@@ -7,7 +7,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-import { AWAY_MS, checkNewCode, LOCKOUT_MS, MAX_ATTEMPTS, normalizeCode, type AskWhen, type IdentityView, type VerifyResult } from '../shared/identity.ts'
+import { AWAY_MS, checkNewCode, LOCKOUT_MS, MAX_ATTEMPTS, normalizeCode, type AskWhen, type IdentityView, type ReturnCause, type VerifyResult } from '../shared/identity.ts'
 
 interface Stored {
   v: 1
@@ -33,6 +33,7 @@ const localDay = (t: number) => {
 export class IdentityGate {
   private s: Stored
   private lockedNow = false
+  private askNow: number | null = null
 
   constructor(
     private readonly file: string,
@@ -75,22 +76,38 @@ export class IdentityGate {
       locked: this.lockedNow,
       attemptsLeft: Math.max(0, MAX_ATTEMPTS - this.s.failures),
       lockoutUntil,
+      askNow: this.lockedNow ? this.askNow : null,
     }
   }
 
   /**
    * Should the owner be asked now? `awayMs` is how long they were away
    * (Infinity for an app start). Never asks without a code or with 'off'.
+   * 'wake' asks after every sleep or Windows lock, whatever its length.
    */
-  shouldAsk(awayMs: number): boolean {
+  shouldAsk(awayMs: number, cause: ReturnCause = 'start'): boolean {
     if (!this.configured || this.s.askWhen === 'off') return false
     const notToday = this.s.verifiedDay !== localDay(this.now())
     if (this.s.askWhen === 'daily') return notToday
+    if (this.s.askWhen === 'wake' && cause === 'wake') return true
     return notToday || awayMs >= AWAY_MS
   }
 
+  /** In 'wake' mode the check closes as the laptop sleeps or locks, so nothing private shows when it opens. */
+  get locksOnLeave() {
+    return this.configured && this.s.askWhen === 'wake'
+  }
+
   lock() {
+    if (!this.lockedNow) this.askNow = null
     this.lockedNow = true
+  }
+
+  /** The owner is there to hear the question: ask aloud. True when this is a new ask. */
+  prompt(): boolean {
+    if (!this.lockedNow || this.askNow !== null) return false
+    this.askNow = this.now()
+    return true
   }
 
   /** Compares a typed or transcribed code; three wrong answers pause attempts for ten minutes. */

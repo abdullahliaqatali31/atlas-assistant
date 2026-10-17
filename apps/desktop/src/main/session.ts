@@ -56,6 +56,10 @@ export const watchSession = (onChange: (c: SessionChange) => void) => {
   poll.unref()
 
   return {
+    /** Windows itself is locked (its sign-in screen is up). */
+    get osLocked() {
+      return lockedAt !== null
+    },
     /** What a freshly (re)started runtime should assume. */
     get away(): 'lock' | 'suspend' | 'idle' | undefined {
       return sleptAt !== null ? 'suspend' : lockedAt !== null ? 'lock' : idleSince !== null ? 'idle' : undefined

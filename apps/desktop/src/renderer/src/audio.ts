@@ -90,11 +90,17 @@ export class SentencePlayer {
   private buffers = new Map<number, AudioBuffer>()
   private next = 0
   private source: AudioBufferSourceNode | null = null
+  private decoding = 0
 
   constructor(private readonly onSpeaking: (speaking: boolean) => void) {}
 
   get isSpeaking() {
     return this.source !== null
+  }
+
+  /** Playing, or still holding sentences that have arrived but not played yet. */
+  get isBusy() {
+    return this.source !== null || this.buffers.size > 0 || this.decoding > 0
   }
 
   async add(replyId: string, seq: number, data: Uint8Array) {
@@ -103,7 +109,13 @@ export class SentencePlayer {
       this.replyId = replyId
     }
     this.ctx ??= new AudioContext()
-    const buffer = await this.ctx.decodeAudioData(data.slice().buffer)
+    this.decoding++
+    let buffer: AudioBuffer
+    try {
+      buffer = await this.ctx.decodeAudioData(data.slice().buffer)
+    } finally {
+      this.decoding--
+    }
     if (this.replyId !== replyId) return
     this.buffers.set(seq, buffer)
     this.pump()

@@ -6,10 +6,10 @@
  */
 
 /** When the assistant asks for the code before speaking privately. */
-export const ASK_WHEN = ['daily', 'away', 'off'] as const
+export const ASK_WHEN = ['daily', 'wake', 'away', 'off'] as const
 export type AskWhen = (typeof ASK_WHEN)[number]
 
-/** Away this long (locked, asleep or idle) counts as "away" for AskWhen 'away'. */
+/** Away this long (locked, asleep or idle) counts as "away" for AskWhen 'away' (and idle returns in 'wake'). */
 export const AWAY_MS = 30 * 60_000
 export const MAX_ATTEMPTS = 3
 export const LOCKOUT_MS = 10 * 60_000
@@ -25,7 +25,15 @@ export interface IdentityView {
   attemptsLeft: number
   /** Epoch ms until which no attempt is accepted, after too many wrong ones. */
   lockoutUntil: number | null
+  /**
+   * Set (epoch ms) when the owner should be asked aloud now: the window is up
+   * and Windows itself is unlocked. Null while nobody is there to hear it.
+   */
+  askNow: number | null
 }
+
+/** Why the owner is back: an app start, a return from sleep or Windows lock, or from idling. */
+export type ReturnCause = 'start' | 'wake' | 'idle'
 
 export type VerifyResult = { ok: true } | { ok: false; attemptsLeft: number; lockoutUntil: number | null; reason: 'wrong' | 'locked-out' | 'not-heard' }
 

@@ -53,6 +53,37 @@ describe('IdentityGate', () => {
     expect(g.shouldAsk(45 * 60_000)).toBe(true)
   })
 
+  it('asks after every sleep or lock in wake mode, but not after a short idle', () => {
+    const { g } = gate()
+    g.setCode('blue sky 42')
+    g.setAskWhen('wake')
+    expect(g.locksOnLeave).toBe(true)
+    expect(g.shouldAsk(60_000, 'wake')).toBe(true)
+    expect(g.shouldAsk(6 * 60_000, 'idle')).toBe(false)
+    expect(g.shouldAsk(45 * 60_000, 'idle')).toBe(true)
+    g.setAskWhen('daily')
+    expect(g.locksOnLeave).toBe(false)
+    expect(g.shouldAsk(60_000, 'wake')).toBe(false)
+  })
+
+  it('asks aloud once per lock, only after prompt, and clears on the right code', () => {
+    const { g, advance } = gate()
+    g.setCode('blue sky 42')
+    g.lock()
+    expect(g.view().askNow).toBeNull() // nobody there yet (Windows sign-in screen)
+    expect(g.prompt()).toBe(true)
+    const first = g.view().askNow
+    expect(first).not.toBeNull()
+    advance(1000)
+    expect(g.prompt()).toBe(false) // a second window open does not ask again
+    expect(g.view().askNow).toBe(first)
+    g.verify('blue sky 42')
+    expect(g.view()).toMatchObject({ locked: false, askNow: null })
+    expect(g.prompt()).toBe(false)
+    g.lock()
+    expect(g.view().askNow).toBeNull() // the next lock starts fresh
+  })
+
   it('locks out after three wrong tries for ten minutes', () => {
     const { g, advance } = gate()
     g.setCode('blue sky 42')

@@ -11,6 +11,7 @@ const cleanError = (err: unknown) =>
 
 const ASK_LABEL: Record<AskWhen, string> = {
   daily: 'Once a day, the first time',
+  wake: 'After every sleep or lock, and daily',
   away: 'Daily, and after 30+ minutes away',
   off: 'Never ask',
 }

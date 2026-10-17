@@ -36,9 +36,15 @@ const TEXT: Record<PromptLanguage, { placeholder: string; check: string; wrong: 
   },
 }
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+/** Hands-free listens per ask: the first answer plus retries after "didn't catch that" or a wrong word. */
+const AUTO_LISTENS = 3
+
 /**
  * "Is that you?" Full-window gate while the owner check waits. Nothing
  * private is on screen; the code is compared in main and never echoed.
+ * When main says the owner is there (`askNow`), it asks aloud and then
+ * listens on its own: no click needed. Typing always works too.
  */
 export function LockScreen({ view, ownerName, voice }: { view: IdentityView; ownerName: string; voice: boolean }) {
   const [language, setLanguage] = useState<PromptLanguage>('en')
@@ -51,7 +57,9 @@ export function LockScreen({ view, ownerName, voice }: { view: IdentityView; own
   const [now, setNow] = useState(Date.now())
   const recording = useRef<Recording | null>(null)
   const playerRef = useRef<SentencePlayer | null>(null)
-  const spoken = useRef(false)
+  const asked = useRef<number | null>(null)
+  const autoLeft = useRef(0)
+  const alive = useRef(true)
   const t = TEXT[language]
   const lockedOut = view.lockoutUntil !== null && view.lockoutUntil > now
 
@@ -60,29 +68,50 @@ export function LockScreen({ view, ownerName, voice }: { view: IdentityView; own
     return () => clearInterval(timer)
   }, [])
 
-  // Ask in the owner's language, aloud once if speech is on.
+  // The owner's language for the text, as soon as it is known.
   useEffect(() => {
-    void window.personality.get().then(
-      p => {
-        const lang = p ? promptLanguageFor(p.profile.language) : 'en'
-        setLanguage(lang)
-        if (spoken.current || !voice) return
-        spoken.current = true
-        playerRef.current ??= new SentencePlayer(() => undefined)
-        const player = playerRef.current
-        const off = window.assistant.onReply(e => {
-          if (e.type === 'audio') void player.add(e.replyId, e.seq, e.data).catch(() => undefined)
-          if (e.type === 'done') off()
-        })
-        void window.identity.speakChallenge(lang).catch(() => undefined)
-      },
-      () => undefined,
-    )
+    alive.current = true
+    void window.personality.get().then(p => setLanguage(p ? promptLanguageFor(p.profile.language) : 'en'), () => undefined)
     return () => {
+      alive.current = false
       recording.current?.stop(false)
       playerRef.current?.stop()
     }
-  }, [voice])
+  }, [])
+
+  /** Speaks the fixed question and resolves once it has finished playing, so the microphone does not hear it. */
+  const sayChallenge = async (lang: PromptLanguage) => {
+    const player = (playerRef.current ??= new SentencePlayer(() => undefined))
+    let done = false
+    const off = window.assistant.onReply(e => {
+      if (e.type === 'audio') void player.add(e.replyId, e.seq, e.data).catch(() => undefined)
+      if (e.type === 'done') done = true
+    })
+    try {
+      const r = await window.identity.speakChallenge(lang).catch(() => null)
+      if (!r) return
+      const started = Date.now()
+      while (alive.current && (!done || player.isBusy) && Date.now() - started < 20_000) await sleep(150)
+      await sleep(300)
+    } finally {
+      off()
+    }
+  }
+
+  // Main says the owner is here (woke the laptop, unlocked Windows, opened Atlas): ask aloud, then listen.
+  useEffect(() => {
+    if (view.askNow === null || asked.current === view.askNow || !voice) return
+    asked.current = view.askNow
+    void (async () => {
+      const p = await window.personality.get().catch(() => null)
+      const lang = p ? promptLanguageFor(p.profile.language) : 'en'
+      setLanguage(lang)
+      await sayChallenge(lang)
+      if (!alive.current || view.lockoutUntil !== null) return
+      autoLeft.current = AUTO_LISTENS
+      void talk(true)
+    })()
+  }, [view.askNow, voice])
 
   const show = (r: VerifyResult) => {
     if (r.ok) {
@@ -90,6 +119,8 @@ export function LockScreen({ view, ownerName, voice }: { view: IdentityView; own
       setMessage(t.approved)
       return
     }
+    // Hands-free: listen again after a miss, while tries and the auto budget last.
+    if (r.reason !== 'locked-out' && !r.lockoutUntil && autoLeft.current > 0) setTimeout(() => alive.current && void talk(true), 900)
     setCode('')
     if (r.reason === 'locked-out' || r.lockoutUntil) setMessage(t.lockedOut(Math.max(1, Math.ceil(((r.lockoutUntil ?? now) - Date.now()) / 60_000))))
     else if (r.reason === 'not-heard') setMessage(t.notHeard)
@@ -110,8 +141,16 @@ export function LockScreen({ view, ownerName, voice }: { view: IdentityView; own
     }
   }
 
-  const talk = async () => {
-    if (recording.current) return recording.current.stop(true)
+  /** `auto`: started by the assistant, not a click; spends one hands-free listen. */
+  const talk = async (auto = false) => {
+    if (recording.current) {
+      if (!auto) recording.current.stop(true)
+      return
+    }
+    if (auto) {
+      if (autoLeft.current <= 0) return
+      autoLeft.current--
+    } else autoLeft.current = 0
     playerRef.current?.stop()
     setMessage('')
     try {
@@ -120,7 +159,11 @@ export function LockScreen({ view, ownerName, voice }: { view: IdentityView; own
         onEnd: async result => {
           recording.current = null
           setListening(false)
-          if (!result) return setMessage(t.notHeard)
+          if (!result) {
+            setMessage(t.notHeard)
+            if (autoLeft.current > 0 && alive.current) setTimeout(() => alive.current && void talk(true), 600)
+            return
+          }
           setBusy(true)
           try {
             show(await window.identity.verifyVoice(result.audio, result.mime))

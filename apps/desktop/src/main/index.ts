@@ -196,6 +196,8 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
 // ── window ──────────────────────────────────────────────────
 
 const createWindow = ({ inactive = false } = {}) => {
+  // The owner check is waiting and someone is at the unlocked computer: ask aloud.
+  if (identity.locked && !sessionWatch?.osLocked && identity.prompt()) publishIdentity()
   if (win && !win.isDestroyed()) {
     win.show()
     win.focus()
@@ -559,14 +561,24 @@ if (!app.requestSingleInstanceLock()) {
     controls.registerHotkey()
     updateTray()
     sessionWatch = watchSession(change => {
-      // Privacy first: playback and the mic stop here, before the runtime even hears about it.
-      if (change.signal === 'lock' || change.signal === 'suspend') toRenderer(CH.silence, null)
+      if (change.signal === 'lock' || change.signal === 'suspend') {
+        // Privacy first: playback and the mic stop here, before the runtime even hears about it.
+        toRenderer(CH.silence, null)
+        // "After every sleep or lock": close the check now, so nothing private shows when the lid opens.
+        if (identity.locksOnLeave && !identity.locked) {
+          identity.lock()
+          publishIdentity()
+        }
+      }
       // Coming back: ask for the code first when the owner's policy says so; hold the return until then.
-      if ('idleMs' in change && (identity.locked || identity.shouldAsk(change.idleMs))) {
+      if ('idleMs' in change && (identity.locked || identity.shouldAsk(change.idleMs, change.signal === 'active' ? 'idle' : 'wake'))) {
         identity.lock()
         heldReturn = change
         publishIdentity()
-        createWindow({ inactive: true })
+        // Waking from sleep, Windows often shows its own sign-in first: ask once it is unlocked, not to an empty room.
+        // The unlock arrives as its own change and comes back here.
+        if (change.signal === 'resume') setTimeout(() => !sessionWatch?.osLocked && identity.locked && createWindow({ inactive: true }), 2_500)
+        else if (!sessionWatch?.osLocked) createWindow({ inactive: true })
         return
       }
       supervisor.session(change)
