@@ -8,7 +8,7 @@ import { mkdirSync } from 'node:fs'
 
 import { DEFAULT_PREFS } from '@assistant/initiative'
 import { MemoryStore } from '@assistant/memory'
-import { AnthropicProvider, type VoiceProvider } from '@assistant/providers'
+import { createLlm, isLlmProvider, listLlmModels, LLM_PROVIDERS, type VoiceProvider } from '@assistant/providers'
 import {
   Assistant,
   createVoice,
@@ -16,6 +16,10 @@ import {
   loadConfig,
   buildAgenda,
   learningTools,
+  meterLlm,
+  setBudget,
+  setPrice,
+  usageSummary,
   skillAgenda,
   skillTools,
   localTools,
@@ -26,6 +30,7 @@ import {
   voiceProviderOf,
   withStoredSecrets,
   type RuntimeTool,
+  type SecretName,
 } from '@assistant/runtime'
 import { systemClock, type InitiativeEvent } from '@assistant/shared'
 
@@ -93,6 +98,16 @@ let activity: HostActivity | null = null
 let learning: HostLearning | null = null
 /** When the owner last sent something; the agenda leaves them room after it. */
 let lastOwnerTurnAt = 0
+/** Sends the cost meter's totals to the window; set once the database is open. */
+let pushUsage = () => {}
+let pushTimer: ReturnType<typeof setTimeout> | null = null
+/** At most one usage update every 2 seconds, however many calls finish. */
+const schedulePush = () => {
+  pushTimer ??= setTimeout(() => {
+    pushTimer = null
+    pushUsage()
+  }, 2_000)
+}
 let activitySettings: ActivitySettings = { enabled: false, excludedApps: [] }
 let ownerName = ''
 /** How often due tasks and commitments are checked; also reconciles after sleep. */
@@ -133,13 +148,15 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   const merged = withStoredSecrets(env, store)
   const provider = voiceProviderOf(merged)
   const voiceKeyName = isVoiceProvider(provider) ? VOICE_KEY_NAME[provider] : null
-  keys = { llm: Boolean(merged.ANTHROPIC_API_KEY), voice: voiceKeyName !== null && Boolean(merged[voiceKeyName]) }
+  const llmInfo = LLM_PROVIDERS[isLlmProvider(merged.ASSISTANT_LLM_PROVIDER) ? merged.ASSISTANT_LLM_PROVIDER : 'anthropic']
+  // A local provider (Ollama) needs no key.
+  keys = { llm: llmInfo.keyName === null || Boolean(merged[llmInfo.keyName]), voice: voiceKeyName !== null && Boolean(merged[voiceKeyName]) }
   secrets = SECRET_NAMES.map(n => merged[n]).filter((v): v is string => typeof v === 'string' && v.length >= 8)
   const { config, problems, warnings } = loadConfig(merged, cwd)
   if (!config) return status('setup', problems, warnings)
 
   status('checking', [], warnings)
-  const llm = new AnthropicProvider(config.llm.apiKey, config.llm.model)
+  const llm = createLlm(config.llm)
   const candidate = config.voice ? createVoice(config.voice, config.owner.languages) : null
   const [llmCheck, voiceCheck] = await Promise.all([llm.healthCheck(), candidate ? candidate.healthCheck() : Promise.resolve({ ok: true as const })])
   const failed: SetupProblem[] = []
@@ -160,7 +177,8 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   learning?.stop()
   learning = new HostLearning({
     memory,
-    llm,
+    // Background learning runs on the cheaper background model, metered and within the monthly budget.
+    llm: meterLlm(createLlm(config.llm, 'background'), { purpose: 'background', memory, clock: systemClock, utcOffsetMin: config.owner.utcOffsetMin, onRecord: () => schedulePush() }),
     clock: systemClock,
     utcOffsetMin: config.owner.utcOffsetMin,
     // Teach and Run now: the owner asked, so no attention policy; it appears in the conversation like any speak-up.
@@ -170,8 +188,12 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
     busy: () => current !== null,
     log: (level, message) => log(level, message),
   })
+  const usageMemory = memory
+  const offset = config.owner.utcOffsetMin
+  pushUsage = () => post({ type: 'usage', summary: usageSummary(usageMemory, systemClock.now(), offset) })
   assistant = new Assistant({
-    llm,
+    // Every reply is metered (tokens and cost per day and model).
+    llm: meterLlm(llm, { purpose: 'chat', memory, clock: systemClock, utcOffsetMin: offset, onRecord: () => schedulePush() }),
     memory,
     learning,
     clock: systemClock,
@@ -204,6 +226,8 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
       agenda: now => {
         // VS Code minutes per project ride along on the agenda tick (every 30 s, sent at most every 10 min).
         code.measureMinutes(agendaMemory, startOfLocalDay(now, config.owner.utcOffsetMin))
+        // Over the monthly budget: Atlas stops raising things on its own (replies to the owner still work).
+        if (usageSummary(agendaMemory, now, config.owner.utcOffsetMin).overBudget) return []
         return [
           ...skillAgenda(agendaMemory, now, { utcOffsetMin: config.owner.utcOffsetMin }),
           ...buildAgenda(agendaMemory, now, { utcOffsetMin: config.owner.utcOffsetMin, wrapUpMinute }),
@@ -214,6 +238,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
     away,
   )
   status('ready', [], warnings)
+  pushUsage()
   // On first run the onboarding and its welcome come before any briefing.
   if (memory.isOnboarded()) void initiative.start()
   setInterval(() => void initiative?.tick(), INITIATIVE_TICK_MS).unref()
@@ -320,12 +345,34 @@ port.on('message', ({ data }: { data: HostRequest }) => {
     case 'store-secrets': {
       let error: string | undefined
       try {
-        if (data.llmKey) store.set('ANTHROPIC_API_KEY', data.llmKey)
+        const llmKeyName = LLM_PROVIDERS[data.llmProvider].keyName
+        if (data.llmKey && llmKeyName) store.set(llmKeyName as SecretName, data.llmKey)
         if (data.voiceKey) store.set(VOICE_KEY_NAME[data.voiceProvider], data.voiceKey)
       } catch {
         error = 'Could not write to the OS credential store.'
       }
       post({ type: 'secrets-stored', requestId: data.requestId, error })
+      break
+    }
+    case 'set-budget':
+      if (memory) {
+        setBudget(memory, data.usd)
+        pushUsage()
+      }
+      break
+    case 'set-price':
+      if (memory) {
+        setPrice(memory, data.model, data.price)
+        pushUsage()
+      }
+      break
+    case 'list-models': {
+      const keyName = LLM_PROVIDERS[data.provider].keyName
+      const apiKey = data.apiKey || (keyName ? (store.get(keyName as SecretName) ?? process.env[keyName] ?? '') : '')
+      void listLlmModels({ provider: data.provider, apiKey, baseUrl: data.baseUrl || undefined }, AbortSignal.timeout(20_000)).then(
+        models => post({ type: 'models', requestId: data.requestId, models }),
+        error => post({ type: 'models', requestId: data.requestId, error: redact(error instanceof Error ? error.message : String(error)) }),
+      )
       break
     }
     case 'approval-answer':

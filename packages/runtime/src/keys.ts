@@ -1,6 +1,6 @@
 /**
  * Manage provider keys in the OS credential store.
- *   pnpm keys set ANTHROPIC_API_KEY      (prompts with hidden input)
+ *   pnpm keys set ANTHROPIC_API_KEY      (prompts with hidden input; any provider key name works, e.g. OPENAI_API_KEY)
  *   pnpm keys status
  *   pnpm keys delete ELEVENLABS_API_KEY
  */

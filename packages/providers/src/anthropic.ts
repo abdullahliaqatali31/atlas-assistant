@@ -11,6 +11,9 @@ import type { ChatTurn, LlmEvent, LlmProvider, LlmRequest } from './llm.ts'
 
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-5-5'
 
+/** Models with server-side refusal fallback and thinking-binding controls. */
+const WITH_FALLBACK = /^claude-(opus-5|opus-5-5|fable-5-1|sonnet-5-5)$/
+
 const BETAS = [
   // Server-side refusal fallback: routes a declined request by category.
   'server-side-fallback-2026-07-01',
@@ -53,11 +56,12 @@ export class AnthropicProvider implements LlmProvider {
       system,
       messages: req.turns.map(toMessage),
       ...(tools && tools.length > 0 ? { tools, tool_choice: { type: 'auto' } } : {}),
-      thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } },
+      // Server-side refusal fallback and thinking-binding controls exist only on the larger models; Haiku gets plain adaptive thinking.
+      ...(WITH_FALLBACK.test(this.model)
+        ? { thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } }, betas: BETAS, fallbacks: 'default' }
+        : { thinking: { type: 'adaptive' } }),
       output_config: { effort: req.effort ?? 'low' },
-      betas: BETAS,
-      fallbacks: 'default',
-    }
+    } as BetaMessageStreamParams
 
     const stream = this.client.beta.messages.stream(params, { signal })
 

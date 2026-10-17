@@ -11,7 +11,7 @@ import { createInterface } from 'node:readline/promises'
 import { DEFAULT_PREFS } from '@assistant/initiative'
 import { McpHost, loadMcpConfig } from '@assistant/mcp'
 import { MemoryStore } from '@assistant/memory'
-import { AnthropicProvider } from '@assistant/providers'
+import { createLlm } from '@assistant/providers'
 import { systemClock, type ConversationMode } from '@assistant/shared'
 
 import { Assistant } from './assistant.ts'
@@ -34,7 +34,7 @@ if (!config) {
   process.exit(1)
 }
 
-const llm = new AnthropicProvider(config.llm.apiKey, config.llm.model)
+const llm = createLlm(config.llm)
 const checks = await Promise.all([
   llm.healthCheck(),
   config.voice ? createVoice(config.voice, config.owner.languages).healthCheck() : Promise.resolve({ ok: true as const }),

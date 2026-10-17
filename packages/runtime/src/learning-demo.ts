@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { MemoryStore } from '@assistant/memory'
-import { AnthropicProvider } from '@assistant/providers'
+import { createLlm } from '@assistant/providers'
 import { DAY, fixedClock, HOUR, MINUTE } from '@assistant/shared'
 
 import { loadConfig } from './config.ts'
@@ -31,7 +31,7 @@ const dir = mkdtempSync(join(tmpdir(), 'pa-learning-demo-'))
 const clock = fixedClock(Date.UTC(2026, 9, 17, 9))
 const memory = new MemoryStore(join(dir, 'demo.db'), clock)
 memory.updatePersonality({ verbosity: 'detailed', language: 'mix' }, 'demo start')
-const learner = new Learner({ memory, llm: new AnthropicProvider(config.llm.apiKey, config.llm.model), clock })
+const learner = new Learner({ memory, llm: createLlm(config.llm), clock })
 const line = (s = '') => console.log(s)
 
 try {
@@ -92,7 +92,7 @@ try {
 
   line('\n━━ 4. Curiosity: follow-ups, opinions, getting to know you (one real model call) ━━')
   const pkt = { utcOffsetMin: 300 }
-  const curious = new Learner({ memory, llm: new AnthropicProvider(config.llm.apiKey, config.llm.model), clock, ...pkt })
+  const curious = new Learner({ memory, llm: createLlm(config.llm), clock, ...pkt })
   clock.set(Date.UTC(2026, 9, 21, 7)) // Wed 12:00 in Karachi
   for (const text of ['Kal 3 baje Ahmed Raza ke saath site visit hai Block C pe.', 'Aur Friday ko bank ka loan interview bhi hai, thori tension hai.', 'Theek hai abhi drawings dekhta hoon.']) {
     memory.addMessage('demo', 'owner', text)

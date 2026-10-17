@@ -97,7 +97,22 @@ const MIGRATIONS: string[] = [
      id TEXT PRIMARY KEY, skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE, trigger TEXT NOT NULL,
      started_at INTEGER NOT NULL, ended_at INTEGER, ok INTEGER, summary TEXT);
    CREATE INDEX skill_run_skill ON skill_run(skill_id, started_at);`,
+  // LLM usage per owner-local day, model and purpose, for the cost meter and budget.
+  `CREATE TABLE llm_usage (
+     day TEXT NOT NULL, model TEXT NOT NULL, purpose TEXT NOT NULL,
+     input INTEGER NOT NULL DEFAULT 0, output INTEGER NOT NULL DEFAULT 0, cached INTEGER NOT NULL DEFAULT 0, calls INTEGER NOT NULL DEFAULT 0,
+     PRIMARY KEY (day, model, purpose));`,
 ]
+
+export interface UsageRow {
+  day: string
+  model: string
+  purpose: string
+  input: number
+  output: number
+  cached: number
+  calls: number
+}
 
 /** When a skill runs by itself: at a time on some weekdays, or once. */
 export type SkillSchedule = { kind: 'daily'; minute: number; days: number[] } | { kind: 'once'; at: number }
@@ -819,6 +834,22 @@ export class MemoryStore {
 
   closeFollowup(id: Id) {
     this.db.prepare(`UPDATE followup SET status = 'done' WHERE id = ?`).run(id)
+  }
+
+  // ── LLM usage ─────────────────────────────────────────────
+
+  addUsage(day: string, model: string, purpose: string, u: { input: number; output: number; cached: number }) {
+    this.db
+      .prepare(
+        `INSERT INTO llm_usage (day, model, purpose, input, output, cached, calls) VALUES (?, ?, ?, ?, ?, ?, 1)
+         ON CONFLICT(day, model, purpose) DO UPDATE SET input = input + excluded.input, output = output + excluded.output, cached = cached + excluded.cached, calls = calls + 1`,
+      )
+      .run(day, model, purpose, u.input, u.output, u.cached)
+  }
+
+  /** Usage rows from `fromDay` ("2026-10-01") on. */
+  usageSince(fromDay: string): UsageRow[] {
+    return this.db.prepare('SELECT * FROM llm_usage WHERE day >= ? ORDER BY day').all(fromDay) as unknown as UsageRow[]
   }
 
   // ── skills ────────────────────────────────────────────────

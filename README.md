@@ -9,8 +9,8 @@ It's not another command listener. It's a working companion. It is honest about 
 ## What you need
 
 - Windows 11, Node.js 22.13+ and pnpm 9.
-- **An LLM API key** (required). Claude is supported first.
-- **A voice provider API key** (required). ElevenLabs is supported first.
+- **An AI provider** (required): Claude, OpenAI, Google Gemini, OpenRouter, Groq, DeepSeek, Mistral, xAI, any OpenAI-compatible server, or a free local model through Ollama (it must support tool calls for Atlas to act). Setup lists the models your key can use.
+- **A voice provider API key** (required): ElevenLabs or Azure AI Speech.
 
 You bring your own keys. Nothing is sent to this project, and there is no account to create. No GPU is needed: heavy work runs on your providers, and local models are an optional extra for capable machines.
 
@@ -33,6 +33,7 @@ pnpm check                          # typecheck and all tests
 pnpm learning:demo                  # learning and curiosity on a throwaway database, with your real key
 pnpm eval:workflows --full          # 20 browser + 10 file tasks, outcomes checked by code (a few cents of API use)
 pnpm trial:skills                   # teach a task in conversation, then run it on request and on schedule (real key, throwaway data)
+pnpm trial:provider ollama <model>  # try any LLM provider: a reply and a tool call, on throwaway data
 pnpm dist                           # license inventory + unsigned Windows installer in apps/desktop/release
 ```
 

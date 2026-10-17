@@ -3,12 +3,17 @@ import { Check, Cloud } from 'lucide-react'
 import { useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from 'react'
 
 import { VOICE_PROVIDER_INFO, VOICE_PROVIDERS, type RuntimeStatus, type SetupInput, type VoiceProviderChoice } from '../../shared/ipc.ts'
+import { LLM_KEY_NAMES, LLM_PROVIDER_IDS, LLM_PROVIDERS, type LlmProviderId } from '@assistant/providers/llm-presets'
+
 import { BrandIcon } from './ui/BrandIcon.tsx'
+import { StartupToggle, UsageCard } from './UsageCard.tsx'
 import { Select } from './ui/Select.tsx'
 
 /** Which form field answers each `loadConfig` problem key. */
 const FIELD_FOR: Record<string, keyof SetupInput> = {
-  ANTHROPIC_API_KEY: 'llmKey',
+  ...Object.fromEntries(LLM_KEY_NAMES.map(k => [k, 'llmKey' as const])),
+  ASSISTANT_LLM_MODEL: 'llmModel',
+  ASSISTANT_LLM_BASE_URL: 'llmBaseUrl',
   ELEVENLABS_API_KEY: 'voiceKey',
   ELEVENLABS_VOICE_ID: 'voiceId',
   AZURE_SPEECH_KEY: 'voiceKey',
@@ -38,7 +43,42 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
     voiceKey: '',
     voiceProvider: setup.voiceProvider,
     azureRegion: setup.azureRegion,
+    llmProvider: setup.llmProvider,
+    llmModel: setup.llmModel,
+    llmBaseUrl: setup.llmBaseUrl,
+    llmBackgroundModel: setup.llmBackgroundModel,
   })
+  const [models, setModels] = useState<string[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [modelsError, setModelsError] = useState('')
+  const llm: LlmProviderId = form.llmProvider ?? 'anthropic'
+  const llmInfo = LLM_PROVIDERS[llm]
+  const llmKeyStored = setup.hasLlmKey && setup.llmProvider === llm
+  const needsModel = !('defaultModel' in llmInfo)
+  const loadModels = async () => {
+    setLoadingModels(true)
+    setModelsError('')
+    try {
+      setModels(await window.assistant.listModels(llm, form.llmKey, form.llmBaseUrl ?? ''))
+    } catch (err) {
+      setModelsError(err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Could not load models.')
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+  const pickLlm = (p: LlmProviderId) => {
+    setModels([])
+    setModelsError('')
+    setForm(f => ({
+      ...f,
+      llmProvider: p,
+      llmKey: '',
+      // Switching provider: the old model names mean nothing there.
+      llmModel: p === setup.llmProvider ? setup.llmModel : '',
+      llmBackgroundModel: p === setup.llmProvider ? setup.llmBackgroundModel : '',
+      llmBaseUrl: p === setup.llmProvider ? setup.llmBaseUrl : '',
+    }))
+  }
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -50,7 +90,9 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
   const problemFor = (field: keyof SetupInput) => problems.find(p => FIELD_FOR[p.key] === field)?.message
   const otherProblems = problems.filter(p => !FIELD_FOR[p.key])
   const canSave =
-    (form.llmKey || setup.hasLlmKey) && (form.voiceKey || keyStored) && form.voiceId.trim() !== '' && (!info.needsRegion || (form.azureRegion ?? '').trim() !== '')
+    (llmInfo.keyName === null || form.llmKey || llmKeyStored) &&
+    (!needsModel || (form.llmModel ?? '').trim() !== '') &&
+    (llm !== 'custom' || (form.llmBaseUrl ?? '').trim() !== '') && (form.voiceKey || keyStored) && form.voiceId.trim() !== '' && (!info.needsRegion || (form.azureRegion ?? '').trim() !== '')
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -80,7 +122,8 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
       <header>
         <h1 className="text-xl font-semibold">Set up your assistant</h1>
         <p className="mt-1 text-sm text-muted">
-          Bring your own keys. An LLM provider and a voice provider are both required. Keys stay in your Windows credential store and never reach this window.
+          Bring your own keys: any AI provider (Claude, OpenAI, Gemini, OpenRouter, Groq, DeepSeek, Mistral, xAI, or a free local model with Ollama) and a voice
+          provider. Keys stay in your Windows credential store and never reach this window.
         </p>
       </header>
 
@@ -88,20 +131,73 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
 
       <section className="space-y-3">
         <h2 className="hud-label">Brain</h2>
-        <div className="flex items-center gap-3">
-          <BrandIcon id="anthropic" size={34} title="Claude by Anthropic" />
-          <div className="flex-1">
-            <Field
-              id="llmKey"
-              label="Claude API key"
-              type="password"
-              value={form.llmKey}
-              onChange={set('llmKey')}
-              placeholder={setup.hasLlmKey ? 'Stored · leave blank to keep' : 'sk-ant-…'}
-              problem={problemFor('llmKey')}
-            />
-          </div>
+        <div className="flex flex-col gap-1.5">
+          <Label.Root htmlFor="llmProvider" className="text-sm font-medium">
+            AI provider
+          </Label.Root>
+          <Select id="llmProvider" value={llm} onChange={v => pickLlm(v as LlmProviderId)} items={LLM_PROVIDER_IDS.map(id => ({ value: id, label: LLM_PROVIDERS[id].label }))} />
+          <p className="text-[11px] text-muted">
+            {'note' in llmInfo ? `${llmInfo.note} ` : ''}
+            {'keyUrl' in llmInfo && (
+              <a href={llmInfo.keyUrl} target="_blank" rel="noreferrer" className="text-accent underline">
+                {llmInfo.keyName ? 'Get a key' : 'Download'}
+              </a>
+            )}
+          </p>
         </div>
+        {llmInfo.keyName && (
+          <Field
+            id="llmKey"
+            label={`${llmInfo.label} API key`}
+            type="password"
+            value={form.llmKey}
+            onChange={set('llmKey')}
+            placeholder={llmKeyStored ? 'Stored · leave blank to keep' : 'Paste your key'}
+            problem={problemFor('llmKey')}
+          />
+        )}
+        {(llm === 'custom' || llm === 'ollama') && (
+          <Field
+            id="llmBaseUrl"
+            label="Server address"
+            value={form.llmBaseUrl ?? ''}
+            onChange={set('llmBaseUrl')}
+            placeholder={llm === 'ollama' ? 'http://localhost:11434/v1' : 'https://your-server/v1'}
+            problem={problemFor('llmBaseUrl')}
+          />
+        )}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <Field
+                id="llmModel"
+                label="Model"
+                list="llm-models"
+                value={form.llmModel ?? ''}
+                onChange={set('llmModel')}
+                placeholder={'defaultModel' in llmInfo ? `${llmInfo.defaultModel} (default)` : 'Load the list or type a model name'}
+                problem={problemFor('llmModel')}
+              />
+            </div>
+            <button type="button" className="btn h-9" onClick={() => void loadModels()} disabled={loadingModels || Boolean(llmInfo.keyName && !form.llmKey && !llmKeyStored)}>
+              {loadingModels ? 'Loading…' : models.length ? `${models.length} models` : 'Load models'}
+            </button>
+          </div>
+          <datalist id="llm-models">
+            {models.map(m => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
+          {modelsError && <p className="text-xs text-danger">{modelsError}</p>}
+        </div>
+        <Field
+          id="llmBackgroundModel"
+          label="Background model (learning, its own questions)"
+          list="llm-models"
+          value={form.llmBackgroundModel ?? ''}
+          onChange={set('llmBackgroundModel')}
+          placeholder={'backgroundModel' in llmInfo ? `${llmInfo.backgroundModel} (cheaper default)` : 'Same as the main model, or pick a cheaper one'}
+        />
       </section>
 
       <section className="space-y-3">
@@ -193,6 +289,13 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
         </p>
       ))}
       {error && <p className="text-sm text-danger">{error}</p>}
+
+      {status.phase === 'ready' && (
+        <>
+          <StartupToggle />
+          <UsageCard />
+        </>
+      )}
 
       <div className="mt-auto flex gap-2">
         {onCancel && (

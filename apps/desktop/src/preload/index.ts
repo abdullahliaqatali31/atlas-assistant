@@ -6,7 +6,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 import { AC, type ActivityBridge, type ActivityView } from '../shared/activity.ts'
 import { CC, type ControlBridge, type ControlState } from '../shared/control.ts'
-import { CH, type ActionNotice, type AssistantBridge, type ReplyEvent, type RuntimeStatus } from '../shared/ipc.ts'
+import { CH, type ActionNotice, type AssistantBridge, type ReplyEvent, type RuntimeStatus, type UsageView } from '../shared/ipc.ts'
 import { IC, type IdentityBridge, type IdentityView } from '../shared/identity.ts'
 import { LC, type LearningBridge, type LearningView } from '../shared/learning.ts'
 import { BC, type BackupBridge } from '../shared/backup.ts'
@@ -35,6 +35,13 @@ const bridge: AssistantBridge = {
   listTasks: () => ipcRenderer.invoke(CH.listTasks),
   listToday: () => ipcRenderer.invoke(CH.listToday),
   saveSetup: input => ipcRenderer.invoke(CH.saveSetup, input),
+  listModels: (provider, apiKey, baseUrl) => ipcRenderer.invoke(CH.listModels, provider, apiKey, baseUrl),
+  usage: () => ipcRenderer.invoke(CH.usage),
+  onUsage: cb => subscribe<UsageView>(CH.usageChanged, cb),
+  setBudget: usd => ipcRenderer.invoke(CH.setBudget, usd),
+  startup: () => ipcRenderer.invoke(CH.startup),
+  setStartup: on => ipcRenderer.invoke(CH.setStartup, on),
+  setPrice: (model, price) => ipcRenderer.invoke(CH.setPrice, model, price),
   answerApproval: (id, approved) => ipcRenderer.invoke(CH.answerApproval, id, approved),
   initiativeAction: (id, action) => ipcRenderer.invoke(CH.initiativeAction, id, action),
   ready: () => ipcRenderer.invoke(CH.ready),

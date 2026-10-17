@@ -94,6 +94,18 @@
         {
           "title": "Glass UI system: acrylic window, custom dropdowns, scrollbars, checkboxes, app icon",
           "status": "done"
+        },
+        {
+          "title": "Any LLM provider: Claude, OpenAI, Gemini, OpenRouter, Groq, DeepSeek, Mistral, xAI, Ollama, custom OpenAI-compatible",
+          "status": "done"
+        },
+        {
+          "title": "Cost meter, monthly budget and a cheaper background model",
+          "status": "done"
+        },
+        {
+          "title": "Start with Windows, in the tray",
+          "status": "done"
         }
       ]
     },

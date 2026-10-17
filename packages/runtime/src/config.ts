@@ -3,11 +3,23 @@
  * voice provider; validation names every missing piece at once so setup can
  * show a single checklist.
  */
-import { AzureSpeechVoice, DEFAULT_AZURE_VOICE, ElevenLabsVoice, azureLocale, isAzureRegion, isAzureVoiceName, type VoiceProvider } from '@assistant/providers'
+import {
+  AzureSpeechVoice,
+  DEFAULT_AZURE_VOICE,
+  ElevenLabsVoice,
+  azureLocale,
+  isAzureRegion,
+  isAzureVoiceName,
+  isLlmProvider,
+  LLM_PROVIDER_IDS,
+  LLM_PROVIDERS,
+  type LlmConfig,
+  type VoiceProvider,
+} from '@assistant/providers'
 
 export interface RuntimeConfig {
   owner: { name: string; timezone: string; languages: string[]; utcOffsetMin: number }
-  llm: { provider: 'anthropic'; apiKey: string; model?: string }
+  llm: LlmConfig
   voice: VoiceConfig | null
   dataDir: string
   mcpConfigPath: string
@@ -48,12 +60,21 @@ export const loadConfig = (
   const warnings: string[] = []
   const devSkipVoice = env.ASSISTANT_DEV_SKIP_VOICE === '1'
 
-  const llmProvider = env.ASSISTANT_LLM_PROVIDER ?? 'anthropic'
-  if (llmProvider !== 'anthropic') {
-    problems.push({ key: 'ASSISTANT_LLM_PROVIDER', message: `Unsupported LLM provider "${llmProvider}" (supported: anthropic).` })
+  const llmProvider = env.ASSISTANT_LLM_PROVIDER || 'anthropic'
+  let llm: LlmConfig | null = null
+  if (!isLlmProvider(llmProvider)) {
+    problems.push({ key: 'ASSISTANT_LLM_PROVIDER', message: `Unsupported LLM provider "${llmProvider}" (supported: ${LLM_PROVIDER_IDS.join(', ')}).` })
+  } else {
+    const info = LLM_PROVIDERS[llmProvider]
+    const apiKey = info.keyName ? (env[info.keyName] ?? '') : ''
+    const model = env.ASSISTANT_LLM_MODEL || undefined
+    const baseUrl = env.ASSISTANT_LLM_BASE_URL || undefined
+    if (info.keyName && !apiKey) problems.push({ key: info.keyName, message: `An API key for ${info.label} is required.` })
+    if (!model && !('defaultModel' in info)) problems.push({ key: 'ASSISTANT_LLM_MODEL', message: `Choose a model for ${info.label}.` })
+    if (llmProvider === 'custom' && !baseUrl) problems.push({ key: 'ASSISTANT_LLM_BASE_URL', message: 'Set the server address, e.g. http://localhost:8000/v1.' })
+    if (baseUrl && !/^https?:\/\/[^\s]+$/.test(baseUrl)) problems.push({ key: 'ASSISTANT_LLM_BASE_URL', message: 'The server address must start with http:// or https://.' })
+    llm = { provider: llmProvider, apiKey, model, baseUrl, backgroundModel: env.ASSISTANT_LLM_BACKGROUND_MODEL || undefined }
   }
-  const llmKey = env.ANTHROPIC_API_KEY ?? ''
-  if (!llmKey) problems.push({ key: 'ANTHROPIC_API_KEY', message: 'An LLM API key is required.' })
 
   const voiceProvider = voiceProviderOf(env)
   let voice: RuntimeConfig['voice'] = null
@@ -93,7 +114,7 @@ export const loadConfig = (
         languages: (env.ASSISTANT_LANGUAGES ?? 'en').split(',').map(s => s.trim()).filter(Boolean),
         utcOffsetMin: utcOffsetFor(timezone),
       },
-      llm: { provider: 'anthropic', apiKey: llmKey, model: env.ASSISTANT_LLM_MODEL || undefined },
+      llm: llm!,
       voice,
       dataDir: env.ASSISTANT_DATA_DIR ?? `${cwd}/data`,
       mcpConfigPath: env.ASSISTANT_MCP_CONFIG ?? `${cwd}/mcp.servers.json`,

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunView } from '../../shared/code.ts'
 import { Runner } from './runner.ts'
@@ -29,6 +29,9 @@ const repo = () => {
   git('commit', '-q', '-m', 'Start the app')
   return { dir, git }
 }
+
+// These start real git and server processes, which are slow on Windows when the whole suite runs at once.
+vi.setConfig({ testTimeout: 20_000 })
 
 describe('scanProject', () => {
   it('measures a git project: commits and lines today, uncommitted work, stack and run commands', async () => {

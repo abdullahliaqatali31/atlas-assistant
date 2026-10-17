@@ -5,6 +5,7 @@
  */
 import { randomUUID } from 'node:crypto'
 
+import type { LlmProviderId } from '@assistant/providers/llm-presets'
 import { utilityProcess, type UtilityProcess } from 'electron'
 
 import type {
@@ -22,6 +23,7 @@ import type {
   DayLine,
   UiMode,
   VoiceProviderChoice,
+  UsageView,
 } from '../shared/ipc.ts'
 import type { ActivityEntry, ControlHostEvent, ControlHostRequest } from '../shared/control.ts'
 import type { PersonalityHostEvent, PersonalityHostRequest } from '../shared/personality.ts'
@@ -53,6 +55,8 @@ export interface SupervisorDeps {
   onData?: (e: ActivityHostEvent | ProjectsHostEvent) => void
   /** Learning screen answers and "something new was learned" pushes. */
   onLearning?: (e: LearningHostEvent) => void
+  /** The cost meter's totals. */
+  onUsage?: (u: UsageView) => void
   /** Code-project requests from the model's tools, and measured VS Code minutes. */
   onCode?: (e: Extract<HostEvent, { type: 'code' | 'code-minutes' }>) => void
 }
@@ -74,6 +78,7 @@ export class RuntimeSupervisor {
   private readonly secretRequests = new Map<string, (error?: string) => void>()
   private readonly actionRequests = new Map<string, (entries: ActivityEntry[]) => void>()
   private readonly backupRequests = new Map<string, (error?: string) => void>()
+  private readonly modelRequests = new Map<string, (models?: string[], error?: string) => void>()
 
   constructor(private readonly deps: SupervisorDeps) {}
 
@@ -216,7 +221,7 @@ export class RuntimeSupervisor {
   }
 
   /** Hand keys to the host, which writes them to the OS credential store. Resolves with an error message, if any. */
-  storeSecrets(llmKey: string, voiceKey: string, voiceProvider: VoiceProviderChoice): Promise<string | undefined> {
+  storeSecrets(llmKey: string, llmProvider: LlmProviderId, voiceKey: string, voiceProvider: VoiceProviderChoice): Promise<string | undefined> {
     if (!llmKey && !voiceKey) return Promise.resolve(undefined)
     if (!this.child) return Promise.resolve('The runtime is not running; try again in a moment.')
     const requestId = randomUUID()
@@ -229,7 +234,31 @@ export class RuntimeSupervisor {
         clearTimeout(timer)
         resolve(error)
       })
-      this.post({ type: 'store-secrets', requestId, llmKey, voiceKey, voiceProvider })
+      this.post({ type: 'store-secrets', requestId, llmKey, llmProvider, voiceKey, voiceProvider })
+    })
+  }
+
+  /** Budget and prices go to the runtime, which owns the database. */
+  usageSetting(msg: Extract<HostRequest, { type: 'set-budget' | 'set-price' }>) {
+    if (!this.child) throw new Error('The assistant is not running.')
+    this.post(msg)
+  }
+
+  /** Setup: models a provider offers, asked of the runtime, which can read stored keys. */
+  listModels(provider: LlmProviderId, apiKey: string, baseUrl: string): Promise<string[]> {
+    if (!this.child) return Promise.reject(new Error('The runtime is not running; try again in a moment.'))
+    const requestId = randomUUID()
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.modelRequests.delete(requestId)
+        reject(new Error('The provider did not answer in time.'))
+      }, 25_000)
+      this.modelRequests.set(requestId, (models, error) => {
+        clearTimeout(timer)
+        if (error) reject(new Error(error))
+        else resolve(models ?? [])
+      })
+      this.post({ type: 'list-models', requestId, provider, apiKey, baseUrl })
     })
   }
 
@@ -304,6 +333,13 @@ export class RuntimeSupervisor {
       case 'today':
         this.todayRequests.get(e.requestId)?.(e.lines)
         this.todayRequests.delete(e.requestId)
+        break
+      case 'usage':
+        this.deps.onUsage?.(e.summary)
+        break
+      case 'models':
+        this.modelRequests.get(e.requestId)?.(e.models, e.error)
+        this.modelRequests.delete(e.requestId)
         break
       case 'backup-db':
         this.backupRequests.get(e.requestId)?.(e.error)

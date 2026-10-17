@@ -5,6 +5,7 @@
  */
 import { join } from 'node:path'
 
+import { isLlmProvider } from '@assistant/providers/llm-presets'
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, session, shell, Tray, type IpcMainInvokeEvent } from 'electron'
 
 import {
@@ -18,6 +19,7 @@ import {
   type InitiativeItem,
   type ReplyEvent,
   type RuntimeStatus,
+  type UsageView,
   type SessionChange,
 } from '../shared/ipc.ts'
 import { CC } from '../shared/control.ts'
@@ -28,6 +30,7 @@ import { Controls } from './controls.ts'
 import { IdentityGate } from './identity.ts'
 import { registerBackupIpc } from './backup.ts'
 import { CodeService } from './code/service.ts'
+import { registerStartupIpc, startedHidden } from './startup.ts'
 import { registerLearningIpc } from './learning.ts'
 import { NewsService } from './news.ts'
 import { registerModelScheme, WakeService } from './wake.ts'
@@ -58,6 +61,8 @@ let keys = { llm: false, voice: false }
 // Name, voice provider and voice as the runtime sees them: stored setup over the environment (.env in development).
 const setupSummary = () => readSetupSummary(runtimeEnv(devEnvFile), keys)
 let voiceReady = false
+/** Latest cost meter totals from the runtime. */
+let usage: UsageView | null = null
 const speech = () => ({ available: voiceReady, enabled: readSetup().speakReplies })
 let status: RuntimeStatus = { phase: 'starting', problems: [], warnings: [], mode: 'companion', setup: setupSummary(), approvals: [], speech: speech(), later: [] }
 let sessionWatch: ReturnType<typeof watchSession> | null = null
@@ -172,6 +177,10 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
   onPersonality: e => personality.onHostEvent(e),
   onData: e => data.onHostEvent(e),
   onLearning: e => learning.onHostEvent(e),
+  onUsage: u => {
+    usage = u
+    toRenderer(CH.usageChanged, u)
+  },
   onCode: e => {
     if (e.type === 'code-minutes') return code.setMinutes(e.minutes)
     // The model's code tools: answered by request id; failures go back as text the model can relay.
@@ -393,11 +402,37 @@ handle(CH.ready, () => {
   for (const e of heldReplies.splice(0)) toRenderer(CH.reply, e)
   rendererReady = true
 })
+registerStartupIpc(handle)
+handle(CH.usage, () => {
+  requireOwner()
+  return usage
+})
+handle(CH.setBudget, usd => {
+  requireOwner()
+  if (typeof usd !== 'number' || !Number.isFinite(usd) || usd < 0 || usd > 100_000) throw new Error('Enter a monthly budget in dollars (0 for no limit).')
+  supervisor.usageSetting({ type: 'set-budget', usd })
+})
+handle(CH.setPrice, (model, price) => {
+  requireOwner()
+  if (typeof model !== 'string' || !/^[\w./:@-]{1,120}$/.test(model)) throw new Error('Unknown model.')
+  const p = price as { input?: unknown; output?: unknown; cacheRead?: unknown } | null
+  const ok = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 10_000
+  if (p !== null && (!ok(p.input) || !ok(p.output) || (p.cacheRead !== undefined && !ok(p.cacheRead)))) throw new Error('Prices are dollars per million tokens.')
+  supervisor.usageSetting({ type: 'set-price', model, price: p === null ? null : { input: p.input as number, output: p.output as number, cacheRead: p.cacheRead as number | undefined } })
+})
+handle(CH.listModels, (provider, apiKey, baseUrl) => {
+  if (!isLlmProvider(provider)) throw new Error('Unknown provider.')
+  const key = typeof apiKey === 'string' ? apiKey.trim().slice(0, 500) : ''
+  const url = typeof baseUrl === 'string' ? baseUrl.trim().slice(0, 300) : ''
+  if (url && !/^https?:\/\/[^\s]+$/.test(url)) throw new Error('The server address must start with http:// or https://.')
+  return supervisor.listModels(provider, key, url)
+})
 handle(CH.saveSetup, async arg => {
   const input = parseSetup(arg)
   if (!input) throw new Error('Invalid setup values.')
   const provider = providerFor(input, runtimeEnv(devEnvFile))
-  const error = await supervisor.storeSecrets(input.llmKey, input.voiceKey, provider)
+  const llmProvider = input.llmProvider ?? setupSummary().llmProvider
+  const error = await supervisor.storeSecrets(input.llmKey, llmProvider, input.voiceKey, provider)
   if (error) throw new Error(error)
   saveSetup(input, provider)
   await supervisor.restart()
@@ -534,7 +569,8 @@ if (!app.requestSingleInstanceLock()) {
       heldReturn = { signal: 'unlock', idleMs: 0 }
     }
     supervisor.start()
-    createWindow()
+    // Started by Windows at login: stay in the tray until the owner opens Atlas.
+    if (!startedHidden()) createWindow()
   })
   // Staying alive in the tray is the point: never quit when the last window closes.
   app.on('window-all-closed', () => {})

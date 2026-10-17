@@ -24,3 +24,4 @@ export { ActivityTracker, activityEvidenceSource, DEFAULT_EXCLUDED_APPS, formatD
 export { buildAgenda, type AgendaEvent, type AgendaOptions } from './agenda.ts'
 export { curiosityItems, TOPICS } from './curiosity.ts'
 export { describeSchedule, parseSchedule, runInstruction, skillAgenda, skillContextLines, skillTools } from './skills.ts'
+export { BudgetExceededError, budget, meterLlm, prices, setBudget, setPrice, usageSummary, type Purpose, type UsageSummary } from './usage.ts'

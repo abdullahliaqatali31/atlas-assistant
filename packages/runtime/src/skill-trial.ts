@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { DEFAULT_PREFS } from '@assistant/initiative'
 import { McpHost } from '@assistant/mcp'
 import { MemoryStore } from '@assistant/memory'
-import { AnthropicProvider } from '@assistant/providers'
+import { createLlm } from '@assistant/providers'
 import { fixedClock, type InitiativeEvent } from '@assistant/shared'
 
 import { Assistant } from './assistant.ts'
@@ -62,7 +62,7 @@ await mcp.start()
 
 const mentions = (text: string, n: number) => text.replace(/(?<=\d),(?=\d{3}\b)/g, '').includes(String(n)) || new RegExp(`\\b${n / 1000}\\s*(k|thousand|hazar)`, 'i').test(text)
 const line = (s = '') => console.log(s)
-const llm = new AnthropicProvider(config.llm.apiKey, config.llm.model)
+const llm = createLlm(config.llm)
 /** A fresh conversation on the same memory, as on a later day. */
 const newAssistant = () =>
   new Assistant({

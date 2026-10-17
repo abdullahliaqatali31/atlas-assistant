@@ -10,7 +10,7 @@ import { join } from 'node:path'
 
 import { loadMcpConfig, McpHost } from '@assistant/mcp'
 import { MemoryStore } from '@assistant/memory'
-import { AnthropicProvider } from '@assistant/providers'
+import { createLlm } from '@assistant/providers'
 import { systemClock } from '@assistant/shared'
 
 import { createVoice, loadConfig } from './config.ts'
@@ -57,7 +57,7 @@ if (config) pass(`Owner "${config.owner.name || '(unset)'}", timezone ${config.o
 
 if (config) {
   console.log('LLM provider')
-  const llm = new AnthropicProvider(config.llm.apiKey, config.llm.model)
+  const llm = createLlm(config.llm)
   const health = await llm.healthCheck()
   if (health.ok) pass(`Key accepted for ${llm.model}`)
   else fail(health.error)

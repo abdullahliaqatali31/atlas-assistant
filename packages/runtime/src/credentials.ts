@@ -8,7 +8,22 @@ import { Entry } from '@napi-rs/keyring'
 export const SERVICE = 'personal-assistant'
 
 /** The only names the store accepts: provider secrets, nothing else. */
-export const SECRET_NAMES = ['ANTHROPIC_API_KEY', 'ELEVENLABS_API_KEY', 'AZURE_SPEECH_KEY', 'PLAYWRIGHT_MCP_EXTENSION_TOKEN'] as const
+export const SECRET_NAMES = [
+  // LLM providers (one per provider in @assistant/providers LLM_PROVIDERS).
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'GEMINI_API_KEY',
+  'OPENROUTER_API_KEY',
+  'GROQ_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'MISTRAL_API_KEY',
+  'XAI_API_KEY',
+  'LLM_API_KEY',
+  // Voice providers.
+  'ELEVENLABS_API_KEY',
+  'AZURE_SPEECH_KEY',
+  'PLAYWRIGHT_MCP_EXTENSION_TOKEN',
+] as const
 export type SecretName = (typeof SECRET_NAMES)[number]
 
 export const isSecretName = (name: string): name is SecretName => (SECRET_NAMES as readonly string[]).includes(name)

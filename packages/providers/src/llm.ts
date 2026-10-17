@@ -49,6 +49,7 @@ export type LlmEvent =
   | { type: 'refused'; category: string | null }
 
 export interface LlmUsage {
+  /** Input tokens not served from cache (adapters subtract cached ones where the API includes them). */
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number

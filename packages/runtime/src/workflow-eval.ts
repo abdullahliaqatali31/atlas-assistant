@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import { DEFAULT_PREFS } from '@assistant/initiative'
 import { McpHost } from '@assistant/mcp'
 import { MemoryStore } from '@assistant/memory'
-import { AnthropicProvider } from '@assistant/providers'
+import { createLlm } from '@assistant/providers'
 import { systemClock } from '@assistant/shared'
 
 import { Assistant } from './assistant.ts'
@@ -132,7 +132,7 @@ const runTask = async (prompt: string, check: (reply: string) => string | null):
     return true
   }
   const assistant = new Assistant({
-    llm: new AnthropicProvider(config.llm.apiKey, config.llm.model),
+    llm: createLlm(config.llm),
     memory,
     clock: systemClock,
     owner: config.owner,
@@ -227,7 +227,7 @@ const report = (name: string, results: Result[]) => {
 }
 
 try {
-  console.log(`Model ${new AnthropicProvider(config.llm.apiKey, config.llm.model).model} · test site 127.0.0.1:${port} · temp folder ${work}`)
+  console.log(`Model ${createLlm(config.llm).model} · test site 127.0.0.1:${port} · temp folder ${work}`)
   const browser: Result[] = []
   for (let i = 0; i < BROWSER_RUNS; i++) {
     browser.push(await browserTask(i))
@@ -242,7 +242,7 @@ try {
   const f = report('File workflow', files)
   const target = Math.ceil(b.total * 0.9)
   console.log(`\nBrowser target ${target}/${b.total}: ${b.passed >= target ? 'MET' : 'NOT MET'} · files ${f.passed}/${f.total}`)
-  writeFileSync(join(process.cwd(), 'docs', `workflow-eval-${full ? 'full' : 'smoke'}.json`), JSON.stringify({ at: new Date().toISOString(), model: new AnthropicProvider(config.llm.apiKey, config.llm.model).model, browser: b, files: f }, null, 2))
+  writeFileSync(join(process.cwd(), 'docs', `workflow-eval-${full ? 'full' : 'smoke'}.json`), JSON.stringify({ at: new Date().toISOString(), model: createLlm(config.llm).model, browser: b, files: f }, null, 2))
   process.exitCode = b.passed >= target && f.unsupported === 0 && b.unsupported === 0 ? 0 : 1
 } finally {
   await mcp.stop()

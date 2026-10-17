@@ -4,6 +4,8 @@
  * whether each one is present.
  */
 
+import { isLlmProvider, type LlmProviderId } from '@assistant/providers/llm-presets'
+
 import type { ActivityHostEvent, ActivityHostRequest } from './activity.ts'
 import type { CodeOp, CodeProjectView, RunView } from './code.ts'
 import type { ControlHostEvent, ControlHostRequest } from './control.ts'
@@ -100,8 +102,29 @@ export const VOICE_PROVIDER_INFO: Record<VoiceProviderChoice, { label: string; v
 }
 
 /** What setup already has. Keys are reported as present/absent only. */
+export interface StartupView {
+  /** Only the installed app can register itself. */
+  available: boolean
+  enabled: boolean
+}
+
+/** What the cost meter shows (same shape as the runtime's usage summary). */
+export interface UsageView {
+  today: { tokens: number; usd: number; calls: number }
+  month: { tokens: number; usd: number; calls: number }
+  byModel: { model: string; purpose: string; input: number; output: number; cached: number; calls: number; usd: number | null }[]
+  unpriced: string[]
+  budgetUsd: number
+  overBudget: boolean
+}
+
 export interface SetupSummary {
   ownerName: string
+  /** The LLM provider in use, its model, server address (custom/Ollama) and background model. */
+  llmProvider: LlmProviderId
+  llmModel: string
+  llmBaseUrl: string
+  llmBackgroundModel: string
   /** ElevenLabs voice id, or the Azure voice name when Azure is selected. */
   voiceId: string
   voiceProvider: VoiceProviderChoice
@@ -114,6 +137,11 @@ export interface SetupSummary {
 
 export interface SetupInput {
   ownerName: string
+  /** Absent keeps the current LLM provider and its settings. */
+  llmProvider?: LlmProviderId | undefined
+  llmModel?: string | undefined
+  llmBaseUrl?: string | undefined
+  llmBackgroundModel?: string | undefined
   voiceId: string
   /** Empty string keeps the stored key. */
   llmKey: string
@@ -162,6 +190,13 @@ export const CH = {
   answerApproval: 'assistant:answer-approval',
   sendVoice: 'assistant:send-voice',
   setSpeech: 'assistant:set-speech',
+  listModels: 'assistant:list-models',
+  usage: 'assistant:usage',
+  startup: 'assistant:startup',
+  setStartup: 'assistant:set-startup',
+  usageChanged: 'assistant:usage-changed',
+  setBudget: 'assistant:set-budget',
+  setPrice: 'assistant:set-price',
   reply: 'assistant:reply',
   action: 'assistant:action',
   initiativeAction: 'assistant:initiative-action',
@@ -190,6 +225,16 @@ export interface AssistantBridge {
   /** Today's conversation so far (across restarts), oldest first. */
   listToday(): Promise<DayLine[]>
   saveSetup(input: SetupInput): Promise<RuntimeStatus>
+  /** Models the chosen provider offers; uses the typed key, or the stored one when blank. */
+  listModels(provider: LlmProviderId, apiKey: string, baseUrl: string): Promise<string[]>
+  /** The cost meter: today, this month, per model, and the monthly budget. Null until the runtime reports. */
+  usage(): Promise<UsageView | null>
+  onUsage(cb: (u: UsageView) => void): () => void
+  setBudget(usd: number): Promise<void>
+  /** Start with Windows (installed app only), in the tray. */
+  startup(): Promise<StartupView>
+  setStartup(on: boolean): Promise<StartupView>
+  setPrice(model: string, price: { input: number; output: number; cacheRead?: number | undefined } | null): Promise<void>
   answerApproval(id: string, approved: boolean): Promise<void>
   initiativeAction(id: string, action: InitiativeAction): Promise<void>
   /** The companion is listening for replies; main then flushes anything it held while the window was loading. */
@@ -247,7 +292,17 @@ export const parseSetup = (v: unknown): SetupInput | null => {
     if (region === undefined || (region !== '' && !/^[a-z][a-z0-9]{2,30}$/.test(region))) return null
     azureRegion = region
   }
-  return { ownerName, voiceId, llmKey, voiceKey, voiceProvider, azureRegion }
+  let llmProvider: LlmProviderId | undefined
+  if (o.llmProvider !== undefined) {
+    if (!isLlmProvider(o.llmProvider)) return null
+    llmProvider = o.llmProvider
+  }
+  const llmModel = o.llmModel === undefined ? undefined : field(o.llmModel, 200)
+  const llmBackgroundModel = o.llmBackgroundModel === undefined ? undefined : field(o.llmBackgroundModel, 200)
+  const llmBaseUrl = o.llmBaseUrl === undefined ? undefined : field(o.llmBaseUrl, 300)
+  if (llmModel === null || llmBackgroundModel === null || llmBaseUrl === null) return null
+  if (llmBaseUrl && !/^https?:\/\/[^\s]+$/.test(llmBaseUrl)) return null
+  return { ownerName, voiceId, llmKey, voiceKey, voiceProvider, azureRegion, llmProvider, llmModel, llmBaseUrl, llmBackgroundModel }
 }
 
 // ── main ⇄ runtime host messages ────────────────────────────
@@ -265,7 +320,12 @@ export type HostRequest =
   /** Encrypted backups: a consistent database snapshot written to `path`. */
   | { type: 'backup-db'; requestId: string; path: string }
   | { type: 'list-today'; requestId: string }
-  | { type: 'store-secrets'; requestId: string; llmKey: string; voiceKey: string; voiceProvider: VoiceProviderChoice }
+  | { type: 'store-secrets'; requestId: string; llmKey: string; llmProvider: LlmProviderId; voiceKey: string; voiceProvider: VoiceProviderChoice }
+  /** Setup: the models a provider offers this key (a typed key, else the stored one). */
+  | { type: 'list-models'; requestId: string; provider: LlmProviderId; apiKey: string; baseUrl: string }
+  /** Monthly AI budget in US dollars (0 = no limit), and the owner's price for a model (null removes it). */
+  | { type: 'set-budget'; usd: number }
+  | { type: 'set-price'; model: string; price: { input: number; output: number; cacheRead?: number | undefined } | null }
   | { type: 'approval-answer'; id: string; approved: boolean }
   | { type: 'session'; change: SessionChange }
   | { type: 'initiative-action'; id: string; action: InitiativeAction }
@@ -286,6 +346,9 @@ export type HostEvent =
   | { type: 'backup-db'; requestId: string; error?: string }
   | { type: 'today'; requestId: string; lines: DayLine[] }
   | { type: 'secrets-stored'; requestId: string; error?: string | undefined }
+  | { type: 'models'; requestId: string; models?: string[] | undefined; error?: string | undefined }
+  /** The cost meter's totals, after LLM calls and on start. */
+  | { type: 'usage'; summary: UsageView }
   | { type: 'approval'; request: ApprovalRequest }
   | { type: 'approval-closed'; id: string }
   | { type: 'action'; notice: ActionNotice }
