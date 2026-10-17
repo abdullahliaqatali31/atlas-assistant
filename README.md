@@ -43,7 +43,7 @@ Talk normally in the console ("Ahmed ko kal quote bhejna hai, yaad rakhna"). The
 
 ## The app
 
-The window has a rail on the left, a broad canvas in the middle (Home, News, Projects, Learning, Controls, Setup) and the conversation as a side panel on the right. The panel can be hidden from the rail, and it opens by itself when Atlas speaks up. Home shows presence, today's tasks, your code projects, the news with pictures and recent actions.
+The window has a rail on the left, the conversation as a side panel next to it, and a broad canvas on the right (Home, News, Projects, Learning, Controls, Setup). The panel can be hidden from the rail, and it opens by itself when Atlas speaks up. Home shows presence, today's tasks, your code projects, the news with pictures and recent actions.
 
 News comes from public RSS feeds, refreshed every 30 minutes, with each story's own picture where the feed provides one. Pictures are fetched by the app and cached, so pages never load remote content. You can choose sources (News › Sources) and save stories for later (News › Saved). Sources on by default: Dawn, Express Tribune, BBC World, Dawn Business and The Verge. Optional: Geo News, BBC Technology and TechCrunch. Atlas can read the headlines to you ("aaj ki khabrein?").
 

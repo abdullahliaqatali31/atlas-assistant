@@ -48,8 +48,8 @@ const store = (key: string, value: string) => {
 }
 
 /**
- * Layout: the rail on the left, the broad canvas (Home, News, Projects…) in
- * the middle, and the conversation as a side panel on the right. The chat
+ * Layout: the rail on the left, then the conversation as a side panel, and
+ * the broad canvas (Home, News, Projects…) filling the right. The chat
  * stays mounted when hidden, so a conversation survives; it opens by itself
  * when Atlas speaks up.
  */
@@ -149,6 +149,16 @@ export function App() {
       </nav>
 
       <div className="relative flex min-w-0 flex-1">
+        {/* The conversation: a side panel on the left when wide, a drawer over the canvas when narrow. Always mounted. */}
+        <aside
+          aria-label="Conversation"
+          className={`glass mb-2 ml-2 flex min-h-0 flex-col overflow-hidden rounded-2xl ${
+            wide ? `w-[400px] shrink-0 xl:w-[440px] ${chatOpen ? '' : 'hidden'}` : `absolute inset-y-0 left-0 z-30 w-[min(440px,calc(100%-1rem))] shadow-2xl ${chatOpen ? '' : 'hidden'}`
+          }`}
+        >
+          <Companion status={status} onOpenSetup={() => go('setup')} onOpenControls={() => go('controls')} onPresence={setPresence} />
+        </aside>
+
         <main className="glass mx-2 mb-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl">
           {controls && <PausedBanner state={controls} />}
           <div className="min-h-0 flex-1">
@@ -160,16 +170,6 @@ export function App() {
             {view === 'setup' && (status.phase === 'ready' ? <SetupSections connection={setup} onClose={() => go('home')} /> : setup)}
           </div>
         </main>
-
-        {/* The conversation: a side panel when wide, a drawer over the canvas when narrow. Always mounted. */}
-        <aside
-          aria-label="Conversation"
-          className={`glass mb-2 mr-2 flex min-h-0 flex-col overflow-hidden rounded-2xl ${
-            wide ? `w-[400px] shrink-0 xl:w-[440px] ${chatOpen ? '' : 'hidden'}` : `absolute inset-y-0 right-0 z-30 w-[min(440px,calc(100%-1rem))] shadow-2xl ${chatOpen ? '' : 'hidden'}`
-          }`}
-        >
-          <Companion status={status} onOpenSetup={() => go('setup')} onOpenControls={() => go('controls')} onPresence={setPresence} />
-        </aside>
       </div>
     </Frame>
   )
