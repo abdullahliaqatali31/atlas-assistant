@@ -1,0 +1,124 @@
+{
+  "$comment": "Copy to mcp.servers.json (the desktop Connections screen manages its own copy). Every server starts disabled; enable only what you authorize. Tools without annotations are treated as external-send (strictest). Calendar and email connectors are readOnly: only tools classified observe are offered, and their briefing reads ground the daily briefing with cited sources.",
+  "servers": {
+    "filesystem": {
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:/Users/YOU/Documents/Work"
+      ]
+    },
+    "playwright": {
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--isolated"
+      ]
+    },
+    "google-calendar": {
+      "$comment": "Google Calendar: Create a Google Cloud OAuth client (Desktop app), download gcp-oauth.keys.json and set GOOGLE_OAUTH_CREDENTIALS to its path. The first start opens a Google sign-in in your browser. (https://github.com/nspady/google-calendar-mcp)",
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@cocal/google-calendar-mcp"
+      ],
+      "env": {
+        "ENABLED_TOOLS": "list-calendars,list-events,get-event,search-events,get-freebusy,get-current-time",
+        "GOOGLE_OAUTH_CREDENTIALS": "C:/Users/YOU/.config/google-calendar-mcp/gcp-oauth.keys.json"
+      },
+      "readOnly": true,
+      "overrides": {
+        "list-calendars": "observe",
+        "list-events": "observe",
+        "get-event": "observe",
+        "search-events": "observe",
+        "get-freebusy": "observe",
+        "get-current-time": "observe"
+      },
+      "briefing": [
+        {
+          "kind": "calendar",
+          "label": "Google Calendar",
+          "tool": "list-events",
+          "args": {
+            "calendarId": "primary",
+            "timeMin": "{dayStart}",
+            "timeMax": "{dayEnd}"
+          }
+        }
+      ]
+    },
+    "gmail": {
+      "$comment": "Gmail: Put your Google OAuth gcp-oauth.keys.json in ~/.gmail-mcp/ and run `npx @gongrzhe/server-gmail-autoauth-mcp auth` once to sign in. (https://github.com/GongRzhe/Gmail-MCP-Server)",
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@gongrzhe/server-gmail-autoauth-mcp"
+      ],
+      "readOnly": true,
+      "overrides": {
+        "search_emails": "observe",
+        "read_email": "observe",
+        "list_email_labels": "observe"
+      },
+      "briefing": [
+        {
+          "kind": "email",
+          "label": "Gmail",
+          "tool": "search_emails",
+          "args": {
+            "query": "is:unread newer_than:2d -category:promotions -category:social",
+            "maxResults": 10
+          }
+        }
+      ]
+    },
+    "microsoft-365": {
+      "$comment": "Microsoft 365 (Outlook mail and calendar): Run `npx @softeria/ms-365-mcp-server --login` once and follow the device-code sign-in. (https://github.com/Softeria/ms-365-mcp-server)",
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@softeria/ms-365-mcp-server",
+        "--read-only"
+      ],
+      "readOnly": true,
+      "overrides": {
+        "list-mail-messages": "observe",
+        "get-mail-message": "observe",
+        "list-calendar-events": "observe",
+        "get-calendar-event": "observe",
+        "get-calendar-view": "observe",
+        "list-calendars": "observe"
+      },
+      "briefing": [
+        {
+          "kind": "calendar",
+          "label": "Outlook Calendar",
+          "tool": "get-calendar-view",
+          "args": {
+            "startDateTime": "{dayStart}",
+            "endDateTime": "{dayEnd}"
+          }
+        },
+        {
+          "kind": "email",
+          "label": "Outlook",
+          "tool": "list-mail-messages",
+          "args": {}
+        }
+      ]
+    }
+  }
+}

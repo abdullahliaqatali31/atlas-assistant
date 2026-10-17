@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-17T19:45:52.259Z",
+  "model": "claude-opus-5-5",
+  "browser": {
+    "passed": 20,
+    "total": 20,
+    "unsupported": 0
+  },
+  "files": {
+    "passed": 10,
+    "total": 10,
+    "unsupported": 0
+  }
+}

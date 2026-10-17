@@ -1,0 +1,552 @@
+/**
+ * Electron main process: owns the tray, the companion window and the
+ * supervised runtime. Closing the window destroys its renderer while the
+ * runtime keeps running; Quit from the tray stops everything.
+ */
+import { join } from 'node:path'
+
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, session, shell, Tray, type IpcMainInvokeEvent } from 'electron'
+
+import {
+  CH,
+  isMode,
+  parseApproval,
+  parseInitiativeAction,
+  parseMessage,
+  parseSetup,
+  parseVoice,
+  type InitiativeItem,
+  type ReplyEvent,
+  type RuntimeStatus,
+  type SessionChange,
+} from '../shared/ipc.ts'
+import { CC } from '../shared/control.ts'
+import { CHALLENGE, IC, isAskWhen } from '../shared/identity.ts'
+import { NC } from '../shared/news.ts'
+import { AudioGate } from './bargein.ts'
+import { Controls } from './controls.ts'
+import { IdentityGate } from './identity.ts'
+import { registerBackupIpc } from './backup.ts'
+import { CodeService } from './code/service.ts'
+import { registerLearningIpc } from './learning.ts'
+import { NewsService } from './news.ts'
+import { registerModelScheme, WakeService } from './wake.ts'
+import { registerDataIpc } from './data.ts'
+import { registerPersonalityIpc } from './personality.ts'
+import { watchSession } from './session.ts'
+import { providerFor, readSetup, runtimeEnv, saveSetup, saveSpeakReplies, setupSummary as readSetupSummary } from './settings.ts'
+import { RuntimeSupervisor } from './supervisor.ts'
+
+// Privileged scheme for the local speech model must be declared before 'ready'.
+registerModelScheme()
+
+// Development only: lets tooling inspect the window (never in a packaged build).
+if (!app.isPackaged && /^\d{4,5}$/.test(process.env.ASSISTANT_DEBUG_PORT ?? '')) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.ASSISTANT_DEBUG_PORT!)
+  app.commandLine.appendSwitch('remote-allow-origins', 'http://127.0.0.1')
+}
+
+const isDev = !app.isPackaged && Boolean(process.env.ELECTRON_RENDERER_URL)
+// In development the repo root's .env feeds setup, like `pnpm chat`.
+const devEnvFile = app.isPackaged ? null : join(app.getAppPath(), '../../.env')
+const ACCENT = { r: 0x14, g: 0xb8, b: 0xa6 }
+
+let win: BrowserWindow | null = null
+let tray: Tray | null = null
+let quitting = false
+let keys = { llm: false, voice: false }
+// Name, voice provider and voice as the runtime sees them: stored setup over the environment (.env in development).
+const setupSummary = () => readSetupSummary(runtimeEnv(devEnvFile), keys)
+let voiceReady = false
+const speech = () => ({ available: voiceReady, enabled: readSetup().speakReplies })
+let status: RuntimeStatus = { phase: 'starting', problems: [], warnings: [], mode: 'companion', setup: setupSummary(), approvals: [], speech: speech(), later: [] }
+let sessionWatch: ReturnType<typeof watchSession> | null = null
+
+// ── owner check ─────────────────────────────────────────────
+// While locked, the runtime still believes the owner is away: the return that
+// would start a briefing is held here until the security code is confirmed.
+const identity = new IdentityGate(join(app.getPath('userData'), 'identity.json'))
+let heldReturn: Extract<SessionChange, { idleMs: number }> | null = null
+const publishIdentity = () => toRenderer(IC.changed, identity.view())
+const requireOwner = () => {
+  if (identity.locked) throw new Error('Please confirm it is you first.')
+}
+
+// The host scrubs key values from everything it reports before it reaches here.
+const log = (level: 'info' | 'warn' | 'error', message: string) => console[level](`[runtime] ${message}`)
+
+// ── runtime ─────────────────────────────────────────────────
+
+const toRenderer = (channel: string, payload: unknown) => {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+}
+
+/**
+ * A window opened for the assistant speaking up is still loading when the
+ * reply starts, so reply events wait here until the companion says it is
+ * listening (CH.ready). Main sends in order, so nothing is lost or doubled.
+ */
+let rendererReady = false
+let heldReplies: ReplyEvent[] = []
+const MAX_HELD = 500
+// Audio of a reply the owner talked over or stopped never reaches the speakers.
+const audioGate = new AudioGate()
+const replyToRenderer = (e: ReplyEvent) => {
+  if (!win || win.isDestroyed() || !audioGate.allows(e)) return
+  if (rendererReady) return toRenderer(CH.reply, e)
+  if (heldReplies.length < MAX_HELD) heldReplies.push(e)
+}
+
+/** Bring the companion forward without stealing focus: reopen it if closed, flash it in the taskbar. */
+const drawAttention = () => {
+  if (!win || win.isDestroyed()) createWindow({ inactive: true })
+  else if (!win.isVisible()) win.showInactive()
+  if (!win?.isFocused()) win?.flashFrame(true)
+}
+
+const notify = (item: InitiativeItem) => {
+  if (!Notification.isSupported()) return
+  const n = new Notification({ title: item.kind === 'reminder' ? 'Reminder' : 'Assistant', body: item.title, silent: true })
+  n.on('click', () => createWindow())
+  n.show()
+}
+
+const publish = (next: Partial<RuntimeStatus>) => {
+  status = { ...status, ...next }
+  toRenderer(CH.statusChanged, status)
+  updateTray()
+}
+
+// Connections, standing rules, activity and the pause switch. Only the owner's UI changes them.
+const controls: Controls = new Controls({
+  handle: (channel, fn) => handle(channel, fn),
+  window: () => win,
+  mcpConfigPath: () => runtimeEnv(devEnvFile).ASSISTANT_MCP_CONFIG!,
+  post: msg => supervisor.control(msg),
+  listActions: () => supervisor.listActions(),
+  onChange: state => {
+    toRenderer(CC.changed, state)
+    updateTray()
+  },
+  onStop: () => toRenderer(CH.silence, null),
+  log,
+})
+
+const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
+  entry: join(import.meta.dirname, 'runtime.js'),
+  env: () => runtimeEnv(devEnvFile),
+  cwd: app.getPath('userData'),
+  onStatus: ({ keys: k, voiceReady: v, phase, problems, warnings }) => {
+    if (k) keys = k
+    if (v !== undefined) voiceReady = v
+    // A host that exited can no longer act on any approval.
+    const gone = phase === 'restarting' || phase === 'stopped'
+    if (gone) controls.runtimeDown()
+    const approvals = gone ? [] : status.approvals
+    const later = gone ? [] : status.later
+    publish({ phase, problems, warnings, mode: supervisor.currentMode, setup: setupSummary(), approvals, speech: speech(), later })
+  },
+  onReply: (e: ReplyEvent) => {
+    // The assistant is speaking up on its own: make sure the owner can see and hear it.
+    if (e.type === 'initiative') drawAttention()
+    replyToRenderer(e)
+  },
+  onLater: (later, item) => {
+    publish({ later })
+    if (item) notify(item)
+  },
+  away: () => sessionWatch?.away ?? (identity.locked ? 'lock' : undefined),
+  onApproval: request => {
+    publish({ approvals: [...status.approvals, request] })
+    // An approval needs the owner's eyes: bring the companion back if it was closed.
+    createWindow()
+    if (tray && !win?.isFocused()) tray.displayBalloon?.({ title: 'Assistant needs your approval', content: `${request.tool}: ${request.reason}` })
+  },
+  onApprovalClosed: id => publish({ approvals: status.approvals.filter(a => a.id !== id) }),
+  onAction: notice => {
+    controls.onAction(notice)
+    toRenderer(CH.action, notice)
+  },
+  controlInit: () => [...controls.initMessages(), data.initMessage(), code.snapshotMessage()],
+  onControl: e => controls.onHostEvent(e),
+  onPersonality: e => personality.onHostEvent(e),
+  onData: e => data.onHostEvent(e),
+  onLearning: e => learning.onHostEvent(e),
+  onCode: e => {
+    if (e.type === 'code-minutes') return code.setMinutes(e.minutes)
+    // The model's code tools: answered by request id; failures go back as text the model can relay.
+    void code.handleOp(e.op).then(
+      result => supervisor.code({ type: 'code-result', requestId: e.requestId, result }),
+      error => supervisor.code({ type: 'code-result', requestId: e.requestId, error: error instanceof Error ? error.message : String(error) }),
+    )
+  },
+  log,
+})
+
+// ── window ──────────────────────────────────────────────────
+
+const createWindow = ({ inactive = false } = {}) => {
+  if (win && !win.isDestroyed()) {
+    win.show()
+    win.focus()
+    return
+  }
+  rendererReady = false
+  heldReplies = []
+  win = new BrowserWindow({
+    width: 1180,
+    height: 760,
+    minWidth: 360,
+    minHeight: 480,
+    show: false,
+    title: 'Assistant',
+    icon: appIcon(),
+    // Windows 11 acrylic behind the glass UI; a transparent base avoids a flash of solid colour.
+    // Older Windows ignores the material and the page's own tinted background shows instead.
+    ...(process.platform === 'win32' ? { backgroundMaterial: 'acrylic' as const, backgroundColor: '#00000000' } : { backgroundColor: '#0b1020' }),
+    // No native title bar: the page draws its own (drag region + logo); Windows keeps
+    // its real minimize/maximize/close buttons, drawn transparently over the page.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: titleBarOverlay(),
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: join(import.meta.dirname, '../preload/index.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      spellcheck: false,
+      // Spoken replies arrive after the click that asked for them.
+      autoplayPolicy: 'no-user-gesture-required',
+    },
+  })
+  win.once('ready-to-show', () => (inactive ? win?.showInactive() : win?.show()))
+  win.on('focus', () => win?.flashFrame(false))
+  // Closing the window destroys the renderer (keeping idle RAM low); the tray and runtime stay up.
+  win.on('closed', () => {
+    win = null
+    rendererReady = false
+    heldReplies = []
+  })
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://')) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', e => e.preventDefault())
+
+  if (isDev) void win.loadURL(process.env.ELECTRON_RENDERER_URL!)
+  else void win.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+}
+
+// ── tray ────────────────────────────────────────────────────
+
+/** Height of the page's own title bar (TITLE_BAR_HEIGHT in the renderer must match). */
+const TITLE_BAR_HEIGHT = 40
+/** Transparent caption buttons whose glyphs follow the light/dark theme. */
+const titleBarOverlay = () => ({
+  color: '#00000000',
+  symbolColor: nativeTheme.shouldUseDarkColors ? '#cfe3ff' : '#1e293b',
+  height: TITLE_BAR_HEIGHT,
+})
+nativeTheme.on('updated', () => {
+  if (win && !win.isDestroyed()) win.setTitleBarOverlay(titleBarOverlay())
+})
+
+/** App and tray icons rendered from resources/icon.svg (`pnpm --filter @assistant/desktop icons`). */
+const resource = (name: string) => join(app.getAppPath(), 'resources', name)
+const appIcon = () => nativeImage.createFromPath(resource('icon.png'))
+
+const trayIcon = () => {
+  // tray@2x.png sits beside tray.png, so high-DPI taskbars get the sharp version.
+  const image = nativeImage.createFromPath(resource('tray.png'))
+  return image.isEmpty() ? fallbackTrayIcon() : image
+}
+
+/** A filled accent dot drawn in code, used if the icon files are missing. */
+const fallbackTrayIcon = () => {
+  const size = 32
+  const buf = Buffer.alloc(size * size * 4)
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const d = Math.hypot(x - 15.5, y - 15.5)
+      const a = Math.max(0, Math.min(1, 13.5 - d))
+      const i = (y * size + x) * 4
+      buf[i] = ACCENT.b
+      buf[i + 1] = ACCENT.g
+      buf[i + 2] = ACCENT.r
+      buf[i + 3] = Math.round(a * 255)
+    }
+  return nativeImage.createFromBitmap(buf, { width: size, height: size, scaleFactor: 2 })
+}
+
+const PHASE_LABEL: Record<RuntimeStatus['phase'], string> = {
+  starting: 'Starting…',
+  setup: 'Setup needed',
+  checking: 'Checking providers…',
+  ready: 'Ready',
+  restarting: 'Restarting runtime…',
+  stopped: 'Stopped',
+}
+
+const updateTray = () => {
+  if (!tray) return
+  tray.setToolTip(`Assistant: ${PHASE_LABEL[status.phase]}`)
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Open assistant', click: () => createWindow() },
+      { label: PHASE_LABEL[status.phase], enabled: false },
+      { type: 'separator' },
+      controls.isPaused
+        ? { label: 'Resume automation', click: () => controls.setPaused(false) }
+        : { label: 'Stop all automation', accelerator: controls.activeHotkey ?? undefined, click: () => controls.stopAll() },
+      { type: 'separator' },
+      { label: 'Quit', click: () => app.quit() },
+    ]),
+  )
+}
+
+// ── IPC: every handler validates its sender and payload ─────
+
+const fromOurWindow = (e: IpcMainInvokeEvent) => {
+  const url = e.senderFrame?.url ?? ''
+  return win !== null && e.sender === win.webContents && (isDev ? url.startsWith(process.env.ELECTRON_RENDERER_URL!) : url.startsWith('file://'))
+}
+
+const handle = <T>(channel: string, fn: (arg: unknown, arg2: unknown, arg3?: unknown) => T | Promise<T>) =>
+  ipcMain.handle(channel, (e, arg: unknown, arg2: unknown, arg3: unknown) => {
+    if (!fromOurWindow(e)) throw new Error('Rejected IPC from an unknown frame.')
+    return fn(arg, arg2, arg3)
+  })
+
+handle(CH.status, () => status)
+const news = new NewsService()
+const wake = new WakeService({ handle, toRenderer })
+wake.register()
+handle(NC.list, refresh => news.list(refresh === true))
+controls.register()
+/** Code projects: approved folders, activity scans, dev servers, status files. */
+const code = new CodeService({
+  handle,
+  toRenderer,
+  toRuntime: s => supervisor.code({ type: 'code-snapshot', ...s }),
+  window: () => win,
+  requireOwner: () => requireOwner(),
+  log: (level, message) => log(level, message),
+})
+code.register()
+handle(CH.send, arg => {
+  const text = parseMessage(arg)
+  if (text === null) throw new Error('Message must be non-empty text under 8000 characters.')
+  if (status.phase !== 'ready') throw new Error('The assistant is not ready yet.')
+  requireOwner()
+  return { replyId: supervisor.send(text) }
+})
+handle(CH.sendVoice, (audio, mime) => {
+  const voice = parseVoice(audio, mime)
+  if (!voice) throw new Error('Recording must be audio under 5 MB.')
+  if (status.phase !== 'ready') throw new Error('The assistant is not ready yet.')
+  if (!status.speech.available) throw new Error('No voice provider is configured; type instead.')
+  requireOwner()
+  return { replyId: supervisor.sendVoice(voice.audio, voice.mime) }
+})
+handle(CH.setSpeech, enabled => {
+  if (typeof enabled !== 'boolean') throw new Error('Expected true or false.')
+  saveSpeakReplies(enabled)
+  supervisor.setSpeech(enabled)
+  publish({ speech: speech() })
+})
+handle(CH.stop, () => {
+  audioGate.interrupt(supervisor.currentReply)
+  supervisor.stopReply()
+})
+handle(CH.interrupt, () => {
+  // Playback stops first, in the renderer; the host cancels the token in parallel.
+  if (!audioGate.interrupt(supervisor.currentReply)) return
+  toRenderer(CH.silence, null)
+  supervisor.interrupt()
+})
+handle(CH.setMode, arg => {
+  if (!isMode(arg)) throw new Error('Unknown mode.')
+  supervisor.setMode(arg)
+  publish({ mode: arg })
+})
+handle(CH.listTasks, () => {
+  requireOwner()
+  return supervisor.listTasks()
+})
+handle(CH.listToday, () => {
+  requireOwner()
+  return supervisor.listToday()
+})
+handle(CH.answerApproval, (id, approved) => {
+  const answer = parseApproval(id, approved)
+  // Only requests the host actually raised can be answered.
+  if (!answer || !status.approvals.some(a => a.id === answer.id)) throw new Error('No such approval request.')
+  supervisor.answerApproval(answer.id, answer.approved)
+})
+handle(CH.initiativeAction, (id, action) => {
+  const parsed = parseInitiativeAction(id, action)
+  if (!parsed) throw new Error('Unknown initiative action.')
+  supervisor.initiativeAction(parsed.id, parsed.action)
+})
+handle(CH.ready, () => {
+  for (const e of heldReplies.splice(0)) toRenderer(CH.reply, e)
+  rendererReady = true
+})
+handle(CH.saveSetup, async arg => {
+  const input = parseSetup(arg)
+  if (!input) throw new Error('Invalid setup values.')
+  const provider = providerFor(input, runtimeEnv(devEnvFile))
+  const error = await supervisor.storeSecrets(input.llmKey, input.voiceKey, provider)
+  if (error) throw new Error(error)
+  saveSetup(input, provider)
+  await supervisor.restart()
+  status = { ...status, phase: 'starting', problems: [], setup: setupSummary() }
+  return status
+})
+
+// Activity (opt-in window tracking) and Projects.
+const data = registerDataIpc({
+  handle,
+  post: msg => supervisor.data(msg),
+  isReady: () => status.phase === 'ready',
+  toRenderer,
+})
+const learning = registerLearningIpc({
+  handle,
+  post: msg => supervisor.data(msg),
+  isReady: () => status.phase === 'ready',
+  toRenderer,
+  requireOwner: () => requireOwner(),
+})
+
+registerBackupIpc({
+  handle,
+  requireOwner: () => requireOwner(),
+  dataDir: () => runtimeEnv(devEnvFile).ASSISTANT_DATA_DIR!,
+  snapshotDb: path => supervisor.backupDb(path),
+  stopRuntime: () => supervisor.stop(),
+  log: (level, message) => log(level, message),
+})
+
+const personality = registerPersonalityIpc({
+  handle,
+  post: msg => supervisor.personality(msg),
+  isReady: () => status.phase === 'ready',
+  speechAvailable: () => status.speech.available,
+  toRenderer,
+  window: () => win,
+})
+
+// ── owner check IPC: the code never leaves main, results carry no secret ──
+
+/** Confirmed: let the held return through, which starts the briefing. */
+const releaseOwner = () => {
+  const change = heldReturn
+  heldReturn = null
+  publishIdentity()
+  if (change) supervisor.session(change)
+}
+const afterVerify = (r: ReturnType<IdentityGate['verify']>) => {
+  if (r.ok) releaseOwner()
+  else publishIdentity()
+  return r
+}
+handle(IC.get, () => identity.view())
+handle(IC.verify, code => {
+  if (typeof code !== 'string' || code.length > 500) throw new Error('Type the code.')
+  return afterVerify(identity.verify(code))
+})
+handle(IC.verifyVoice, async (audio, mime) => {
+  const heard = await personality.transcribe(audio, mime)
+  if (!heard.trim()) return { ok: false as const, attemptsLeft: identity.view().attemptsLeft, lockoutUntil: identity.view().lockoutUntil, reason: 'not-heard' as const }
+  return afterVerify(identity.verify(heard))
+})
+handle(IC.setCode, (code, current) => {
+  const v = identity.setCode(code, current)
+  publishIdentity()
+  return v
+})
+handle(IC.removeCode, current => {
+  const v = identity.removeCode(current)
+  if (!identity.locked && heldReturn) releaseOwner()
+  publishIdentity()
+  return v
+})
+handle(IC.setAskWhen, when => {
+  if (!isAskWhen(when)) throw new Error('Choose daily, away or off.')
+  // Turning the check off while it is waiting would be a bypass: confirm first.
+  if (identity.locked) throw new Error('Please confirm it is you first.')
+  const v = identity.setAskWhen(when)
+  publishIdentity()
+  return v
+})
+handle(IC.speakChallenge, language => {
+  if (language !== 'en' && language !== 'ur-Latn' && language !== 'ur-Arab') throw new Error('Unknown language.')
+  return personality.speakFixed(CHALLENGE[language](setupSummary().ownerName))
+})
+
+// ── permissions: the companion may use the microphone, nothing else ──
+
+const isCompanion = (wc: Electron.WebContents | null) => win !== null && !win.isDestroyed() && wc === win.webContents
+
+const allowMicrophoneOnlyForCompanion = () => {
+  const s = session.defaultSession
+  s.setPermissionRequestHandler((wc, permission, callback, details) => {
+    const audioOnly = permission === 'media' && 'mediaTypes' in details && (details.mediaTypes ?? []).every(t => t === 'audio')
+    callback(isCompanion(wc) && audioOnly)
+  })
+  s.setPermissionCheckHandler((wc, permission) => isCompanion(wc) && permission === 'media')
+}
+
+// ── lifecycle ───────────────────────────────────────────────
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => createWindow())
+  app.whenReady().then(() => {
+    app.setAppUserModelId('dev.personal-assistant.desktop')
+    allowMicrophoneOnlyForCompanion()
+    wake.registerProtocol()
+    code.start()
+    supervisor.setSpeech(readSetup().speakReplies)
+    tray = new Tray(trayIcon())
+    tray.on('click', () => createWindow())
+    controls.registerHotkey()
+    updateTray()
+    sessionWatch = watchSession(change => {
+      // Privacy first: playback and the mic stop here, before the runtime even hears about it.
+      if (change.signal === 'lock' || change.signal === 'suspend') toRenderer(CH.silence, null)
+      // Coming back: ask for the code first when the owner's policy says so; hold the return until then.
+      if ('idleMs' in change && (identity.locked || identity.shouldAsk(change.idleMs))) {
+        identity.lock()
+        heldReturn = change
+        publishIdentity()
+        createWindow({ inactive: true })
+        return
+      }
+      supervisor.session(change)
+    })
+    // A fresh start of the day asks too; the runtime starts as if the owner were away.
+    if (identity.shouldAsk(Number.POSITIVE_INFINITY)) {
+      identity.lock()
+      heldReturn = { signal: 'unlock', idleMs: 0 }
+    }
+    supervisor.start()
+    createWindow()
+  })
+  // Staying alive in the tray is the point: never quit when the last window closes.
+  app.on('window-all-closed', () => {})
+  app.on('before-quit', e => {
+    if (quitting) return
+    e.preventDefault()
+    quitting = true
+    globalShortcut.unregisterAll()
+    sessionWatch?.stop()
+    void supervisor.stop().finally(() => {
+      tray?.destroy()
+      app.quit()
+    })
+  })
+}

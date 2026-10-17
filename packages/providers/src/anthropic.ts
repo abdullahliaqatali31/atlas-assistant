@@ -1,0 +1,122 @@
+import Anthropic from '@anthropic-ai/sdk'
+import type {
+  BetaContentBlockParam,
+  BetaMessageParam,
+  BetaMessageStreamParams,
+  BetaTextBlockParam,
+  BetaTool,
+} from '@anthropic-ai/sdk/resources/beta/messages/messages'
+
+import type { ChatTurn, LlmEvent, LlmProvider, LlmRequest } from './llm.ts'
+
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-5-5'
+
+const BETAS = [
+  // Server-side refusal fallback: routes a declined request by category.
+  'server-side-fallback-2026-07-01',
+  // Lets a mismatched replayed thinking block be dropped instead of failing the request.
+  'thinking-binding-controls-2026-08-01',
+]
+
+/**
+ * Claude adapter. The persona and the owner's profile are separate cached
+ * system blocks that never change per turn; per-turn context travels in the
+ * user message instead.
+ */
+export class AnthropicProvider implements LlmProvider {
+  readonly id = 'anthropic'
+  private readonly client: Anthropic
+
+  constructor(
+    apiKey: string,
+    readonly model: string = DEFAULT_ANTHROPIC_MODEL,
+  ) {
+    this.client = new Anthropic({ apiKey })
+  }
+
+  async *stream(req: LlmRequest, signal?: AbortSignal): AsyncIterable<LlmEvent> {
+    const system: BetaTextBlockParam[] = (typeof req.system === 'string' ? [req.system] : req.system).map(text => ({
+      type: 'text',
+      text,
+      cache_control: { type: 'ephemeral' },
+    }))
+    const tools: BetaTool[] | undefined = req.tools?.map(t => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.inputSchema as BetaTool['input_schema'],
+      eager_input_streaming: true,
+    }))
+
+    const params: BetaMessageStreamParams = {
+      model: this.model,
+      max_tokens: req.maxTokens ?? 8192,
+      system,
+      messages: req.turns.map(toMessage),
+      ...(tools && tools.length > 0 ? { tools, tool_choice: { type: 'auto' } } : {}),
+      thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } },
+      output_config: { effort: req.effort ?? 'low' },
+      betas: BETAS,
+      fallbacks: 'default',
+    }
+
+    const stream = this.client.beta.messages.stream(params, { signal })
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        yield { type: 'text', text: event.delta.text }
+      }
+    }
+
+    const final = await stream.finalMessage()
+    if (final.stop_reason === 'refusal') {
+      yield { type: 'refused', category: final.stop_details?.category ?? null }
+      return
+    }
+    for (const block of final.content) {
+      // Tool input arrives already parsed; an eager stream can still yield a
+      // truncated object, so the runtime validates it against the schema.
+      if (block.type === 'tool_use') yield { type: 'tool_use', id: block.id, name: block.name, input: block.input }
+    }
+    yield {
+      type: 'done',
+      stopReason:
+        final.stop_reason === 'end_turn' ? 'end' : final.stop_reason === 'tool_use' ? 'tool_use' : final.stop_reason === 'max_tokens' ? 'max_tokens' : 'other',
+      usage: {
+        inputTokens: final.usage.input_tokens,
+        outputTokens: final.usage.output_tokens,
+        cacheReadTokens: final.usage.cache_read_input_tokens ?? 0,
+      },
+      raw: final.content,
+    }
+  }
+
+  async healthCheck() {
+    try {
+      await this.client.models.retrieve(this.model)
+      return { ok: true as const }
+    } catch (error) {
+      if (error instanceof Anthropic.AuthenticationError) return { ok: false as const, error: 'The API key was rejected.' }
+      if (error instanceof Anthropic.NotFoundError) return { ok: false as const, error: `Model ${this.model} is not available to this key.` }
+      if (error instanceof Anthropic.APIConnectionError) return { ok: false as const, error: 'Could not reach the Anthropic API.' }
+      return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+}
+
+const toMessage = (turn: ChatTurn): BetaMessageParam => {
+  if (turn.role === 'assistant' && turn.raw !== undefined) {
+    return { role: 'assistant', content: turn.raw as BetaContentBlockParam[] }
+  }
+  if (typeof turn.content === 'string') return { role: turn.role, content: turn.content }
+  const content: BetaContentBlockParam[] = turn.content.map(part => {
+    switch (part.type) {
+      case 'text':
+        return { type: 'text', text: part.text }
+      case 'tool_use':
+        return { type: 'tool_use', id: part.id, name: part.name, input: part.input }
+      case 'tool_result':
+        return { type: 'tool_result', tool_use_id: part.toolUseId, content: part.content, is_error: part.isError ?? false }
+    }
+  })
+  return { role: turn.role, content }
+}

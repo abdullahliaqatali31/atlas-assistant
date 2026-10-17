@@ -1,0 +1,33 @@
+{
+  "name": "personal-assistant",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Open source, proactive desktop assistant with local memory, voice and authorized computer control.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @assistant/desktop typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "chat": "tsx packages/runtime/src/cli.ts",
+    "doctor": "tsx packages/runtime/src/doctor.ts",
+    "keys": "tsx packages/runtime/src/keys.ts",
+    "learning:demo": "tsx packages/runtime/src/learning-demo.ts",
+    "eval:workflows": "tsx packages/runtime/src/workflow-eval.ts",
+    "trial:skills": "tsx packages/runtime/src/skill-trial.ts",
+    "licenses:inventory": "node tools/license-inventory.mjs",
+    "dist": "pnpm licenses:inventory && pnpm --filter @assistant/desktop dist",
+    "check": "pnpm typecheck && pnpm test",
+    "desktop": "pnpm --filter @assistant/desktop dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}

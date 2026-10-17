@@ -1,0 +1,373 @@
+@import 'tailwindcss';
+
+/*
+ * Glass design system.
+ * The window sits on Windows 11 acrylic; the page adds a deep tint and a slow
+ * aurora so the glass reads the same where acrylic is unavailable.
+ * Rules: one level of glass (no glass inside glass), 1px light edges,
+ * cyan as the single interactive accent, amber only for "attention".
+ */
+:root {
+  color-scheme: dark;
+  --tint: rgb(6 10 20 / 0.34);
+  --bg: rgb(4 8 18 / 0.55);
+  --surface: rgb(255 255 255 / 0.045);
+  --surface-strong: rgb(255 255 255 / 0.09);
+  --border: rgb(255 255 255 / 0.10);
+  --edge: rgb(255 255 255 / 0.16);
+  --text: #e8f1ff;
+  --muted: #8ea0bd;
+  --accent: #22d3ee;
+  --accent-soft: rgb(34 211 238 / 0.16);
+  --accent-fg: #04121a;
+  --warm: #fbbf24;
+  --danger: #fb7185;
+  --ok: #34d399;
+  --shadow: 0 10px 40px rgb(0 0 0 / 0.35);
+  --blur: 18px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --tint: rgb(238 243 252 / 0.38);
+    --bg: rgb(255 255 255 / 0.55);
+    --surface: rgb(255 255 255 / 0.42);
+    --surface-strong: rgb(255 255 255 / 0.75);
+    --border: rgb(15 23 42 / 0.10);
+    --edge: rgb(255 255 255 / 0.85);
+    --text: #0b1324;
+    --muted: #55637a;
+    --accent: #0891b2;
+    --accent-soft: rgb(8 145 178 / 0.12);
+    --accent-fg: #ffffff;
+    --warm: #b45309;
+    --danger: #e11d48;
+    --ok: #059669;
+    --shadow: 0 10px 30px rgb(15 23 42 / 0.10);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-border: var(--border);
+  --color-edge: var(--edge);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-warm: var(--warm);
+  --color-danger: var(--danger);
+  --color-ok: var(--ok);
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'Cascadia Mono', Consolas, ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  /* Transparent over acrylic; the tint keeps contrast on bright wallpapers. */
+  background: var(--tint);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/*
+ * Custom title bar: the whole strip drags the window; buttons inside stay clickable.
+ * Right padding keeps clear of the Windows caption buttons (Window Controls Overlay).
+ */
+.titlebar {
+  -webkit-app-region: drag;
+  app-region: drag;
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 0.75rem);
+}
+.titlebar button,
+.titlebar a,
+.titlebar input {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Slow aurora behind everything: a visual base where acrylic is off. */
+.aurora {
+  position: fixed;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 35% at 20% 15%, rgb(34 211 238 / 0.18), transparent 70%),
+    radial-gradient(35% 30% at 85% 80%, rgb(59 130 246 / 0.16), transparent 70%),
+    radial-gradient(25% 25% at 70% 20%, rgb(251 191 36 / 0.07), transparent 70%);
+  filter: blur(20px);
+  animation: aurora-drift 40s ease-in-out infinite alternate;
+}
+
+@keyframes aurora-drift {
+  to {
+    transform: translate3d(3%, -2%, 0) rotate(4deg);
+  }
+}
+
+@layer components {
+  /* One frosted plane. */
+  .glass {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow:
+      inset 0 1px 0 var(--edge),
+      var(--shadow);
+    backdrop-filter: blur(var(--blur)) saturate(140%);
+  }
+
+  /* A row or card inside a glass plane: flat, never blurred again. */
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.875rem;
+  }
+
+  .hud-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    border-radius: 0.625rem;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text);
+    transition:
+      background 120ms,
+      border-color 120ms,
+      transform 120ms;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--surface-strong);
+    border-color: var(--edge);
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .btn:disabled {
+    opacity: 0.4;
+  }
+  .btn-primary {
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--accent-fg);
+    font-weight: 600;
+    box-shadow: 0 0 18px rgb(34 211 238 / 0.35);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent);
+    filter: brightness(1.08);
+  }
+  .btn-danger {
+    background: var(--danger);
+    border-color: transparent;
+    color: #fff;
+    font-weight: 600;
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: var(--danger);
+    filter: brightness(1.08);
+  }
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.625rem;
+    color: var(--muted);
+    transition:
+      background 120ms,
+      color 120ms;
+  }
+  .icon-btn:hover {
+    background: var(--surface-strong);
+    color: var(--text);
+  }
+  .icon-btn[aria-pressed='true'],
+  .icon-btn[aria-current='page'] {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .field {
+    width: 100%;
+    border-radius: 0.625rem;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--text);
+    outline: none;
+    transition:
+      border-color 120ms,
+      box-shadow 120ms;
+  }
+  .field::placeholder {
+    color: var(--muted);
+  }
+  .field:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+}
+
+/* Custom checkboxes and radios: glass box, accent fill, drawn check. */
+input[type='checkbox'],
+input[type='radio'] {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  margin: 0;
+  border: 1px solid var(--edge);
+  background: var(--surface-strong);
+  border-radius: 0.3rem;
+  transition:
+    background 120ms,
+    border-color 120ms,
+    box-shadow 120ms;
+}
+input[type='radio'] {
+  border-radius: 999px;
+}
+input[type='checkbox']::before {
+  content: '';
+  width: 0.55rem;
+  height: 0.55rem;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  background: var(--accent-fg);
+  transform: scale(0);
+  transition: transform 120ms;
+}
+input[type='radio']::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--accent-fg);
+  transform: scale(0);
+  transition: transform 120ms;
+}
+input[type='checkbox']:checked,
+input[type='radio']:checked {
+  background: var(--accent);
+  border-color: transparent;
+  box-shadow: 0 0 10px rgb(34 211 238 / 0.4);
+}
+input[type='checkbox']:checked::before,
+input[type='radio']:checked::before {
+  transform: scale(1);
+}
+input[type='checkbox']:disabled,
+input[type='radio']:disabled {
+  opacity: 0.4;
+}
+
+/* Keyboard focus is always visible, never on mouse clicks. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+/* Custom scrollbars: a thin glass thumb that brightens on hover. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184 / 0.35) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgb(148 163 184 / 0.28) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(34 211 238 / 0.55) padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@keyframes pulse-dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+.thinking-dot {
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.rise-in {
+  animation: rise-in 220ms ease-out both;
+}
+
+@keyframes scan {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+.scanline {
+  position: relative;
+  overflow: hidden;
+}
+.scanline::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(34 211 238 / 0.12), transparent);
+  animation: scan 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-dot,
+  .aurora,
+  .rise-in,
+  .scanline::after {
+    animation: none;
+  }
+}
