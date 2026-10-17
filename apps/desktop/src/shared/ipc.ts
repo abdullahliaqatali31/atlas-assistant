@@ -330,6 +330,8 @@ export type HostRequest =
   | { type: 'session'; change: SessionChange }
   | { type: 'initiative-action'; id: string; action: InitiativeAction }
   | { type: 'shutdown' }
+  /** Headlines for the assistant's news tool (untrusted feed text). */
+  | { type: 'news-snapshot'; headlines: { title: string; source: string; category: string; publishedAt: number | null; summary: string }[] }
   /** Code projects: the latest scan and running servers, pushed by main after every change. */
   | { type: 'code-snapshot'; projects: CodeProjectView[]; running: RunView[] }
   | { type: 'code-result'; requestId: string; result?: string | undefined; error?: string | undefined }

@@ -12,9 +12,8 @@ import { app, net, protocol } from 'electron'
 
 import { DEFAULT_WAKE, LEGACY_MODEL_IDS, MODEL_BYTES, MODEL_FILES, MODEL_ID, MODEL_REPO, MODEL_SCHEME, parseWakePatch, WC, type ModelState, type WakeSettings, type WakeView } from '../shared/wake.ts'
 
-/** Must run before app 'ready': lets fetch() in the renderer read assistant-model:// URLs. */
-export const registerModelScheme = () =>
-  protocol.registerSchemesAsPrivileged([{ scheme: MODEL_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
+/** Lets fetch() in the renderer read assistant-model:// URLs; registered with the other schemes before app 'ready'. */
+export const modelSchemePrivileges = { scheme: MODEL_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }
 
 export interface WakeDeps {
   handle: <T>(channel: string, fn: (arg: unknown, arg2: unknown) => T | Promise<T>) => void

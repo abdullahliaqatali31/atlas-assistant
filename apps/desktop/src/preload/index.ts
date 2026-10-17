@@ -11,7 +11,7 @@ import { IC, type IdentityBridge, type IdentityView } from '../shared/identity.t
 import { LC, type LearningBridge, type LearningView } from '../shared/learning.ts'
 import { BC, type BackupBridge } from '../shared/backup.ts'
 import { KC, type CodeBridge, type CodeState } from '../shared/code.ts'
-import { NC, type NewsBridge } from '../shared/news.ts'
+import { NC, type NewsBridge, type NewsResult } from '../shared/news.ts'
 import { WC, type WakeBridge, type WakeView } from '../shared/wake.ts'
 import { PC, type PersonalityBridge, type PersonalityView } from '../shared/personality.ts'
 import { PJ, type ProjectsBridge } from '../shared/projects.ts'
@@ -93,7 +93,15 @@ const personality: PersonalityBridge = {
 contextBridge.exposeInMainWorld('personality', personality)
 
 /** Public headlines for the Jarvis panel (fetched and parsed in main). */
-const news: NewsBridge = { list: refresh => ipcRenderer.invoke(NC.list, refresh === true) }
+const news: NewsBridge = {
+  list: refresh => ipcRenderer.invoke(NC.list, refresh === true),
+  sources: () => ipcRenderer.invoke(NC.sources),
+  setSources: ids => ipcRenderer.invoke(NC.setSources, ids),
+  saved: () => ipcRenderer.invoke(NC.saved),
+  save: id => ipcRenderer.invoke(NC.save, id),
+  unsave: id => ipcRenderer.invoke(NC.unsave, id),
+  onChanged: cb => subscribe<NewsResult>(NC.changed, cb),
+}
 
 contextBridge.exposeInMainWorld('news', news)
 

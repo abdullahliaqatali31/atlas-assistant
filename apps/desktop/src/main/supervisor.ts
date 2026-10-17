@@ -72,6 +72,7 @@ export class RuntimeSupervisor {
   private restartTimer: NodeJS.Timeout | null = null
   private mode: UiMode = 'companion'
   private speech = true
+  private lastNews: Extract<HostRequest, { type: 'news-snapshot' }>['headlines'] = []
   private activeReply: string | null = null
   private readonly taskRequests = new Map<string, (t: TaskView[]) => void>()
   private readonly todayRequests = new Map<string, (l: DayLine[]) => void>()
@@ -276,6 +277,12 @@ export class RuntimeSupervisor {
   }
 
   /** Activity and Projects requests. False when the host is down. */
+  /** Latest headlines for the assistant's news tool. */
+  news(headlines: Extract<HostRequest, { type: 'news-snapshot' }>['headlines']) {
+    this.lastNews = headlines
+    if (this.child) this.post({ type: 'news-snapshot', headlines })
+  }
+
   /** Code-project snapshots and tool answers. */
   code(msg: Extract<HostRequest, { type: 'code-snapshot' | 'code-result' }>): boolean {
     if (!this.child) return false
@@ -316,6 +323,7 @@ export class RuntimeSupervisor {
         if (e.phase === 'ready') {
           if (this.mode !== 'companion') this.post({ type: 'set-mode', mode: this.mode })
           this.post({ type: 'set-speech', enabled: this.speech })
+          if (this.lastNews.length) this.post({ type: 'news-snapshot', headlines: this.lastNews })
         }
         this.deps.onStatus(e)
         break

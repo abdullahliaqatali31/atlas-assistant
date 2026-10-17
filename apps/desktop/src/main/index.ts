@@ -6,7 +6,7 @@
 import { join } from 'node:path'
 
 import { isLlmProvider } from '@assistant/providers/llm-presets'
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, session, shell, Tray, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, protocol, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, session, shell, Tray, type IpcMainInvokeEvent } from 'electron'
 
 import {
   CH,
@@ -32,8 +32,8 @@ import { registerBackupIpc } from './backup.ts'
 import { CodeService } from './code/service.ts'
 import { registerStartupIpc, startedHidden } from './startup.ts'
 import { registerLearningIpc } from './learning.ts'
-import { NewsService } from './news.ts'
-import { registerModelScheme, WakeService } from './wake.ts'
+import { NewsService, newsSchemePrivileges } from './news.ts'
+import { modelSchemePrivileges, WakeService } from './wake.ts'
 import { registerDataIpc } from './data.ts'
 import { registerPersonalityIpc } from './personality.ts'
 import { watchSession } from './session.ts'
@@ -41,7 +41,8 @@ import { providerFor, readSetup, runtimeEnv, saveSetup, saveSpeakReplies, setupS
 import { RuntimeSupervisor } from './supervisor.ts'
 
 // Privileged scheme for the local speech model must be declared before 'ready'.
-registerModelScheme()
+// Electron takes one list of privileged schemes, before 'ready': local speech models and news pictures.
+protocol.registerSchemesAsPrivileged([modelSchemePrivileges, newsSchemePrivileges])
 
 // Development only: lets tooling inspect the window (never in a packaged build).
 if (!app.isPackaged && /^\d{4,5}$/.test(process.env.ASSISTANT_DEBUG_PORT ?? '')) {
@@ -328,10 +329,16 @@ const handle = <T>(channel: string, fn: (arg: unknown, arg2: unknown, arg3?: unk
   })
 
 handle(CH.status, () => status)
-const news = new NewsService()
+const news = new NewsService({
+  onChange: r => {
+    toRenderer(NC.changed, r)
+    // The assistant can tell the owner the news; feed text is untrusted.
+    supervisor.news(r.headlines.slice(0, 40).map(h => ({ title: h.title, source: h.source, category: h.category, publishedAt: h.publishedAt, summary: h.summary })))
+  },
+})
+news.register(handle, () => requireOwner())
 const wake = new WakeService({ handle, toRenderer })
 wake.register()
-handle(NC.list, refresh => news.list(refresh === true))
 controls.register()
 /** Code projects: approved folders, activity scans, dev servers, status files. */
 const code = new CodeService({
@@ -544,6 +551,7 @@ if (!app.requestSingleInstanceLock()) {
     app.setAppUserModelId('dev.personal-assistant.desktop')
     allowMicrophoneOnlyForCompanion()
     wake.registerProtocol()
+    news.registerProtocol()
     code.start()
     supervisor.setSpeech(readSetup().speakReplies)
     tray = new Tray(trayIcon())

@@ -1,23 +1,25 @@
-import { Brain, FolderKanban, MessageSquare, PanelRightClose, PanelRightOpen, Settings2, SlidersHorizontal } from 'lucide-react'
+import { Brain, FolderKanban, LayoutDashboard, MessageSquare, Newspaper, Settings2, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import type { ControlState } from '../../shared/control.ts'
+import type { IdentityView } from '../../shared/identity.ts'
 import type { RuntimeStatus } from '../../shared/ipc.ts'
 import logo from './assets/logo.svg'
 import { Companion } from './Companion.tsx'
 import { Controls, PausedBanner } from './Controls.tsx'
-import type { IdentityView } from '../../shared/identity.ts'
-import { JarvisPanel, type Presence } from './Jarvis.tsx'
+import { Home } from './Home.tsx'
+import type { Presence } from './Jarvis.tsx'
 import { Learning } from './Learning.tsx'
 import { LockScreen } from './LockScreen.tsx'
+import { NewsPage } from './News.tsx'
 import { ProjectsHome } from './ProjectsHome.tsx'
 import { SetupSections } from './Personality.tsx'
 import { Setup } from './Setup.tsx'
 
-type View = 'assistant' | 'projects' | 'learning' | 'controls' | 'setup'
+type View = 'home' | 'news' | 'projects' | 'learning' | 'controls' | 'setup'
 
-/** Wide enough for conversation and the panel side by side. */
-const WIDE = '(min-width: 900px)'
+/** Wide enough for the canvas and the chat side by side; narrower, the chat slides over the canvas. */
+const WIDE = '(min-width: 1100px)'
 
 const useMedia = (query: string) => {
   const [match, setMatch] = useState(() => window.matchMedia(query).matches)
@@ -30,23 +32,34 @@ const useMedia = (query: string) => {
   return match
 }
 
-const readPanelPref = () => {
+const stored = (key: string, fallback: string) => {
   try {
-    return localStorage.getItem('panel') !== 'hidden'
+    return localStorage.getItem(key) ?? fallback
   } catch {
-    return true
+    return fallback
+  }
+}
+const store = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Storage unavailable: the choice lasts for this window only.
   }
 }
 
+/**
+ * Layout: the rail on the left, the broad canvas (Home, News, Projects…) in
+ * the middle, and the conversation as a side panel on the right. The chat
+ * stays mounted when hidden, so a conversation survives; it opens by itself
+ * when Atlas speaks up.
+ */
 export function App() {
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [controls, setControls] = useState<ControlState | null>(null)
-  const [view, setView] = useState<View>('assistant')
+  const [view, setView] = useState<View>(() => (stored('view', 'home') as View))
   const [presence, setPresence] = useState<Presence>({ state: 'idle', level: 0 })
   const wide = useMedia(WIDE)
-  const [panelOpen, setPanelOpen] = useState(readPanelPref)
-  // In a narrow window the panel replaces the conversation, so it starts closed there.
-  const [narrowPanel, setNarrowPanel] = useState(false)
+  const [chatOpen, setChatOpen] = useState(() => stored('chat', 'open') === 'open')
   const [identity, setIdentity] = useState<IdentityView | null>(null)
   const [suggestions, setSuggestions] = useState(0)
 
@@ -59,28 +72,28 @@ export function App() {
     const offIdentity = window.identity.onChanged(setIdentity)
     void window.learning.get().then(v => setSuggestions(v.pending.length), () => undefined)
     const offLearning = window.learning.onChanged(v => setSuggestions(v.pending.length))
+    // Atlas speaks up on its own: show the conversation.
+    const offReply = window.assistant.onReply(e => {
+      if (e.type === 'initiative') openChat(true)
+    })
     return () => {
       off()
       offControls()
       offIdentity()
       offLearning()
+      offReply()
     }
   }, [])
 
-  const togglePanel = () => {
-    if (!wide) {
-      setNarrowPanel(v => !v)
-      setView('assistant')
-      return
-    }
-    setPanelOpen(v => {
-      try {
-        localStorage.setItem('panel', v ? 'hidden' : 'shown')
-      } catch {
-        // Storage unavailable: the choice lasts for this window only.
-      }
-      return !v
-    })
+  const go = (v: View) => {
+    setView(v)
+    store('view', v)
+    // In a narrow window the chat covers the canvas: picking a page hides it.
+    if (!wide) setChatOpen(false)
+  }
+  const openChat = (open: boolean) => {
+    setChatOpen(open)
+    store('chat', open ? 'open' : 'closed')
   }
 
   if (!status) return <div className="aurora" />
@@ -96,11 +109,24 @@ export function App() {
     )
   }
 
-  const showPanel = wide ? panelOpen : narrowPanel && view === 'assistant'
-  const panelShown = wide ? panelOpen : narrowPanel
-  const setup = <Setup status={status} onSaved={s => setStatus(s)} onCancel={() => setView('assistant')} />
-
+  const setup = <Setup status={status} onSaved={s => setStatus(s)} onCancel={() => go('home')} />
   const locked = identity?.locked === true
+  const nav: [View, string, ReactNode][] = [
+    ['home', 'Home', <LayoutDashboard key="h" className="size-[18px]" />],
+    ['news', 'News', <Newspaper key="n" className="size-[18px]" />],
+    ['projects', 'Projects', <FolderKanban key="p" className="size-[18px]" />],
+    [
+      'learning',
+      suggestions ? `Learning (${suggestions} waiting)` : 'Learning',
+      <span key="l" className="relative">
+        <Brain className="size-[18px]" />
+        {suggestions > 0 && <span className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-warm text-[9px] font-bold text-black">{suggestions}</span>}
+      </span>,
+    ],
+    ['controls', 'Connections, permissions and activity', <SlidersHorizontal key="c" className="size-[18px]" />],
+    ['setup', 'Setup and personality', <Settings2 key="s" className="size-[18px]" />],
+  ]
+
   return (
     <Frame
       status={status}
@@ -108,62 +134,42 @@ export function App() {
       overlay={identity && locked ? <LockScreen view={identity} ownerName={status.setup.ownerName} voice={status.speech.available} /> : null}
     >
       <nav className="glass mb-2 ml-2 flex w-14 shrink-0 flex-col items-center gap-1 rounded-2xl py-3" aria-label="Main">
-        <RailButton label="Assistant" active={view === 'assistant'} onClick={() => setView('assistant')}>
-          <MessageSquare className="size-[18px]" />
-        </RailButton>
-        <RailButton label="Projects" active={view === 'projects'} onClick={() => setView('projects')}>
-          <FolderKanban className="size-[18px]" />
-        </RailButton>
-        <RailButton label={suggestions ? `Learning (${suggestions} waiting)` : 'Learning'} active={view === 'learning'} onClick={() => setView('learning')}>
-          <span className="relative">
-            <Brain className="size-[18px]" />
-            {suggestions > 0 && <span className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-warm text-[9px] font-bold text-black">{suggestions}</span>}
-          </span>
-        </RailButton>
-        <RailButton label="Connections, permissions and activity" active={view === 'controls'} onClick={() => setView('controls')}>
-          <SlidersHorizontal className="size-[18px]" />
-        </RailButton>
-        <RailButton label="Setup and personality" active={view === 'setup'} onClick={() => setView('setup')}>
-          <Settings2 className="size-[18px]" />
-        </RailButton>
+        {nav.map(([id, label, icon]) => (
+          <RailButton key={id} label={label} active={view === id} onClick={() => go(id)}>
+            {icon}
+          </RailButton>
+        ))}
         <div className="flex-1" />
-        <RailButton label={panelShown ? 'Hide the assistant panel' : 'Show the assistant panel'} active={panelShown} onClick={togglePanel}>
-          {panelShown ? <PanelRightClose className="size-[18px]" /> : <PanelRightOpen className="size-[18px]" />}
+        <RailButton label={chatOpen ? 'Hide the conversation' : 'Talk to Atlas'} active={chatOpen} onClick={() => openChat(!chatOpen)}>
+          <span className="relative">
+            <MessageSquare className="size-[18px]" />
+            {presence.state !== 'idle' && <span className="thinking-dot absolute -right-1 -top-1 size-2 rounded-full bg-accent" aria-hidden />}
+          </span>
         </RailButton>
       </nav>
 
-      <div className={`flex min-w-0 flex-1 ${wide ? 'flex-row' : 'flex-col'}`}>
-        <main className={`glass mx-2 mb-2 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl ${showPanel && !wide ? 'hidden' : 'flex-1'}`}>
+      <div className="relative flex min-w-0 flex-1">
+        <main className="glass mx-2 mb-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl">
           {controls && <PausedBanner state={controls} />}
-          {view === 'controls' && controls && (
-            <div className="min-h-0 flex-1">
-              <Controls state={controls} onBack={() => setView('assistant')} />
-            </div>
-          )}
-          {view === 'projects' && (
-            <div className="min-h-0 flex-1">
-              <ProjectsHome />
-            </div>
-          )}
-          {view === 'learning' && (
-            <div className="min-h-0 flex-1">
-              <Learning onTalk={() => setView('assistant')} />
-            </div>
-          )}
-          {view === 'setup' && (
-            <div className="min-h-0 flex-1">{status.phase === 'ready' ? <SetupSections connection={setup} onClose={() => setView('assistant')} /> : setup}</div>
-          )}
-          {/* The companion stays mounted so the conversation survives a visit elsewhere. */}
-          <div className={view === 'assistant' ? 'min-h-0 flex-1' : 'hidden'}>
-            <Companion status={status} onOpenSetup={() => setView('setup')} onPresence={setPresence} />
+          <div className="min-h-0 flex-1">
+            {view === 'home' && <Home status={status} controls={controls} presence={presence} ownerName={status.setup.ownerName} go={go} />}
+            {view === 'news' && <NewsPage />}
+            {view === 'projects' && <ProjectsHome />}
+            {view === 'learning' && <Learning onTalk={() => openChat(true)} />}
+            {view === 'controls' && controls && <Controls state={controls} onBack={() => go('home')} />}
+            {view === 'setup' && (status.phase === 'ready' ? <SetupSections connection={setup} onClose={() => go('home')} /> : setup)}
           </div>
         </main>
 
-        {showPanel && (
-          <div className={`min-h-0 ${wide ? 'w-[340px] shrink-0 xl:w-[380px]' : 'flex-1'}`}>
-            <JarvisPanel status={status} controls={controls} presence={presence} ownerName={status.setup.ownerName} />
-          </div>
-        )}
+        {/* The conversation: a side panel when wide, a drawer over the canvas when narrow. Always mounted. */}
+        <aside
+          aria-label="Conversation"
+          className={`glass mb-2 mr-2 flex min-h-0 flex-col overflow-hidden rounded-2xl ${
+            wide ? `w-[400px] shrink-0 xl:w-[440px] ${chatOpen ? '' : 'hidden'}` : `absolute inset-y-0 right-0 z-30 w-[min(440px,calc(100%-1rem))] shadow-2xl ${chatOpen ? '' : 'hidden'}`
+          }`}
+        >
+          <Companion status={status} onOpenSetup={() => go('setup')} onOpenControls={() => go('controls')} onPresence={setPresence} />
+        </aside>
       </div>
     </Frame>
   )
