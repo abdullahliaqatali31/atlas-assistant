@@ -26,7 +26,7 @@ export const toFeatures = (w: WorldSnapshot): { places: FC; quakes: FC; events: 
   },
   events: {
     type: 'FeatureCollection',
-    features: w.events.map(e => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lon, e.lat] }, properties: { title: `${e.category}: ${e.title}`, color: EVENT_COLOR[e.category] ?? '#94a3b8', url: e.url, time: e.time } })),
+    features: w.events.map(e => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lon, e.lat] }, properties: { title: `${e.category}: ${e.title}`, category: e.category, color: EVENT_COLOR[e.category] ?? '#94a3b8', url: e.url, time: e.time } })),
   },
 })
 
@@ -76,6 +76,7 @@ export const shipFeatures = (ships: Ship[]): FC => ({
       title: `${v.name || `MMSI ${v.mmsi}`} · ${v.category}`,
       detail: `${v.speed.toFixed(1)} kn${v.destination ? ` · to ${v.destination}` : ''}${v.length ? ` · ${v.length} m` : ''}`,
       name: v.name,
+      category: v.category,
       rotation: v.heading ?? v.course,
       color: SHIP_COLOR[v.category] ?? SHIP_COLOR.Other!,
       time: v.at,
@@ -92,6 +93,8 @@ export const flightFeatures = (flights: Flight[]): FC => ({
       title: `${f.callsign || f.registration || f.hex}${f.type ? ` · ${f.type}` : ''}${f.military ? ' · military' : ''}`,
       detail: `${f.altitude === null ? 'On the ground' : `${Math.round(f.altitude).toLocaleString()} ft`} · ${Math.round(f.speed)} kt${f.registration ? ` · ${f.registration}` : ''}`,
       callsign: f.callsign,
+      military: f.military ? 1 : 0,
+      altitude: f.altitude ?? 0,
       track: f.track,
       color: f.military ? '#ef4444' : '#fbbf24',
     },

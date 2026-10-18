@@ -18,7 +18,9 @@ import { HoverCard } from './HoverCard.tsx'
 import type { Selected } from './Inspector.tsx'
 import { layerDef, LAYERS, OWN_SOURCES, PICKABLE, readLayers, SELECTED_LAYER, type LayerId } from './layers.ts'
 import { describeFound, describeVisible, findItems, linkFeatures, pinFeatures, storyFeatures, ZOOM_FOR } from './mapops.ts'
+import { LayerRail, RAIL } from './LayerRail.tsx'
 import { NewsCanvas } from './NewsCanvas.tsx'
+import { layerFilter, readFilters, saveFilters } from './panels.ts'
 import { pickAt } from './pick.ts'
 import { BASE_URL, carryOverlays, composeStyle, creditLine, STYLES, type CreditPart, type StyleId } from './styles.ts'
 
@@ -85,6 +87,9 @@ export function MapView({
   const [styleError, setStyleError] = useState('')
   const fitted = useRef(false)
   const [layers, setLayers] = useState(readLayers)
+  const [filters, setFilters] = useState(readFilters)
+  /** Orbit elements of the tracked satellites, for the rail's "above you" panel. */
+  const satsRef = useRef<{ name: string; rec: satellite.SatRec }[]>([])
   const [open, setOpen] = useState<'layers' | 'style' | null>(null)
   const [counts, setCounts] = useState<Partial<Record<LayerId, number>>>({})
   const [flightNote, setFlightNote] = useState('')
@@ -422,6 +427,36 @@ export function MapView({
     }
   }, [data, ready])
 
+  // Filters from the rail's Filters tab: the same rule for the map and the panel lists. Applied again after a style switch.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const apply = () => {
+      for (const l of LAYERS) for (const spec of l.draw) if (m.getLayer(spec.id) && spec.type !== 'line') m.setFilter(spec.id, layerFilter(l.id, filters))
+    }
+    apply()
+    m.on('style.load', apply)
+    saveFilters(filters)
+    return () => {
+      m.off('style.load', apply)
+    }
+  }, [filters, ready])
+
+  // One key per layer (shown on the rail) while the map is on screen; never while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return
+      const t = e.target
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)) return
+      if (!box.current?.offsetParent) return
+      const r = RAIL.find(x => x.key === e.key.toLowerCase())
+      if (!r) return
+      setLayers(x => ({ ...x, [r.id]: !x[r.id] }))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // Switches: show or hide each layer's map layers, remembered. Applied again after a style switch.
   useEffect(() => {
     const m = map.current
@@ -563,6 +598,7 @@ export function MapView({
           return []
         }
       })
+      satsRef.current = sats
       setCounts(c => ({ ...c, satellites: sats.length }))
       draw()
     }, () => undefined)
@@ -572,6 +608,32 @@ export function MapView({
       clearInterval(timer)
     }
   }, [ready, layers.satellites])
+
+  const needsShipKey = shipState.status === 'no-key' || (shipState.status === 'error' && /key/i.test(shipState.message ?? ''))
+  /** The owner's AISStream key form: in the Layers popover and in the Ships panel on the rail. */
+  const shipKeyForm = (className: string) => (
+      <form
+        className={`space-y-1 ${className}`}
+        onSubmit={e => {
+          e.preventDefault()
+          if (shipKey.trim()) void saveShipKey(shipKey.trim())
+        }}
+      >
+        <p className="text-[10px] text-muted">
+          {shipState.message ?? 'Ships need your free AISStream key:'}{' '}
+          <a href="https://aisstream.io/apikeys" target="_blank" rel="noreferrer" className="text-accent underline">
+            get one
+          </a>
+        </p>
+        <div className="flex gap-1">
+          <input type="password" autoComplete="off" spellCheck={false} className="field min-w-0 flex-1 py-0.5 text-[11px]" placeholder="Paste AISStream key" value={shipKey} onChange={e => setShipKey(e.target.value)} aria-label="AISStream API key" />
+          <button type="submit" className="btn h-6 px-2 text-[11px]" disabled={!shipKey.trim()}>
+            Save
+          </button>
+        </div>
+        {shipKeyError && <p className="text-[10px] text-danger">{shipKeyError}</p>}
+      </form>
+  )
 
   const on = LAYERS.filter(l => layers[l.id]).length
   const current = STYLES.find(s => s.id === prefs.style)!
@@ -599,7 +661,7 @@ export function MapView({
         <Globe2 className="size-3.5" aria-hidden />
         <span className="hidden @[640px]:inline">{globe ? 'Globe' : '2D'}</span>
       </button>
-      <button type="button" onClick={() => toggle('layers')} aria-expanded={open === 'layers'} className={`map-chip ${open === 'layers' ? 'border-accent text-accent' : ''}`} title="Map layers">
+      <button type="button" onClick={() => toggle('layers')} aria-expanded={open === 'layers'} className={`map-chip @[640px]:hidden ${open === 'layers' ? 'border-accent text-accent' : ''}`} title="Map layers">
         <Layers className="size-3.5" aria-hidden />
         <span className="hidden @[520px]:inline">Layers</span>
         <span className="font-mono text-[10px] text-muted">
@@ -613,6 +675,33 @@ export function MapView({
     <div className="relative h-full w-full overflow-hidden">
       <div ref={box} className="h-full w-full" aria-label="World map" role="region" />
       <HoverCard map={map.current} ready={ready} world={world} now={now} />
+      {ready && map.current && (
+        <LayerRail
+          on={layers}
+          counts={counts}
+          onToggle={id => setLayers(x => ({ ...x, [id]: !x[id] }))}
+          ctx={{
+            sources: latest.current,
+            world,
+            filters,
+            onFilters: setFilters,
+            observer: world.places[0] ? { lat: world.places[0].place.lat, lon: world.places[0].place.lon, name: world.places[0].place.name } : { lat: map.current.getCenter().lat, lon: map.current.getCenter().lng, name: 'the map centre' },
+            centre: [map.current.getCenter().lng, map.current.getCenter().lat],
+            sats: satsRef.current,
+            storyTitle: story?.title ?? null,
+            flightNote,
+            shipNote: shipState.status === 'connecting' ? 'Connecting to AISStream… ships appear as they report.' : shipState.status === 'error' && !needsShipKey ? shipState.message : null,
+            shipKeyForm: needsShipKey ? shipKeyForm('pt-1') : null,
+            now,
+            onFocus: (kind, f) => {
+              const lngLat = f.geometry.coordinates as [number, number]
+              selectRef.current({ kind, lngLat, props: f.properties })
+              void fly(map.current!, { center: lngLat, zoom: Math.max(map.current!.getZoom(), ZOOM_FOR[kind]) })
+            },
+            onFly: (lat, lon, zoom) => void fly(map.current!, { center: [lon, lat], zoom }),
+          }}
+        />
+      )}
       {story && (
         <NewsCanvas
           story={story}
@@ -672,29 +761,7 @@ export function MapView({
             ))}
           {layers.flights && flightNote && <p className="pl-6 text-[10px] text-muted">{flightNote}</p>}
           {layers.ships && shipState.status === 'connecting' && <p className="pl-6 text-[10px] text-muted">Connecting to AISStream… ships appear as they report</p>}
-          {layers.ships && (shipState.status === 'no-key' || (shipState.status === 'error' && /key/i.test(shipState.message ?? ''))) && (
-            <form
-              className="space-y-1 pl-6 pt-1"
-              onSubmit={e => {
-                e.preventDefault()
-                if (shipKey.trim()) void saveShipKey(shipKey.trim())
-              }}
-            >
-              <p className="text-[10px] text-muted">
-                {shipState.message ?? 'Ships need your free AISStream key:'}{' '}
-                <a href="https://aisstream.io/apikeys" target="_blank" rel="noreferrer" className="text-accent underline">
-                  get one
-                </a>
-              </p>
-              <div className="flex gap-1">
-                <input type="password" autoComplete="off" spellCheck={false} className="field min-w-0 flex-1 py-0.5 text-[11px]" placeholder="Paste AISStream key" value={shipKey} onChange={e => setShipKey(e.target.value)} aria-label="AISStream API key" />
-                <button type="submit" className="btn h-6 px-2 text-[11px]" disabled={!shipKey.trim()}>
-                  Save
-                </button>
-              </div>
-              {shipKeyError && <p className="text-[10px] text-danger">{shipKeyError}</p>}
-            </form>
-          )}
+          {layers.ships && needsShipKey && shipKeyForm('pl-6 pt-1')}
           {layers.ships && shipState.status === 'error' && !/key/i.test(shipState.message ?? '') && <p className="pl-6 text-[10px] text-warm">{shipState.message}</p>}
           {layers.cameras && <p className="pl-6 text-[10px] leading-snug text-muted">Official open feeds only: {CAMERA_COVERAGE}</p>}
         </fieldset>

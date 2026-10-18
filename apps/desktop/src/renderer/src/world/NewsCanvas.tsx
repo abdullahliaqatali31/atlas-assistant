@@ -33,7 +33,7 @@ export function NewsCanvas({
   const [folded, setFolded] = useState(false)
   if (folded) {
     return (
-      <button type="button" className="map-chip pointer-events-auto absolute right-12 top-12 z-10" onClick={() => setFolded(false)} title="Open the News canvas">
+      <button type="button" className="map-chip pointer-events-auto absolute right-12 top-12 z-10 @[640px]:right-[68px]" onClick={() => setFolded(false)} title="Open the News canvas">
         <Newspaper className="size-3.5 text-[#fbbf24]" aria-hidden />
         <span className="max-w-40 truncate">{story.title}</span>
         <span className="font-mono text-[10px] text-muted">{story.items.length}</span>
@@ -41,7 +41,7 @@ export function NewsCanvas({
     )
   }
   return (
-    <section aria-label={`News canvas: ${story.title}`} className="ask-pop glass pointer-events-auto absolute right-12 top-12 z-10 flex max-h-[calc(100%-8.5rem)] w-[min(320px,calc(100%-4rem))] flex-col overflow-hidden rounded-xl bg-solid/90 shadow-2xl">
+    <section aria-label={`News canvas: ${story.title}`} className="ask-pop glass pointer-events-auto absolute right-12 top-12 z-10 @[640px]:right-[68px] flex max-h-[calc(100%-8.5rem)] w-[min(320px,calc(100%-4rem))] flex-col overflow-hidden rounded-xl bg-solid/90 shadow-2xl">
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
         <Newspaper className="size-4 shrink-0 text-[#fbbf24]" aria-hidden />
         <h3 className="min-w-0 flex-1 truncate text-sm font-medium" title={story.title}>
