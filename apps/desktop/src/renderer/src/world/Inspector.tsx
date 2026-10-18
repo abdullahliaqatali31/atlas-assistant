@@ -126,10 +126,28 @@ function LiveVideo({ url, kind, poster, onFail }: { url: string; kind: string; p
 }
 
 /** A public camera: live video where the agency offers it, else its latest frame (fetched by Atlas, refreshed every 30 s). */
-function CameraDetail({ id, source, video, videoKind }: { id: string; source: string; video?: string | undefined; videoKind?: string | undefined }) {
+function CameraDetail({
+  id,
+  source,
+  video,
+  videoKind,
+  player,
+  playerKind,
+  link,
+}: {
+  id: string
+  source: string
+  video?: string | undefined
+  videoKind?: string | undefined
+  /** Windy's embeddable player: its live stream or today's timelapse. */
+  player?: string | undefined
+  playerKind?: string | undefined
+  link?: string | undefined
+}) {
   const [frame, setFrame] = useState<{ src: string; at: number } | null>(null)
   const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
-  const [mode, setMode] = useState<'video' | 'still'>(video ? 'video' : 'still')
+  const moving = video ?? player
+  const [mode, setMode] = useState<'video' | 'still'>(moving ? 'video' : 'still')
   const load = useCallback(() => {
     setState('loading')
     void window.world.cameraImage(id).then(
@@ -142,24 +160,26 @@ function CameraDetail({ id, source, video, videoKind }: { id: string; source: st
   }, [id])
   useEffect(() => {
     setFrame(null)
-    setMode(video ? 'video' : 'still')
+    setMode(moving ? 'video' : 'still')
     load()
     const timer = setInterval(load, 30_000)
     return () => clearInterval(timer)
-  }, [load, video])
+  }, [load, moving])
   return (
     <div className="space-y-1.5">
       <div className="relative grid aspect-video place-items-center overflow-hidden rounded-lg bg-surface">
         {mode === 'video' && video ? (
           <LiveVideo url={video} kind={videoKind ?? 'clip'} poster={frame?.src} onFail={() => setMode('still')} />
+        ) : mode === 'video' && player ? (
+          <iframe src={player} title="Webcam player" className="h-full w-full border-0" sandbox="allow-scripts allow-same-origin" allow="autoplay; fullscreen" referrerPolicy="no-referrer" />
         ) : frame ? (
           <img src={frame.src} alt="Latest camera frame" className="h-full w-full object-cover" />
         ) : (
           <span className="text-xs text-muted">{state === 'error' ? 'Image unavailable right now' : 'Loading the latest frame…'}</span>
         )}
-        {mode === 'video' && video && (
+        {mode === 'video' && moving && (
           <span className="absolute left-2 top-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white">
-            <span className="size-1.5 animate-pulse rounded-full bg-red-500" aria-hidden /> {videoKind === 'hls' ? 'LIVE' : 'RECENT CLIP'}
+            <span className="size-1.5 animate-pulse rounded-full bg-red-500" aria-hidden /> {video ? (videoKind === 'hls' ? 'LIVE' : 'RECENT CLIP') : playerKind === 'live' ? 'LIVE' : 'TODAY, TIMELAPSE'}
           </span>
         )}
       </div>
@@ -168,7 +188,12 @@ function CameraDetail({ id, source, video, videoKind }: { id: string; source: st
           {source}
           {mode === 'still' && frame ? ` · ${new Date(frame.at).toLocaleTimeString()}` : ''}
         </span>
-        {video && (
+        {link && (
+          <a href={link} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+            Windy
+          </a>
+        )}
+        {moving && (
           <button type="button" className="text-accent hover:underline" onClick={() => setMode(m => (m === 'video' ? 'still' : 'video'))}>
             {mode === 'video' ? 'Still' : 'Video'}
           </button>
@@ -248,7 +273,11 @@ export function Inspector({
         ) : sel.kind === 'satellites' ? (
           <SatelliteDetail p={p} />
         ) : sel.kind === 'cameras' ? (
-          <CameraDetail id={String(p.id)} source={String(p.source ?? '')} video={typeof p.video === 'string' ? p.video : undefined} videoKind={typeof p.videoKind === 'string' ? p.videoKind : undefined} />
+          <CameraDetail id={String(p.id)} source={String(p.source ?? '')} video={typeof p.video === 'string' ? p.video : undefined} videoKind={typeof p.videoKind === 'string' ? p.videoKind : undefined}
+            player={typeof p.player === 'string' ? p.player : undefined}
+            playerKind={typeof p.playerKind === 'string' ? p.playerKind : undefined}
+            link={typeof p.link === 'string' ? p.link : undefined}
+          />
         ) : (
           <>
             {typeof p.image === 'string' && p.image.startsWith('assistant-news://') && <img src={p.image} alt="" className="aspect-video w-full rounded-lg object-cover" />}

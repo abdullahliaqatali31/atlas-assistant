@@ -47,9 +47,11 @@ export interface MapFilters {
   disasterMinAlert: number
   /** News categories to show; empty shows all. */
   newsTypes: string[]
+  /** Let OpenSky (non-commercial terms) fill in flights where adsb.lol sees few. */
+  openSky: boolean
 }
 
-export const DEFAULT_FILTERS: MapFilters = { militaryOnly: false, shipTypes: [], quakeMinMag: 4, eventTypes: [], disasterMinAlert: 0, newsTypes: [] }
+export const DEFAULT_FILTERS: MapFilters = { militaryOnly: false, shipTypes: [], quakeMinMag: 4, eventTypes: [], disasterMinAlert: 0, newsTypes: [], openSky: false }
 
 export const readFilters = (): MapFilters => {
   try {
@@ -60,6 +62,7 @@ export const readFilters = (): MapFilters => {
       quakeMinMag: typeof raw.quakeMinMag === 'number' && raw.quakeMinMag >= 4 && raw.quakeMinMag <= 8 ? raw.quakeMinMag : 4,
       eventTypes: Array.isArray(raw.eventTypes) ? raw.eventTypes.filter((v): v is string => typeof v === 'string') : [],
       disasterMinAlert: raw.disasterMinAlert === 1 || raw.disasterMinAlert === 2 ? raw.disasterMinAlert : 0,
+      openSky: raw.openSky === true,
       newsTypes: Array.isArray(raw.newsTypes) ? raw.newsTypes.filter((v): v is string => typeof v === 'string') : [],
     }
   } catch {

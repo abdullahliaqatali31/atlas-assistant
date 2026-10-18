@@ -55,9 +55,9 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
 
 /** Wraps one IPC handler: our window only, and the owner for the listed channels. */
 export const gateIpc =
-  <E, T>(channel: string, fn: (arg: unknown, arg2: unknown, arg3?: unknown) => T | Promise<T>, check: { fromOurWindow: (e: E) => boolean; requireOwner: () => void }) =>
-  (e: E, arg: unknown, arg2: unknown, arg3: unknown) => {
+  <E, T>(channel: string, fn: (arg: unknown, arg2: unknown, arg3?: unknown, arg4?: unknown) => T | Promise<T>, check: { fromOurWindow: (e: E) => boolean; requireOwner: () => void }) =>
+  (e: E, arg: unknown, arg2: unknown, arg3: unknown, arg4?: unknown) => {
     if (!check.fromOurWindow(e)) throw new Error('Rejected IPC from an unknown frame.')
     if (OWNER_ONLY.has(channel)) check.requireOwner()
-    return fn(arg, arg2, arg3)
+    return fn(arg, arg2, arg3, arg4)
   }

@@ -67,7 +67,7 @@ export const LAYERS: LayerDef[] = [
         id: 'cameras',
         type: 'circle',
         source: 'cameras',
-        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 2, 10, 5], 'circle-color': '#2dd4bf', 'circle-opacity': 0.8, 'circle-stroke-width': 0.5, 'circle-stroke-color': HALO },
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 2, 10, 5], 'circle-color': ['coalesce', ['get', 'color'], '#2dd4bf'], 'circle-opacity': 0.8, 'circle-stroke-width': 0.5, 'circle-stroke-color': HALO },
       },
     ],
   },

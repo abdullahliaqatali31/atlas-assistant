@@ -157,6 +157,44 @@ export const parseFlights = (j: unknown): Flight[] => {
     }))
 }
 
+/**
+ * OpenSky Network state vectors ({ time, states: [[icao24, callsign, country,
+ * timePosition, lastContact, lon, lat, baroAltitudeM, onGround, velocityMs,
+ * track, verticalRateMs, sensors, geoAltitudeM, squawk, spi, source], ...] })
+ * into the same shape as adsb.lol's aircraft.
+ */
+export const parseOpenSky = (j: unknown): Flight[] => {
+  const o = j as { time?: unknown; states?: unknown[][] | null }
+  const now = typeof o?.time === 'number' ? o.time : 0
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const out: Flight[] = []
+  for (const s of o?.states ?? []) {
+    if (!Array.isArray(s)) continue
+    const lon = n(s[5])
+    const lat = n(s[6])
+    if (lat === null || lon === null) continue
+    const altM = n(s[7]) ?? n(s[13])
+    const vr = n(s[11])
+    out.push({
+      hex: String(s[0] ?? ''),
+      callsign: String(s[1] ?? '').trim(),
+      registration: '',
+      type: '',
+      lat,
+      lon,
+      altitude: s[8] === true || altM === null ? null : Math.round(altM * 3.28084),
+      speed: Math.round((n(s[9]) ?? 0) * 1.943844),
+      track: n(s[10]) ?? 0,
+      military: false,
+      squawk: typeof s[14] === 'string' ? s[14] : '',
+      verticalRate: vr === null ? null : Math.round(vr * 196.85),
+      emergency: 'none',
+      seen: now && n(s[4]) !== null ? Math.max(0, now - n(s[4])!) : 0,
+    })
+  }
+  return out
+}
+
 /** A vessel broadcasting AIS, from AISStream. */
 export interface Ship {
   mmsi: number
@@ -232,15 +270,19 @@ export interface Camera {
   image: string
   /** Live video: an HLS stream (Caltrans) or a short clip refreshed every few minutes (TfL). */
   video?: { url: string; kind: 'hls' | 'clip' } | undefined
+  /** An embeddable player page (Windy webcams: live stream or today's timelapse). */
+  player?: { url: string; kind: 'live' | 'timelapse' } | undefined
+  /** The camera's own page. */
+  link?: string | undefined
 }
 
 /** Where official public cameras are available without a key. */
-export const CAMERA_COVERAGE = 'London (TfL), California (Caltrans), Finland (Fintraffic), Hong Kong (Transport Department), Singapore (LTA)'
+export const CAMERA_COVERAGE = 'London (TfL), California (Caltrans), Finland (Fintraffic), New Zealand (NZTA), Hong Kong (Transport Department), Singapore (LTA)'
 
 /** Each agency's own format into one list. Unknown or broken entries are skipped. */
 const httpsVideo = (v: unknown, kind: 'hls' | 'clip') => (typeof v === 'string' && /^https:\/\/[^\s]+\.(m3u8|mp4)$/.test(v) ? { url: v, kind } : undefined)
 
-export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; finland?: unknown; hongKong?: string; singapore?: unknown }): Camera[] => {
+export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; finland?: unknown; nz?: unknown; hongKong?: string; singapore?: unknown }): Camera[] => {
   const out: Camera[] = []
   const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN)
   const push = (c: Camera) => {
@@ -269,6 +311,11 @@ export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; f
     if (!preset) continue
     push({ id: `fi:${preset.id}`, name: String(props.name ?? 'Road weather camera').replace(/_/g, ' '), lat: num(coords[1]), lon: num(coords[0]), country: 'Finland', source: 'Fintraffic Digitraffic (CC BY 4.0)', image: `https://weathercam.digitraffic.fi/${preset.id}.jpg` })
   }
+  for (const f of ((raw.nz as { features?: { properties?: Record<string, unknown> }[] })?.features ?? [])) {
+    const p = f.properties ?? {}
+    if (p.Offline === 1 || p.UnderMaintenance === 1) continue
+    push({ id: `nz:${String(p.id ?? p.ExternalId)}`, name: [p.Name, p.Direction].filter(Boolean).join(' · ') || 'New Zealand camera', lat: num(p.Latitude), lon: num(p.Longitude), country: 'New Zealand', source: 'NZ Transport Agency Waka Kotahi', image: String(p.ImageUrl ?? '') })
+  }
   const xml = raw.hongKong ?? ''
   const tag = (block: string, t: string) => new RegExp(`<${t}>([^<]*)</${t}>`).exec(block)?.[1]?.trim() ?? ''
   for (const block of xml.split('<image>').slice(1)) {
@@ -279,6 +326,53 @@ export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; f
     push({ id: `sg:${String(c.camera_id)}`, name: `Singapore traffic camera ${String(c.camera_id)}`, lat: num(loc.latitude), lon: num(loc.longitude), country: 'Singapore', source: 'Land Transport Authority (data.gov.sg)', image: String(c.image ?? '') })
   }
   return out
+}
+
+/** Windy Webcams map clusters (API v3, the owner's own free key): cameras for one map view. */
+export const parseWindyClusters = (j: unknown): Camera[] => {
+  const out: Camera[] = []
+  for (const w of Array.isArray(j) ? (j as Record<string, unknown>[]) : []) {
+    if (w.status !== 'active') continue
+    const loc = (w.location as Record<string, unknown> | undefined) ?? {}
+    const img = ((w.images as Record<string, unknown> | undefined)?.current as Record<string, unknown> | undefined) ?? {}
+    const player = (w.player as Record<string, unknown> | undefined) ?? {}
+    const https = (v: unknown) => (typeof v === 'string' && v.startsWith('https://') ? v : undefined)
+    const live = https(player.live)
+    const day = https(player.day)
+    const lat = typeof loc.latitude === 'number' ? loc.latitude : NaN
+    const lon = typeof loc.longitude === 'number' ? loc.longitude : NaN
+    const image = https(img.preview) ?? https(img.thumbnail) ?? ''
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !image) continue
+    out.push({
+      id: `wc:${String(w.webcamId)}`,
+      name: String(w.title ?? [loc.city, loc.country].filter(Boolean).join(', ') ?? 'Webcam'),
+      lat,
+      lon,
+      country: String(loc.country ?? ''),
+      source: 'Windy Webcams',
+      image,
+      player: live ? { url: live, kind: 'live' } : day ? { url: day, kind: 'timelapse' } : undefined,
+      link: https((w.urls as Record<string, unknown> | undefined)?.detail),
+    })
+  }
+  return out
+}
+
+/**
+ * Windy only answers for a box small enough for its zoom (22.5° by 45° at
+ * zoom 4, half that per step): the view, cut down around its centre to fit.
+ */
+export const windyBox = (b: { south: number; west: number; north: number; east: number }, zoom: number) => {
+  const z = Math.max(4, Math.min(18, Math.round(zoom)))
+  const latSpan = 22.5 / 2 ** (z - 4)
+  const lonSpan = 45 / 2 ** (z - 4)
+  const cLat = (b.south + b.north) / 2
+  const cLon = b.west <= b.east ? (b.west + b.east) / 2 : ((b.west + b.east + 360) / 2 + 180) % 360 - 180
+  const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v))
+  const half = (span: number, want: number) => Math.min(span, Math.abs(want)) / 2
+  const hLat = half(latSpan, b.north - b.south)
+  const hLon = half(lonSpan, b.west <= b.east ? b.east - b.west : b.east + 360 - b.west)
+  return { zoom: z, north: clamp(cLat + hLat, 90), south: clamp(cLat - hLat, 90), east: clamp(cLon + hLon, 180), west: clamp(cLon - hLon, 180) }
 }
 
 export type WorldOp = { kind: 'add'; name: string } | { kind: 'remove'; id: string } | { kind: 'refresh' }
@@ -294,6 +388,8 @@ export const WLD = {
   shipsKey: 'world:ships-key',
   cameras: 'world:cameras',
   cameraImage: 'world:camera-image',
+  webcams: 'world:webcams',
+  webcamsKey: 'world:webcams-key',
   changed: 'world:changed',
 } as const
 
@@ -302,8 +398,8 @@ export interface WorldBridge {
   add(name: string): Promise<WorldSnapshot>
   remove(id: string): Promise<WorldSnapshot>
   refresh(): Promise<WorldSnapshot>
-  /** Aircraft within dist nautical miles (up to 250) of a point. */
-  flights(lat: number, lon: number, dist: number): Promise<Flight[]>
+  /** Aircraft within dist nautical miles (up to 1000) of a point, plus military worldwide; fill asks OpenSky too where coverage is thin. */
+  flights(lat: number, lon: number, dist: number, fill?: boolean): Promise<Flight[]>
   /** The ISS, stations and the brightest satellites. */
   satellites(): Promise<SatelliteElements[]>
   /** Ships in the area on screen (needs the owner's free AISStream key). */
@@ -314,6 +410,10 @@ export interface WorldBridge {
   cameras(): Promise<Camera[]>
   /** A camera's latest frame, fetched by Atlas, as a data URL. */
   cameraImage(id: string): Promise<{ dataUrl: string; at: number }>
+  /** Worldwide webcams in a map view (the owner's free Windy key; zoom 4 and closer). */
+  webcams(box: { south: number; west: number; north: number; east: number }, zoom: number): Promise<{ status: 'no-key' | 'ok' | 'error'; cameras: Camera[]; message: string | null }>
+  /** Saves the Windy Webcams key in the Windows credential store (null removes it). */
+  setWebcamsKey(key: string | null): Promise<{ hasKey: boolean }>
   onChanged(cb: (s: WorldSnapshot) => void): () => void
 }
 

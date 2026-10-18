@@ -258,12 +258,14 @@ const world: WorldBridge = {
   add: name => ipcRenderer.invoke(WLD.add, name),
   remove: id => ipcRenderer.invoke(WLD.remove, id),
   refresh: () => ipcRenderer.invoke(WLD.refresh),
-  flights: (lat, lon, dist) => ipcRenderer.invoke(WLD.flights, lat, lon, dist),
+  flights: (lat, lon, dist, fill) => ipcRenderer.invoke(WLD.flights, lat, lon, dist, fill === true),
   satellites: () => ipcRenderer.invoke(WLD.satellites),
   ships: box => ipcRenderer.invoke(WLD.ships, box),
   setShipsKey: key => ipcRenderer.invoke(WLD.shipsKey, key),
   cameras: () => ipcRenderer.invoke(WLD.cameras),
   cameraImage: id => ipcRenderer.invoke(WLD.cameraImage, id),
+  webcams: (box, zoom) => ipcRenderer.invoke(WLD.webcams, box, zoom),
+  setWebcamsKey: key => ipcRenderer.invoke(WLD.webcamsKey, key),
   onChanged: cb => subscribe<WorldSnapshot>(WLD.changed, cb),
 }
 contextBridge.exposeInMainWorld('world', world)

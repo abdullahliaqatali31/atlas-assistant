@@ -12,7 +12,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { MAX_PINS, type MapOp, type Pin, type Story } from '../../../shared/map.ts'
 import type { NewsResult } from '../../../shared/news.ts'
-import { CAMERA_COVERAGE, kmBetween, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
+import { CAMERA_COVERAGE, kmBetween, type Camera, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
 import { cleanError, flightFeatures, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
 import { nearbyItems, type NearbyItem } from './hover.ts'
 import { HoverCard } from './HoverCard.tsx'
@@ -95,6 +95,8 @@ export function MapView({
   const fitted = useRef(false)
   const [layers, setLayers] = useState(readLayers)
   const [filters, setFilters] = useState(readFilters)
+  const filtersNow = useRef(filters)
+  filtersNow.current = filters
   /** Orbit elements of the tracked satellites, for the rail's "above you" panel. */
   const satsRef = useRef<{ name: string; rec: satellite.SatRec }[]>([])
   /** Where aircraft and ships have been since the map opened. */
@@ -105,6 +107,11 @@ export function MapView({
   const [shipState, setShipState] = useState<{ status: ShipsResult['status']; message: string | null }>({ status: 'off', message: null })
   const [shipKey, setShipKey] = useState('')
   const [shipKeyError, setShipKeyError] = useState('')
+  /** Worldwide webcams (Windy, the owner's key): status, what is in view, and the key form. */
+  const [webcamState, setWebcamState] = useState<{ status: 'no-key' | 'ok' | 'error'; message: string | null; inView: number }>({ status: 'ok', message: null, inView: 0 })
+  const [webcamKey, setWebcamKey] = useState('')
+  const [webcamKeyError, setWebcamKeyError] = useState('')
+  const [webcamKeyVersion, setWebcamKeyVersion] = useState(0)
   /** Views to go back to, newest last; each fly-to the owner or Atlas asks for adds one. */
   const history = useRef<View[]>([])
   const [canGoBack, setCanGoBack] = useState(false)
@@ -577,7 +584,7 @@ export function MapView({
       const nm = kmBetween({ lat: c.lat, lon: c.lng }, { lat: corner.lat, lon: corner.lng }) / 1.852
       const regional = m.getZoom() >= 3
       try {
-        const flights = await window.world.flights(c.lat, c.lng, regional ? Math.min(1000, Math.ceil(nm)) : 0)
+        const flights = await window.world.flights(c.lat, c.lng, regional ? Math.min(1000, Math.ceil(nm)) : 0, regional && filtersNow.current.openSky)
         if (stopped) return
         trails.current.add(flights.map(f => ({ id: `f:${f.hex}`, lon: f.lon, lat: f.lat })))
         put('flights', flightFeatures(flights))
@@ -601,7 +608,7 @@ export function MapView({
       clearInterval(timer)
       if (debounce) clearTimeout(debounce)
     }
-  }, [ready, layers.flights])
+  }, [ready, layers.flights, filters.openSky])
 
   // Ships in the area on screen (the owner's AISStream key): when the map stops and every 8 s.
   useEffect(() => {
@@ -670,23 +677,65 @@ export function MapView({
     }
   }, [ready, layers.news, filters.newsTypes.join('|')])
 
-  // Public cameras: the list once (only where official open feeds exist).
+  // Public cameras: the official open feeds once, plus (with the owner's free Windy key) the webcams in view.
   useEffect(() => {
     const m = map.current
     if (!m || !ready || !layers.cameras) return
     let stopped = false
-    void window.world.cameras().then(list => {
+    let official: Camera[] = []
+    let windy: Camera[] = []
+    const feature = (c: Camera) => ({
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: [c.lon, c.lat] },
+      properties: {
+        id: c.id,
+        title: c.name,
+        source: c.source,
+        ...(c.video ? { video: c.video.url, videoKind: c.video.kind } : {}),
+        ...(c.player ? { player: c.player.url, playerKind: c.player.kind } : {}),
+        ...(c.link ? { link: c.link } : {}),
+        ...(c.source === 'Windy Webcams' ? { color: '#38bdf8' } : {}),
+      },
+    })
+    const draw = () => {
       if (stopped) return
-      put('cameras', {
-        type: 'FeatureCollection',
-        features: list.map(c => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lon, c.lat] }, properties: { id: c.id, title: c.name, source: c.source, ...(c.video ? { video: c.video.url, videoKind: c.video.kind } : {}) } })),
-      })
-      setCounts(x => ({ ...x, cameras: list.length }))
+      const ids = new Set(official.map(c => c.id))
+      const all = [...official, ...windy.filter(c => !ids.has(c.id))]
+      put('cameras', { type: 'FeatureCollection', features: all.map(feature) })
+      setCounts(x => ({ ...x, cameras: all.length }))
+    }
+    void window.world.cameras().then(list => {
+      official = list
+      draw()
     }, () => undefined)
+    const loadWindy = async () => {
+      if (stopped || document.hidden) return
+      const b = m.getBounds()
+      const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
+      try {
+        const r = await window.world.webcams({ south: clamp(b.getSouth(), 90), north: clamp(b.getNorth(), 90), west: clamp(b.getWest(), 180), east: clamp(b.getEast(), 180) }, m.getZoom())
+        if (stopped) return
+        setWebcamState({ status: r.status, message: r.message, inView: r.cameras.length })
+        if (r.status === 'no-key') return
+        windy = r.cameras
+        draw()
+      } catch {
+        setWebcamState(w => ({ ...w, status: 'error', message: 'Webcams unavailable right now.' }))
+      }
+    }
+    void loadWindy()
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const onMove = () => {
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => void loadWindy(), 800)
+    }
+    m.on('moveend', onMove)
     return () => {
       stopped = true
+      m.off('moveend', onMove)
+      if (debounce) clearTimeout(debounce)
     }
-  }, [ready, layers.cameras])
+  }, [ready, layers.cameras, webcamKeyVersion])
 
   // Satellites: orbit elements once, positions every 2 s.
   useEffect(() => {
@@ -717,6 +766,42 @@ export function MapView({
     }
   }, [ready, layers.satellites])
 
+  const saveWebcamKey = async (key: string | null) => {
+    setWebcamKeyError('')
+    try {
+      const r = await window.world.setWebcamsKey(key)
+      setWebcamKey('')
+      setWebcamState(w => ({ ...w, status: r.hasKey ? 'ok' : 'no-key', message: null }))
+      setWebcamKeyVersion(v => v + 1)
+    } catch (err) {
+      setWebcamKeyError(cleanError(err) || 'Could not save the key.')
+    }
+  }
+  /** The owner's Windy Webcams key, for worldwide webcams; shown in the Cameras panel. */
+  const webcamKeyForm = (
+    <form
+      className="space-y-1 pt-1"
+      onSubmit={e => {
+        e.preventDefault()
+        if (webcamKey.trim()) void saveWebcamKey(webcamKey.trim())
+      }}
+    >
+      <p className="text-[10px] leading-snug text-muted">
+        Add webcams from all over the world with your free Windy key ({' '}
+        <a href="https://api.windy.com/keys" target="_blank" rel="noreferrer" className="text-accent underline">
+          get one
+        </a>
+        , choose Webcams API). They load for the area you look at, zoomed in to a country or closer.
+      </p>
+      <div className="flex gap-1">
+        <input type="password" autoComplete="off" spellCheck={false} className="field min-w-0 flex-1 py-0.5 text-[11px]" placeholder="Paste Windy Webcams key" value={webcamKey} onChange={e => setWebcamKey(e.target.value)} aria-label="Windy Webcams API key" />
+        <button type="submit" className="btn h-6 px-2 text-[11px]" disabled={!webcamKey.trim()}>
+          Save
+        </button>
+      </div>
+      {webcamKeyError && <p className="text-[10px] text-danger">{webcamKeyError}</p>}
+    </form>
+  )
   const needsShipKey = shipState.status === 'no-key' || (shipState.status === 'error' && /key/i.test(shipState.message ?? ''))
   /** The owner's AISStream key form: in the Layers popover and in the Ships panel on the rail. */
   const shipKeyForm = (className: string) => (
@@ -800,6 +885,8 @@ export function MapView({
             flightNote,
             shipNote: shipState.status === 'connecting' ? 'Connecting to AISStream… ships appear as they report.' : shipState.status === 'error' && !needsShipKey ? shipState.message : null,
             shipKeyForm: needsShipKey ? shipKeyForm('pt-1') : null,
+            webcamNote: webcamState.status === 'error' ? webcamState.message : webcamState.status === 'ok' && webcamState.inView ? `${webcamState.inView} worldwide webcams in this view (Windy)` : webcamState.message,
+            webcamKeyForm: webcamState.status === 'no-key' ? webcamKeyForm : null,
             now,
             onFocus: (kind, f) => {
               const lngLat = f.geometry.coordinates as [number, number]
@@ -829,7 +916,12 @@ export function MapView({
         />
       )}
       {toolbar(controls)}
-      <MapCredit parts={creditLine(prefs.style, LAYERS.filter(l => layers[l.id]).map(l => l.id))} />
+      <MapCredit
+        parts={creditLine(prefs.style, LAYERS.filter(l => layers[l.id]).map(l => l.id), [
+          ...(layers.cameras && webcamState.inView ? [{ text: 'Webcams Windy.com', href: 'https://www.windy.com/webcams' }] : []),
+          ...(layers.flights && filters.openSky ? [{ text: 'OpenSky Network', href: 'https://opensky-network.org' }] : []),
+        ])}
+      />
       {styleError && <p className="glass absolute bottom-16 left-2 z-10 rounded-lg bg-solid/85 px-2 py-1 text-[11px] text-warm">{styleError}</p>}
       {open === 'style' && (
         <fieldset className="ask-pop glass absolute left-2 top-12 z-20 w-[min(280px,calc(100%-1rem))] space-y-0.5 rounded-xl bg-solid/90 p-1.5 text-xs shadow-2xl">

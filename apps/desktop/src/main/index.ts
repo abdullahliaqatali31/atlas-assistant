@@ -346,7 +346,7 @@ const fromOurWindow = (e: IpcMainInvokeEvent) => {
   return win !== null && e.sender === win.webContents && (isDev ? url.startsWith(process.env.ELECTRON_RENDERER_URL!) : url.startsWith('file://'))
 }
 
-const handle = <T>(channel: string, fn: (arg: unknown, arg2: unknown, arg3?: unknown) => T | Promise<T>) =>
+const handle = <T>(channel: string, fn: (arg: unknown, arg2: unknown, arg3?: unknown, arg4?: unknown) => T | Promise<T>) =>
   ipcMain.handle(channel, gateIpc(channel, fn, { fromOurWindow, requireOwner: () => requireOwner() }))
 
 handle(CH.status, () => status)

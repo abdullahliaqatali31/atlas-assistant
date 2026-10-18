@@ -148,7 +148,7 @@ const LAYER_CREDIT: Record<string, CreditPart> = {
  * The map's own small credit line: imagery, base map (OpenStreetMap's
  * licence asks for a visible credit with a link), then the live layers on.
  */
-export const creditLine = (id: StyleId, layersOn: readonly string[]): CreditPart[] => [
+export const creditLine = (id: StyleId, layersOn: readonly string[], extra: readonly CreditPart[] = []): CreditPart[] => [
   ...(id === 'satellite'
     ? [{ text: 'Imagery © EOX Sentinel-2 cloudless 2016', href: 'https://s2maps.eu' }]
     : id === 'today'
@@ -160,6 +160,7 @@ export const creditLine = (id: StyleId, layersOn: readonly string[]): CreditPart
   { text: '© OpenMapTiles', href: 'https://www.openmaptiles.org' },
   { text: '© OpenStreetMap contributors', href: 'https://www.openstreetmap.org/copyright' },
   ...layersOn.flatMap(l => (LAYER_CREDIT[l] ? [LAYER_CREDIT[l]] : [])),
+  ...extra,
 ]
 
 /**

@@ -49,6 +49,10 @@ export interface RailContext {
   shipNote: string | null
   /** The AISStream key form, when ships need one. */
   shipKeyForm: ReactNode
+  /** Worldwide webcams in view, or why not. */
+  webcamNote: string | null
+  /** The Windy key form, when there is no key yet. */
+  webcamKeyForm: ReactNode
   now: number
   onFocus: (kind: LayerId, f: Feature) => void
   onFly: (lat: number, lon: number, zoom: number) => void
@@ -182,7 +186,9 @@ function NowTab({ id, ctx }: { id: LayerId; ctx: RailContext }) {
           <p className="px-1.5 text-xs">
             <span className="font-mono text-base">{all.length}</span> public cameras
           </p>
-          <p className="px-1.5 text-[10px] leading-snug text-muted">Official open feeds only: {CAMERA_COVERAGE}</p>
+          <p className="px-1.5 text-[10px] leading-snug text-muted">Official traffic cameras: {CAMERA_COVERAGE}. California plays live video, London recent clips.</p>
+          {ctx.webcamNote && <p className="px-1.5 pt-1 text-[11px] text-accent">{ctx.webcamNote}</p>}
+          {ctx.webcamKeyForm && <div className="px-1.5">{ctx.webcamKeyForm}</div>}
           {all.length > 0 && <Label>Nearest the map centre</Label>}
           <ul>{nearest(6).map(f => <Row key={String(f.properties.id)} f={f} kind={id} onFocus={ctx.onFocus} />)}</ul>
         </>
@@ -283,9 +289,18 @@ function FiltersTab({ id, ctx }: { id: LayerId; ctx: RailContext }) {
   switch (id) {
     case 'flights':
       return (
-        <label className="flex items-center gap-2 px-1.5 py-1 text-xs">
-          <input type="checkbox" checked={f.militaryOnly} onChange={() => ctx.onFilters({ ...f, militaryOnly: !f.militaryOnly })} /> Military aircraft only
-        </label>
+        <div className="space-y-2 px-1.5 text-xs">
+          <label className="flex items-center gap-2 py-0.5">
+            <input type="checkbox" checked={f.militaryOnly} onChange={() => ctx.onFilters({ ...f, militaryOnly: !f.militaryOnly })} /> Military aircraft only
+          </label>
+          <label className="flex items-start gap-2 py-0.5">
+            <input type="checkbox" className="mt-0.5" checked={f.openSky} onChange={() => ctx.onFilters({ ...f, openSky: !f.openSky })} />
+            <span>
+              Fill gaps with OpenSky
+              <span className="block text-[10px] text-muted">Where the default network sees few planes (Pakistan, much of Asia and Africa). OpenSky is free for personal, non-commercial use; Atlas asks it at most every 3 minutes.</span>
+            </span>
+          </label>
+        </div>
       )
     case 'ships':
       return (
