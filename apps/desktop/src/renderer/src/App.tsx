@@ -1,4 +1,4 @@
-import { Brain, FolderKanban, FolderOpen, LayoutDashboard, MessageSquare, Newspaper, Settings2, SlidersHorizontal } from 'lucide-react'
+import { AppWindow, Brain, FolderKanban, FolderOpen, LayoutDashboard, MessageSquare, Newspaper, Settings2, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import type { ControlState } from '../../shared/control.ts'
@@ -7,6 +7,7 @@ import type { RuntimeStatus } from '../../shared/ipc.ts'
 import logo from './assets/logo.svg'
 import { Companion } from './Companion.tsx'
 import { Controls, PausedBanner } from './Controls.tsx'
+import { AppsPage } from './Apps.tsx'
 import { FilesPage } from './Files.tsx'
 import { Home } from './Home.tsx'
 import type { Presence } from './Jarvis.tsx'
@@ -17,7 +18,7 @@ import { ProjectsHome } from './ProjectsHome.tsx'
 import { SetupSections } from './Personality.tsx'
 import { Setup } from './Setup.tsx'
 
-type View = 'home' | 'news' | 'projects' | 'files' | 'learning' | 'controls' | 'setup'
+type View = 'home' | 'news' | 'projects' | 'files' | 'apps' | 'learning' | 'controls' | 'setup'
 
 /** Wide enough for the canvas and the chat side by side; narrower, the chat slides over the canvas. */
 const WIDE = '(min-width: 1100px)'
@@ -117,6 +118,7 @@ export function App() {
     ['news', 'News', <Newspaper key="n" className="size-[18px]" />],
     ['projects', 'Projects', <FolderKanban key="p" className="size-[18px]" />],
     ['files', 'Files', <FolderOpen key="f" className="size-[18px]" />],
+    ['apps', 'Apps', <AppWindow key="a" className="size-[18px]" />],
     [
       'learning',
       suggestions ? `Learning (${suggestions} waiting)` : 'Learning',
@@ -168,6 +170,7 @@ export function App() {
             {view === 'news' && <NewsPage />}
             {view === 'projects' && <ProjectsHome />}
             {view === 'files' && <FilesPage onTalk={() => openChat(true)} />}
+            {view === 'apps' && <AppsPage onTalk={() => openChat(true)} />}
             {view === 'learning' && <Learning onTalk={() => openChat(true)} />}
             {view === 'controls' && controls && <Controls state={controls} onBack={() => go('home')} />}
             {view === 'setup' && (status.phase === 'ready' ? <SetupSections connection={setup} onClose={() => go('home')} /> : setup)}

@@ -8,6 +8,7 @@ import { isLlmProvider, type LlmProviderId } from '@assistant/providers/llm-pres
 
 import type { ActivityHostEvent, ActivityHostRequest } from './activity.ts'
 import type { CodeOp, CodeProjectView, RunView } from './code.ts'
+import type { DesktopOp } from './desktop.ts'
 import type { FileOp } from './files.ts'
 import type { ControlHostEvent, ControlHostRequest } from './control.ts'
 import type { PersonalityHostEvent, PersonalityHostRequest } from './personality.ts'
@@ -338,6 +339,8 @@ export type HostRequest =
   | { type: 'code-result'; requestId: string; result?: string | undefined; error?: string | undefined }
   /** Answer to a file tool's request. */
   | { type: 'files-result'; requestId: string; result?: string | undefined; error?: string | undefined }
+  /** Answer to a desktop-app tool's request. */
+  | { type: 'desktop-result'; requestId: string; result?: string | undefined; error?: string | undefined }
   | ControlHostRequest
   | PersonalityHostRequest
   | ActivityHostRequest
@@ -366,6 +369,8 @@ export type HostEvent =
   | { type: 'code-minutes'; minutes: Record<string, number> }
   /** A file tool asks main to list, search, read, move, organise, recycle or undo inside the chosen folders. */
   | { type: 'files'; requestId: string; op: FileOp }
+  /** A desktop-app tool asks main to open, read or control one of the owner's chosen apps. */
+  | { type: 'desktop'; requestId: string; op: DesktopOp }
   | ControlHostEvent
   | PersonalityHostEvent
   | ActivityHostEvent

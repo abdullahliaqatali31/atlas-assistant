@@ -50,6 +50,8 @@ News comes from public RSS feeds, refreshed every 30 minutes, with each story's 
 
 Files: Atlas looks after only the folders you add in Files, read-only until you allow organising. It can list, search and read text files, move, rename and copy, make folders, tidy loose files by type, month or year (plan first), and remove to the Recycle Bin (always asks). Nothing is overwritten or permanently deleted, and every change has Undo in Files. File routines are taught like any task ("every Friday tidy Downloads").
 
+Apps: Atlas uses desktop apps you add in Apps through Windows UI Automation (the accessibility interface screen readers use), driven by a small worker built from Windows PowerShell and a C# helper that ship with Windows. Per app you choose open, read the screen, or control (click, type, keys). Send, Delete, Pay, Call and similar buttons, Enter in chat apps and select-all wipes always ask; typing is read back and checked; password fields are never read or typed. Terminals, system tools, Windows security, password managers and browsers are never controllable. WhatsApp Desktop has its own tools: chat list and unread, read a chat, and send, which opens the chat by search, checks the message box names that person before typing, and asks you each time with the exact text. Teach by showing: Watch me records your clicks and typing in the chosen apps (never passwords) and turns them into a task. Reading an app sends what it shows to your AI provider. Live check: `ATLAS_LIVE=1 pnpm vitest run apps/desktop/src/main/desktop/desktop.live.test.ts` (Notepad on a fresh tab, WhatsApp read-only).
+
 ## Layout
 
 ```text

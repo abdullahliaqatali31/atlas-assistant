@@ -60,6 +60,7 @@ export interface SupervisorDeps {
   /** Code-project requests from the model's tools, and measured VS Code minutes. */
   onCode?: (e: Extract<HostEvent, { type: 'code' | 'code-minutes' }>) => void
   onFiles?: (e: Extract<HostEvent, { type: 'files' }>) => void
+  onDesktop?: (e: Extract<HostEvent, { type: 'desktop' }>) => void
 }
 
 const STABLE_MS = 60_000
@@ -291,8 +292,8 @@ export class RuntimeSupervisor {
     return true
   }
 
-  /** File tool answers. */
-  files(msg: Extract<HostRequest, { type: 'files-result' }>): boolean {
+  /** File and desktop-app tool answers. */
+  files(msg: Extract<HostRequest, { type: 'files-result' | 'desktop-result' }>): boolean {
     if (!this.child) return false
     this.post(msg)
     return true
@@ -408,6 +409,9 @@ export class RuntimeSupervisor {
         break
       case 'files':
         this.deps.onFiles?.(e)
+        break
+      case 'desktop':
+        this.deps.onDesktop?.(e)
         break
       case 'log':
         this.deps.log(e.level, e.message)

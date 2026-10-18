@@ -11,6 +11,7 @@ import { IC, type IdentityBridge, type IdentityView } from '../shared/identity.t
 import { LC, type LearningBridge, type LearningView } from '../shared/learning.ts'
 import { BC, type BackupBridge } from '../shared/backup.ts'
 import { KC, type CodeBridge, type CodeState } from '../shared/code.ts'
+import { DC, type DesktopBridge, type DesktopState } from '../shared/desktop.ts'
 import { FC, type FilesBridge, type FilesState } from '../shared/files.ts'
 import { NC, type NewsBridge, type NewsResult } from '../shared/news.ts'
 import { WC, type WakeBridge, type WakeView } from '../shared/wake.ts'
@@ -219,3 +220,15 @@ const files: FilesBridge = {
   onChanged: cb => subscribe<FilesState>(FC.changed, cb),
 }
 contextBridge.exposeInMainWorld('files', files)
+
+const desktop: DesktopBridge = {
+  state: () => ipcRenderer.invoke(DC.state),
+  installed: () => ipcRenderer.invoke(DC.installed),
+  add: app => ipcRenderer.invoke(DC.add, app),
+  remove: id => ipcRenderer.invoke(DC.remove, id),
+  setAccess: (id, access) => ipcRenderer.invoke(DC.setAccess, id, access),
+  recordStart: () => ipcRenderer.invoke(DC.recordStart),
+  recordStop: () => ipcRenderer.invoke(DC.recordStop),
+  onChanged: cb => subscribe<DesktopState>(DC.changed, cb),
+}
+contextBridge.exposeInMainWorld('desktop', desktop)

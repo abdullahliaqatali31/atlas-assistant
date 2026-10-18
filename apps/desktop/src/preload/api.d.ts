@@ -2,6 +2,7 @@ import type { ActivityBridge } from '../shared/activity.ts'
 import type { BackupBridge } from '../shared/backup.ts'
 import type { CodeBridge } from '../shared/code.ts'
 import type { ControlBridge } from '../shared/control.ts'
+import type { DesktopBridge } from '../shared/desktop.ts'
 import type { FilesBridge } from '../shared/files.ts'
 import type { IdentityBridge } from '../shared/identity.ts'
 import type { LearningBridge } from '../shared/learning.ts'
@@ -25,5 +26,6 @@ declare global {
     backup: BackupBridge
     code: CodeBridge
     files: FilesBridge
+    desktop: DesktopBridge
   }
 }
