@@ -21,7 +21,7 @@ const WINDY = [
 
 const memoryStore = (): CredentialStore => {
   const m = new Map<string, string>()
-  return { get: k => m.get(k) ?? null, set: (k, v) => void m.set(k, v), delete: k => void m.delete(k) } as unknown as CredentialStore
+  return { get: (k: string) => m.get(k) ?? null, set: (k: string, v: string) => void m.set(k, v), delete: (k: string) => void m.delete(k) } as unknown as CredentialStore
 }
 
 describe('Windy webcams', () => {
