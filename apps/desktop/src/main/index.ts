@@ -30,6 +30,7 @@ import { Controls } from './controls.ts'
 import { DesktopService } from './desktop/service.ts'
 import { FileService } from './files/service.ts'
 import { UiService } from './ui.ts'
+import { WorldService } from './world.ts'
 import { IdentityGate } from './identity.ts'
 import { registerBackupIpc } from './backup.ts'
 import { CodeService } from './code/service.ts'
@@ -185,6 +186,7 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
     usage = u
     toRenderer(CH.usageChanged, u)
   },
+  onWorld: e => world.onHostEvent(e),
   onUi: e => {
     // The model's window tools.
     void ui.handleOp(e.op).then(
@@ -360,7 +362,7 @@ const news = new NewsService({
   onChange: r => {
     toRenderer(NC.changed, r)
     // The assistant can tell the owner the news; feed text is untrusted.
-    supervisor.news(r.headlines.slice(0, 40).map(h => ({ title: h.title, source: h.source, category: h.category, publishedAt: h.publishedAt, summary: h.summary })))
+    supervisor.news(r.headlines.slice(0, 40).map(h => ({ title: h.title, source: h.source, category: h.category, publishedAt: h.publishedAt, summary: h.summary, link: h.link })))
   },
 })
 news.register(handle, () => requireOwner())
@@ -398,6 +400,9 @@ const ui = new UiService({
   onChange: state => supervisor.ui(state),
 })
 ui.register()
+/** The live world at the owner's places, for the World page. */
+const world = new WorldService({ handle, toRenderer, toRuntime: msg => supervisor.world(msg), requireOwner: () => requireOwner() })
+world.register()
 handle(CH.send, arg => {
   const text = parseMessage(arg)
   if (text === null) throw new Error('Message must be non-empty text under 8000 characters.')

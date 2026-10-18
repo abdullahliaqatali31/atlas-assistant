@@ -62,6 +62,7 @@ export interface SupervisorDeps {
   onFiles?: (e: Extract<HostEvent, { type: 'files' }>) => void
   onDesktop?: (e: Extract<HostEvent, { type: 'desktop' }>) => void
   onUi?: (e: Extract<HostEvent, { type: 'ui' }>) => void
+  onWorld?: (e: Extract<HostEvent, { type: 'world' | 'world-result' }>) => void
 }
 
 const STABLE_MS = 60_000
@@ -300,6 +301,13 @@ export class RuntimeSupervisor {
     if (this.child) this.post({ type: 'ui-snapshot', state })
   }
 
+  /** World page requests. */
+  world(msg: Extract<HostRequest, { type: 'world-op' }>): boolean {
+    if (!this.child) return false
+    this.post(msg)
+    return true
+  }
+
   /** File, desktop-app and window tool answers. */
   files(msg: Extract<HostRequest, { type: 'files-result' | 'desktop-result' | 'ui-result' }>): boolean {
     if (!this.child) return false
@@ -424,6 +432,10 @@ export class RuntimeSupervisor {
         break
       case 'ui':
         this.deps.onUi?.(e)
+        break
+      case 'world':
+      case 'world-result':
+        this.deps.onWorld?.(e)
         break
       case 'log':
         this.deps.log(e.level, e.message)

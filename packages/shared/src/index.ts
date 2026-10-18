@@ -43,6 +43,8 @@ export type SourceKind =
   | 'browser'
   | 'file'
   | 'mcp'
+  /** Open public data on the web (weather, earthquakes, news feeds). */
+  | 'web'
 
 export interface SourceRef {
   kind: SourceKind

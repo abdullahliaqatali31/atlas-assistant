@@ -5,6 +5,7 @@ import type { ControlBridge } from '../shared/control.ts'
 import type { DesktopBridge } from '../shared/desktop.ts'
 import type { FilesBridge } from '../shared/files.ts'
 import type { UiBridge } from '../shared/ui.ts'
+import type { WorldBridge } from '../shared/world.ts'
 import type { IdentityBridge } from '../shared/identity.ts'
 import type { LearningBridge } from '../shared/learning.ts'
 import type { AssistantBridge } from '../shared/ipc.ts'
@@ -29,5 +30,6 @@ declare global {
     files: FilesBridge
     desktop: DesktopBridge
     ui: UiBridge
+    world: WorldBridge
   }
 }

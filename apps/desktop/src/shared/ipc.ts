@@ -11,6 +11,7 @@ import type { CodeOp, CodeProjectView, RunView } from './code.ts'
 import type { DesktopOp } from './desktop.ts'
 import type { FileOp } from './files.ts'
 import type { UiOp, UiState } from './ui.ts'
+import type { WorldOp, WorldSnapshot } from './world.ts'
 import type { ControlHostEvent, ControlHostRequest } from './control.ts'
 import type { PersonalityHostEvent, PersonalityHostRequest } from './personality.ts'
 import type { LearningHostEvent, LearningHostRequest } from './learning.ts'
@@ -336,12 +337,14 @@ export type HostRequest =
   | { type: 'initiative-action'; id: string; action: InitiativeAction }
   | { type: 'shutdown' }
   /** Headlines for the assistant's news tool (untrusted feed text). */
-  | { type: 'news-snapshot'; headlines: { title: string; source: string; category: string; publishedAt: number | null; summary: string }[] }
+  | { type: 'news-snapshot'; headlines: { title: string; source: string; category: string; publishedAt: number | null; summary: string; link?: string | undefined }[] }
   /** Code projects: the latest scan and running servers, pushed by main after every change. */
   | { type: 'code-snapshot'; projects: CodeProjectView[]; running: RunView[] }
   | { type: 'code-result'; requestId: string; result?: string | undefined; error?: string | undefined }
   /** Answer to a file tool's request. */
   | { type: 'files-result'; requestId: string; result?: string | undefined; error?: string | undefined }
+  /** The World page asks the runtime to add or remove a place, or refresh. */
+  | { type: 'world-op'; requestId: string; op: WorldOp }
   /** Atlas's own window, pushed by main whenever it changes. */
   | { type: 'ui-snapshot'; state: UiState }
   /** Answer to a window tool's request. */
@@ -376,6 +379,10 @@ export type HostEvent =
   | { type: 'code-minutes'; minutes: Record<string, number> }
   /** A file tool asks main to list, search, read, move, organise, recycle or undo inside the chosen folders. */
   | { type: 'files'; requestId: string; op: FileOp }
+  /** The latest live-world snapshot, for the World page. */
+  | { type: 'world'; snapshot: WorldSnapshot }
+  /** Answer to a World page request. */
+  | { type: 'world-result'; requestId: string; error?: string | undefined }
   /** A window tool asks main to describe or change Atlas's own window. */
   | { type: 'ui'; requestId: string; op: UiOp }
   /** A desktop-app tool asks main to open, read or control one of the owner's chosen apps. */

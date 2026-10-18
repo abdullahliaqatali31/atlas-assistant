@@ -1,4 +1,4 @@
-import { AppWindow, Brain, FolderKanban, FolderOpen, LayoutDashboard, Maximize2, MessageSquare, Minimize2, Newspaper, Pin, PinOff, Settings2, SlidersHorizontal } from 'lucide-react'
+import { AppWindow, Brain, FolderKanban, FolderOpen, Globe2, LayoutDashboard, Maximize2, MessageSquare, Minimize2, Newspaper, Pin, PinOff, Settings2, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import type { ControlState } from '../../shared/control.ts'
@@ -11,6 +11,7 @@ import { Controls, PausedBanner } from './Controls.tsx'
 import { AppsPage } from './Apps.tsx'
 import { FilesPage } from './Files.tsx'
 import { Home } from './Home.tsx'
+import { WorldPage } from './World.tsx'
 import type { Presence } from './Jarvis.tsx'
 import { Learning } from './Learning.tsx'
 import { LockScreen } from './LockScreen.tsx'
@@ -144,6 +145,7 @@ export function App() {
   const locked = identity?.locked === true
   const nav: [View, string, ReactNode][] = [
     ['home', 'Home', <LayoutDashboard key="h" className="size-[18px]" />],
+    ['world', 'World', <Globe2 key="w" className="size-[18px]" />],
     ['news', 'News', <Newspaper key="n" className="size-[18px]" />],
     ['projects', 'Projects', <FolderKanban key="p" className="size-[18px]" />],
     ['files', 'Files', <FolderOpen key="f" className="size-[18px]" />],
@@ -226,6 +228,7 @@ export function App() {
               {controls && <PausedBanner state={controls} />}
               <div className="min-h-0 flex-1">
                 {view === 'home' && <Home status={status} controls={controls} presence={presence} ownerName={status.setup.ownerName} go={go} />}
+                {view === 'world' && <WorldPage />}
                 {view === 'news' && <NewsPage />}
                 {view === 'projects' && <ProjectsHome />}
                 {view === 'files' && <FilesPage onTalk={() => openChat(true)} />}

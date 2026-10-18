@@ -6,7 +6,7 @@
 import type { Rule } from '@assistant/policy'
 import type { RuntimeTool } from '@assistant/runtime'
 
-export type NewsItem = { title: string; source: string; category: string; publishedAt: number | null; summary: string }
+export type NewsItem = { title: string; source: string; category: string; publishedAt: number | null; summary: string; link?: string | undefined }
 
 export const NEWS_RULES: Rule[] = [{ id: 'default-news_headlines', tool: 'news_headlines', actionClass: 'observe', effect: 'allow' }]
 
@@ -15,6 +15,14 @@ export class HostNews {
 
   set(items: NewsItem[]) {
     this.items = items
+  }
+
+  /** Headlines from the owner's feeds that mention a place, for the World page. */
+  mentions(place: string): { title: string; url: string; domain: string; time: number; language: string }[] {
+    const n = place.toLowerCase()
+    return this.items
+      .filter(h => h.link?.startsWith('https://') && `${h.title} ${h.summary}`.toLowerCase().includes(n))
+      .map(h => ({ title: h.title, url: h.link!, domain: h.source, time: h.publishedAt ?? 0, language: '' }))
   }
 
   tool(now: () => number): RuntimeTool {

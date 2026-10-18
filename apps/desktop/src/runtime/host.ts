@@ -43,6 +43,7 @@ import { DESKTOP_RULES, HostDesktop } from './desktop.ts'
 import { FILE_RULES, HostFiles } from './files.ts'
 import { HostUi, UI_RULES } from './ui.ts'
 import { IMPROVEMENT_RULES, Improvements } from './improvements.ts'
+import { WORLD_RULES, WorldWatch } from './world.ts'
 import { HostNews, NEWS_RULES } from './news.ts'
 import { HostControls } from './controls.ts'
 import { InitiativeService, parseQuietHours } from './initiative.ts'
@@ -90,7 +91,7 @@ const controls = new HostControls({
   log: (level, message) => log(level, message),
   now: () => systemClock.now(),
   extensionToken: () => store.get('PLAYWRIGHT_MCP_EXTENSION_TOKEN'),
-  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...IMPROVEMENT_RULES],
+  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...IMPROVEMENT_RULES, ...WORLD_RULES],
 })
 let voice: VoiceProvider | null = null
 let speechEnabled = true
@@ -108,6 +109,7 @@ let initiative: InitiativeService | null = null
 /** Opt-in window tracking; settings can arrive from main before the database exists. */
 let activity: HostActivity | null = null
 let learning: HostLearning | null = null
+let world: WorldWatch | null = null
 /** When the owner last sent something; the agenda leaves them room after it. */
 let lastOwnerTurnAt = 0
 /** Sends the cost meter's totals to the window; set once the database is open. */
@@ -191,6 +193,10 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   sttLanguage = sttPin(memory, configuredLanguages)
   for (const t of memory.recoverInterrupted()) log('warn', `"${t.title}" was interrupted last time; it is waiting for verification.`)
   learning?.stop()
+  world?.stop()
+  world = new WorldWatch({ memory, now: () => systemClock.now(), localNews: place => news.mentions(place), publish: snapshot => post({ type: 'world', snapshot }), log: (level, message) => log(level, message) })
+  world.start()
+  const watch = world
   const improvements = new Improvements({ memory, clock: systemClock, writeBrief: (project, file, text) => code.writeBrief(project, file, text) })
   learning = new HostLearning({
     improvements,
@@ -225,11 +231,11 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
     confirm: (tool, input, decision) => (controls.paused ? Promise.resolve(false) : askOwner(tool, input, decision.reason, current?.abort.signal)),
     onAction: n => post({ type: 'action', notice: { tool: n.tool, status: n.status, detail: n.detail === undefined ? undefined : redact(n.detail) } }),
     // Connected calendar/email (read-only connectors) and, when the owner opted in, window activity.
-    briefingSources: () => [...controls.briefingSources(), ...(activity?.briefingSources() ?? []), code.briefingSource()],
+    briefingSources: () => [...controls.briefingSources(), ...(activity?.briefingSources() ?? []), code.briefingSource(), ...(world ? [world.briefingSource()] : [])],
   })
   // Local tools now; MCP servers start in the background and join when ready.
   // Answers to its own questions (project status, learning suggestions) go through these.
-  void controls.attach(assistant, [...localTools(memory, systemClock), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...improvements.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
+  void controls.attach(assistant, [...localTools(memory, systemClock), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
   const agendaMemory = memory
   const wrapUpMinute = parseClock(merged.ASSISTANT_WRAP_UP) ?? 18 * 60
   initiative = new InitiativeService(
@@ -253,6 +259,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
           ...buildAgenda(agendaMemory, now, { utcOffsetMin: config.owner.utcOffsetMin, wrapUpMinute }),
           ...code.agenda(now),
           ...improvements.agenda(now),
+          ...watch.agenda(now),
         ].sort((a, b) => b.priority - a.priority)
       },
     },
@@ -544,6 +551,18 @@ port.on('message', ({ data }: { data: HostRequest }) => {
     case 'ui-snapshot':
       ui.setSnapshot(data.state)
       break
+    case 'world-op': {
+      const { requestId, op } = data
+      if (!world) {
+        post({ type: 'world-result', requestId, error: 'The assistant is not ready yet.' })
+        break
+      }
+      void world.handleOp(op).then(
+        () => post({ type: 'world-result', requestId }),
+        error => post({ type: 'world-result', requestId, error: error instanceof Error ? error.message : String(error) }),
+      )
+      break
+    }
     case 'open-app-result':
       controls.onOpenResult(data.requestId, data.error)
       break
