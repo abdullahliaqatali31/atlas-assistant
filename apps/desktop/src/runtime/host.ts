@@ -84,7 +84,7 @@ let dayOffsetMin = 0
 const code = new HostCode({ post: e => post(e), now: () => systemClock.now() })
 const files = new HostFiles({ post: e => post(e) })
 const desktop = new HostDesktop({ post: e => post(e) })
-const ui = new HostUi({ post: e => post(e) })
+const ui = new HostUi({ post: e => post(e), geocode: name => (world ? world.geocode(name) : Promise.reject(new Error('The assistant is not ready yet.'))) })
 const news = new HostNews()
 const controls = new HostControls({
   post: e => post(e),

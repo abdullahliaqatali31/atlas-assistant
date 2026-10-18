@@ -105,7 +105,7 @@ describe('layer registry', () => {
     expect(new Set(LAYERS.map(l => l.pickRank)).size).toBe(LAYERS.length)
   })
 
-  it('picks your places first, then cameras, flights and ships', () => {
-    expect(PICKABLE.slice(0, 4).map(p => p.kind)).toEqual(['places', 'cameras', 'flights', 'ships'])
+  it('picks Atlas’s pins and your places first, then cameras, flights and ships', () => {
+    expect(PICKABLE.slice(0, 5).map(p => p.kind)).toEqual(['pins', 'places', 'cameras', 'flights', 'ships'])
   })
 })

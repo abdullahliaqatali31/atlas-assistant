@@ -58,6 +58,8 @@ export const hoverInfo = (kind: LayerId, props: Props, world: WorldSnapshot, now
     }
     case 'cameras':
       return { ...base, title, facts: [str(props.source)].filter(Boolean), cameraId: str(props.id) || undefined }
+    case 'pins':
+      return { ...base, title, facts: [str(props.note)].filter(Boolean) }
     case 'flights':
     case 'ships':
     case 'satellites':

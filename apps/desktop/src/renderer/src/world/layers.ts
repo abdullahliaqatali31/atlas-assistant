@@ -5,7 +5,7 @@
  */
 import type { LayerSpecification } from 'maplibre-gl'
 
-export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras'
+export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras' | 'pins'
 
 export interface LayerDef {
   id: LayerId
@@ -157,6 +157,29 @@ export const LAYERS: LayerDef[] = [
         source: 'places',
         layout: { 'text-field': ['get', 'title'], 'text-offset': [0, 1.3], 'text-size': 12, 'text-anchor': 'top' },
         paint: { 'text-color': '#e2e8f0', 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+      },
+    ],
+  },
+  {
+    id: 'pins',
+    label: 'Atlas’s pins',
+    kind: 'Pin',
+    dot: '#f472b6',
+    source: 'pins',
+    pickRank: -1,
+    draw: [
+      {
+        id: 'pins',
+        type: 'circle',
+        source: 'pins',
+        paint: { 'circle-radius': 7, 'circle-color': '#f472b6', 'circle-stroke-width': 2.5, 'circle-stroke-color': '#ffffff' },
+      },
+      {
+        id: 'pin-labels',
+        type: 'symbol',
+        source: 'pins',
+        layout: { 'text-field': ['get', 'title'], 'text-offset': [0, 1.3], 'text-size': 12, 'text-anchor': 'top', 'text-max-width': 12 },
+        paint: { 'text-color': '#fbcfe8', 'text-halo-color': HALO, 'text-halo-width': 1.6 },
       },
     ],
   },

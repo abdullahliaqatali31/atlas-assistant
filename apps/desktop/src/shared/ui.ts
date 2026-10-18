@@ -3,6 +3,7 @@
  * open, compact mode, the window size, and the commands Atlas (or the owner)
  * uses to change them. The page reports its part; main owns the window.
  */
+import type { MapOp } from './map.ts'
 
 export const VIEWS = ['home', 'world', 'alerts', 'today', 'news', 'projects', 'files', 'apps', 'learning', 'controls', 'setup'] as const
 export type View = (typeof VIEWS)[number]
@@ -58,7 +59,8 @@ export interface UiChange {
   pinned?: boolean | undefined
 }
 
-export type UiOp = { kind: 'state' } | { kind: 'set'; change: UiChange }
+/** The model's window tools; map ops drive the World map (shared/map.ts). */
+export type UiOp = { kind: 'state' } | { kind: 'set'; change: UiChange } | { kind: 'map'; op: MapOp }
 
 /** Page-side commands main sends (view, chat, compact). */
 export interface PageCommand {

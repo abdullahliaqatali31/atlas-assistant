@@ -10,12 +10,14 @@ import maplibregl, { type GeoJSONSource, type Map as MapLibre, type StyleSpecifi
 import * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
+import { MAX_PINS, type MapOp, type Pin } from '../../../shared/map.ts'
 import { CAMERA_COVERAGE, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
 import { cleanError, flightFeatures, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
 import { nearbyItems, type NearbyItem } from './hover.ts'
 import { HoverCard } from './HoverCard.tsx'
 import type { Selected } from './Inspector.tsx'
-import { LAYERS, OWN_SOURCES, PICKABLE, readLayers, SELECTED_LAYER, type LayerId } from './layers.ts'
+import { layerDef, LAYERS, OWN_SOURCES, PICKABLE, readLayers, SELECTED_LAYER, type LayerId } from './layers.ts'
+import { describeFound, describeVisible, findItems, pinFeatures, ZOOM_FOR } from './mapops.ts'
 import { pickAt } from './pick.ts'
 import { BASE_URL, carryOverlays, composeStyle, creditLine, STYLES, type CreditPart, type StyleId } from './styles.ts'
 
@@ -200,6 +202,114 @@ export function MapView({
     setCanGoBack(history.current.length > 0)
     m.flyTo({ ...v, duration: isLite() ? 0 : 900 })
   }
+
+  // ── The assistant's map ops (map_* tools): run here, answered in words ──
+
+  const pins = useRef<Pin[]>([])
+  const now$ = useRef({ prefs, layers, selected, globe })
+  now$.current = { prefs, layers, selected, globe }
+
+  /** Fly and wait until the map settles (or a few seconds pass), keeping the view for Back. */
+  const fly = (m: MapLibre, to: { center?: [number, number]; zoom?: number }) =>
+    new Promise<void>(resolve => {
+      history.current = [...history.current, viewOf(m)].slice(-20)
+      setCanGoBack(true)
+      const done = setTimeout(resolve, 3_500)
+      m.once('moveend', () => {
+        clearTimeout(done)
+        resolve()
+      })
+      m.flyTo({ ...to, duration: isLite() ? 0 : 1_400, essential: true })
+    })
+
+  const runOp = async (op: MapOp): Promise<string> => {
+    const m = map.current
+    if (!m) throw new Error('The map is not ready yet.')
+    const { prefs: p, layers: on, selected: sel, globe: isGlobe } = now$.current
+    const showLayer = (id: LayerId) => !on[id] && setLayers(x => ({ ...x, [id]: true }))
+    switch (op.kind) {
+      case 'view': {
+        if (op.style !== undefined || op.globe !== undefined) onPrefs({ style: op.style ?? p.style, globe: op.globe ?? p.globe })
+        if (op.lat !== undefined && op.lon !== undefined) await fly(m, { center: [op.lon, op.lat], zoom: op.zoom ?? Math.max(m.getZoom(), 6) })
+        else if (op.zoom !== undefined) await fly(m, { zoom: op.zoom })
+        const style = op.style ?? p.style
+        const wantsGlobe = op.globe ?? p.globe
+        const where = op.label ?? (op.lat !== undefined ? `${op.lat.toFixed(2)}, ${op.lon!.toFixed(2)}` : 'the same place')
+        return `Showing ${where} at zoom ${m.getZoom().toFixed(1)} on the ${STYLES.find(s => s.id === style)?.label ?? style} map${wantsGlobe ? (isLite() ? ' (Lite mode keeps it flat, not a globe)' : ' as a globe') : ''}.`
+      }
+      case 'layers': {
+        setLayers(x => {
+          const next = { ...x }
+          for (const id of op.show) next[id] = true
+          for (const id of op.hide) next[id] = false
+          return next
+        })
+        const after = LAYERS.filter(l => (op.show.includes(l.id) ? true : op.hide.includes(l.id) ? false : on[l.id])).map(l => l.id)
+        return `Layers on now: ${after.join(', ') || 'none'}.`
+      }
+      case 'visible': {
+        const b = m.getBounds()
+        const c = m.getCenter()
+        return describeVisible(
+          latest.current,
+          { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() },
+          { center: [c.lng, c.lat], zoom: m.getZoom(), style: p.style, globe: isGlobe, layersOn: LAYERS.filter(l => on[l.id]).map(l => l.id), selected: sel ? { kind: sel.kind, title: String(sel.props.title ?? '') } : null },
+        )
+      }
+      case 'find':
+        return describeFound(findItems(latest.current, op.query, op.layers), op.query)
+      case 'focus': {
+        if (op.query) {
+          const hit = findItems(latest.current, op.query)[0]
+          if (!hit) throw new Error(describeFound([], op.query))
+          showLayer(hit.kind)
+          selectRef.current({ kind: hit.kind, lngLat: hit.lngLat, props: hit.props })
+          await fly(m, { center: hit.lngLat, zoom: op.zoom ?? Math.max(m.getZoom(), ZOOM_FOR[hit.kind]) })
+          const around = nearbyItems(hit.lngLat, latest.current, { exclude: { kind: hit.kind, props: hit.props }, limit: 5 })
+          return `Focused on ${layerDef(hit.kind).kind.toLowerCase()} "${hit.title}"; its card is open.${around.length ? ` Around it: ${around.map(a => `${a.title} (${a.km} km)`).join('; ')}.` : ''}`
+        }
+        await fly(m, { center: [op.lon!, op.lat!], zoom: op.zoom ?? Math.max(m.getZoom(), 8) })
+        return `Focused on ${op.label ?? `${op.lat!.toFixed(2)}, ${op.lon!.toFixed(2)}`}.`
+      }
+      case 'clear-selection':
+        selectRef.current(null)
+        return 'Closed the card.'
+      case 'pins': {
+        pins.current = [...(op.clear ? [] : pins.current), ...op.add].slice(-MAX_PINS)
+        put('pins', pinFeatures(pins.current))
+        if (op.add.length) showLayer('pins')
+        if (op.add.length === 1) await fly(m, { center: [op.add[0]!.lon, op.add[0]!.lat], zoom: Math.max(m.getZoom(), 6) })
+        else if (op.add.length > 1) {
+          const b = new maplibregl.LngLatBounds()
+          for (const pin of op.add) b.extend([pin.lon, pin.lat])
+          history.current = [...history.current, viewOf(m)].slice(-20)
+          setCanGoBack(true)
+          m.fitBounds(b, { padding: 90, maxZoom: 9, duration: isLite() ? 0 : 1_400 })
+        }
+        return pins.current.length ? `${pins.current.length} pin${pins.current.length === 1 ? '' : 's'} on the map: ${pins.current.map(x => x.label).join('; ')}.` : 'Pins cleared.'
+      }
+      case 'back':
+        if (!history.current.length) return 'There is no earlier view to go back to.'
+        back()
+        return 'Back to the previous view.'
+    }
+  }
+  const runOpRef = useRef(runOp)
+  runOpRef.current = runOp
+
+  useEffect(() => {
+    if (!ready) return
+    // Main sends each op again until it hears back; answer each one once.
+    const seen = new Set<string>()
+    return window.mapOps.onOp(({ requestId, op }) => {
+      if (seen.has(requestId)) return
+      seen.add(requestId)
+      void runOpRef.current(op).then(
+        result => window.mapOps.reply(requestId, result),
+        err => window.mapOps.reply(requestId, undefined, cleanError(err)),
+      )
+    })
+  }, [ready])
 
   // Places, quakes and events: update the sources; frame the places the first time.
   useEffect(() => {

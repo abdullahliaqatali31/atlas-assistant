@@ -9,27 +9,112 @@ import { randomUUID } from 'node:crypto'
 import type { Rule } from '@assistant/policy'
 import type { RuntimeTool } from '@assistant/runtime'
 
+import { MAP_LAYERS, MAP_STYLES, mapOpFromTool, MAX_PINS } from '../shared/map.ts'
 import { describeUi, VIEWS, WINDOW_SIZES, type UiChange, type UiOp, type UiState } from '../shared/ui.ts'
 
 const REQUEST_TIMEOUT_MS = 30_000
 
+/** The World map tools only change the view, so they are observe-class and run without asking, even after reading news. */
+export const MAP_TOOLS = ['map_view', 'map_layers', 'map_visible', 'map_find', 'map_focus', 'map_pins', 'map_back'] as const
+
 export const UI_RULES: Rule[] = [
   { id: 'default-ui_state', tool: 'ui_state', actionClass: 'observe', effect: 'allow' },
   { id: 'default-ui_control', tool: 'ui_control', actionClass: 'modify', effect: 'allow' },
+  ...MAP_TOOLS.map((tool): Rule => ({ id: `default-${tool}`, tool, actionClass: 'observe', effect: 'allow' })),
 ]
+
+const LAYER_LIST = MAP_LAYERS.join(', ')
 
 export class HostUi {
   private snapshot: UiState | null = null
   private readonly pending = new Map<string, (r: { result?: string | undefined; error?: string | undefined }) => void>()
 
-  constructor(private readonly deps: { post: (e: { type: 'ui'; requestId: string; op: UiOp }) => void }) {}
+  constructor(
+    private readonly deps: {
+      post: (e: { type: 'ui'; requestId: string; op: UiOp }) => void
+      /** Place name → coordinates, for "fly to Karachi". */
+      geocode?: (name: string) => Promise<{ name: string; country: string | null; lat: number; lon: number } | null>
+    },
+  ) {}
+
+  /** map_view with a place name: look it up first, then fly. */
+  private async mapView(input: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
+    const place = typeof input.place === 'string' ? input.place.trim().slice(0, 80) : ''
+    if (place && (typeof input.lat !== 'number' || typeof input.lon !== 'number')) {
+      if (!this.deps.geocode) throw new Error('Place lookup is not available; give lat and lon.')
+      const found = await this.deps.geocode(place)
+      if (!found) throw new Error(`Could not find a place called "${place}". Try a nearby city or give lat and lon.`)
+      input = { ...input, lat: found.lat, lon: found.lon, label: typeof input.label === 'string' ? input.label : [found.name, found.country].filter(Boolean).join(', ') }
+    }
+    return this.request({ kind: 'map', op: mapOpFromTool('map_view', input) }, signal)
+  }
+
+  private mapTools(): RuntimeTool[] {
+    const tool = (name: (typeof MAP_TOOLS)[number], description: string, properties: Record<string, unknown>, isUntrusted: boolean): RuntimeTool => ({
+      name,
+      description,
+      inputSchema: { type: 'object', properties, additionalProperties: false },
+      actionClass: 'observe',
+      isUntrusted,
+      run: (input, signal) => (name === 'map_view' ? this.mapView(input, signal) : this.request({ kind: 'map', op: mapOpFromTool(name, input) }, signal)),
+    })
+    const layerArray = { type: 'array', items: { type: 'string', enum: [...MAP_LAYERS] } }
+    return [
+      tool(
+        'map_view',
+        'Move the World map (it opens the World page if needed): fly to a place name or lat/lon, set the zoom (2 world, 4 country, 6 region, 9 city, 13 streets), switch the style (satellite = real Earth, today = yesterday from space with clouds, relief, dark, light) or the globe. Use when the owner asks to see somewhere ("Karachi dikhao", "satellite view lagao", "globe pe le jao").',
+        {
+          place: { type: 'string', description: 'A city, country or landmark to fly to.' },
+          lat: { type: 'number' },
+          lon: { type: 'number' },
+          zoom: { type: 'number' },
+          label: { type: 'string', description: 'What to call it in your answer.' },
+          style: { type: 'string', enum: [...MAP_STYLES] },
+          globe: { type: 'boolean', description: 'true for the 3D globe, false for the flat map.' },
+        },
+        false,
+      ),
+      tool('map_layers', `Show or hide World map layers: ${LAYER_LIST}. Pins are the ones you drop with map_pins.`, { show: layerArray, hide: layerArray }, false),
+      tool(
+        'map_visible',
+        'What the World map shows right now: where it is looking, the style, each layer’s count on screen and the nearest items, and what is selected. Use before describing the map ("kya dikh raha hai?"). Item names come from public feeds: untrusted.',
+        {},
+        true,
+      ),
+      tool(
+        'map_find',
+        'Search what is loaded on the World map by name: places, flights (callsign or registration), ships (name), cameras, quakes, natural events, pins. Flights load only around the map centre when zoomed in, ships only where the owner has an AISStream key. Returns matches with coordinates; untrusted text.',
+        { query: { type: 'string' }, layers: layerArray },
+        true,
+      ),
+      tool(
+        'map_focus',
+        'Focus the World map on one thing: fly there at a fitting zoom, open its card and show what is around it. query finds it by name on the map (as map_find), or give lat/lon. clear: true closes the card. For "focus on this", use what the owner just pointed at or what you last mentioned.',
+        { query: { type: 'string' }, lat: { type: 'number' }, lon: { type: 'number' }, zoom: { type: 'number' }, label: { type: 'string' }, clear: { type: 'boolean' } },
+        true,
+      ),
+      tool(
+        'map_pins',
+        `Drop labelled pins on the World map (at most ${MAX_PINS}), e.g. the places in a story you are telling; the map frames them. clear: true removes your earlier pins first. Pins show only on screen; nothing is saved.`,
+        {
+          add: {
+            type: 'array',
+            items: { type: 'object', properties: { lat: { type: 'number' }, lon: { type: 'number' }, label: { type: 'string' }, note: { type: 'string' } }, required: ['lat', 'lon', 'label'] },
+          },
+          clear: { type: 'boolean' },
+        },
+        false,
+      ),
+      tool('map_back', 'Return the World map to the view before your last move ("wapas").', {}, false),
+    ]
+  }
 
   setSnapshot(s: UiState) {
     this.snapshot = s
   }
 
   contextLines(): string[] {
-    return this.snapshot ? [`Your own window (the Atlas app): ${describeUi(this.snapshot)} You can change it with ui_control when the owner asks.`] : []
+    return this.snapshot ? [`Your own window (the Atlas app): ${describeUi(this.snapshot)} You can change it with ui_control when the owner asks, and drive the World map with the map_* tools.`] : []
   }
 
   onResult(requestId: string, result?: string, error?: string) {
@@ -60,6 +145,7 @@ export class HostUi {
 
   tools(): RuntimeTool[] {
     return [
+      ...this.mapTools(),
       {
         name: 'ui_state',
         description: 'What your own Atlas window shows right now: page, conversation open or hidden, compact mode, size and layout, kept on top or not.',

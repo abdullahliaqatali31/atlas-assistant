@@ -1,0 +1,53 @@
+import { evaluate } from '@assistant/policy'
+import { describe, expect, it } from 'vitest'
+
+import type { UiOp } from '../shared/ui.ts'
+import { HostUi, MAP_TOOLS, UI_RULES } from './ui.ts'
+
+/** A HostUi whose window answers every op at once with what it was asked. */
+const setup = (geocode?: ConstructorParameters<typeof HostUi>[0]['geocode']) => {
+  const posted: UiOp[] = []
+  const ui: HostUi = new HostUi({
+    post: e => {
+      posted.push(e.op)
+      queueMicrotask(() => ui.onResult(e.requestId, 'ok'))
+    },
+    geocode,
+  })
+  const tool = (name: string) => ui.tools().find(t => t.name === name)!
+  return { ui, posted, tool }
+}
+
+describe('map tools', () => {
+  it('looks a place name up, then flies there with a readable label', async () => {
+    const { posted, tool } = setup(async name => (name === 'Karachi' ? { name: 'Karachi', country: 'Pakistan', lat: 24.86, lon: 67.0 } : null))
+    await tool('map_view').run({ place: 'Karachi', zoom: 9, style: 'satellite' })
+    expect(posted).toEqual([{ kind: 'map', op: { kind: 'view', lat: 24.86, lon: 67.0, zoom: 9, label: 'Karachi, Pakistan', style: 'satellite', globe: undefined } }])
+  })
+
+  it('says so when a place cannot be found, without moving the map', async () => {
+    const { posted, tool } = setup(async () => null)
+    await expect(tool('map_view').run({ place: 'Atlantis' })).rejects.toThrow('Could not find a place called "Atlantis"')
+    expect(posted).toEqual([])
+  })
+
+  it('passes searches and pins straight to the map', async () => {
+    const { posted, tool } = setup()
+    await tool('map_find').run({ query: 'PIA301', layers: ['flights'] })
+    await tool('map_pins').run({ add: [{ lat: 26.5, lon: 56.3, label: 'Hormuz' }], clear: true })
+    expect(posted.map(o => (o.kind === 'map' ? o.op.kind : o.kind))).toEqual(['find', 'pins'])
+  })
+
+  it('lets every map tool run without asking, even after untrusted content', () => {
+    for (const name of MAP_TOOLS) {
+      const d = evaluate({ tool: name, actionClass: 'observe', fromUntrustedSource: true }, UI_RULES, 0)
+      expect(d.effect, name).toBe('allow')
+    }
+  })
+
+  it('marks results that carry feed text as untrusted', () => {
+    const { tool } = setup()
+    expect(['map_visible', 'map_find', 'map_focus'].every(n => tool(n).isUntrusted)).toBe(true)
+    expect(tool('map_view').isUntrusted).toBe(false)
+  })
+})

@@ -204,6 +204,13 @@ export class WorldWatch {
     this.deps.memory.setSetting(PLACES_KEY, JSON.stringify(p.slice(0, MAX_PLACES)))
   }
 
+  /** A place name to coordinates (Open-Meteo), for flying the map somewhere; nothing is saved. */
+  async geocode(name: string): Promise<Omit<Place, 'id'> | null> {
+    const q = name.trim()
+    if (!q || q.length > 80) return null
+    return parseGeocode(await this.get(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=1&language=en&format=json`))
+  }
+
   async addPlace(name: string): Promise<Place> {
     const q = name.trim()
     if (!q || q.length > 80) throw new Error('Which place?')

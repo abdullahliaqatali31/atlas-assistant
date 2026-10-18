@@ -13,6 +13,7 @@ import { BC, type BackupBridge } from '../shared/backup.ts'
 import { KC, type CodeBridge, type CodeState } from '../shared/code.ts'
 import { DC, type DesktopBridge, type DesktopState } from '../shared/desktop.ts'
 import { FC, type FilesBridge, type FilesState } from '../shared/files.ts'
+import { MC, type MapOpRequest, type MapOpsBridge } from '../shared/map.ts'
 import { UC, type PageCommand, type UiBridge } from '../shared/ui.ts'
 import { WLD, type WorldBridge, type WorldSnapshot } from '../shared/world.ts'
 import { NC, type NewsBridge, type NewsResult } from '../shared/news.ts'
@@ -245,6 +246,12 @@ const ui: UiBridge = {
   state: () => ipcRenderer.invoke(UC.state),
 }
 contextBridge.exposeInMainWorld('ui', ui)
+
+const mapOps: MapOpsBridge = {
+  onOp: cb => subscribe<MapOpRequest>(MC.op, cb),
+  reply: (requestId, result, error) => ipcRenderer.send(MC.result, { requestId, result, error }),
+}
+contextBridge.exposeInMainWorld('mapOps', mapOps)
 
 const world: WorldBridge = {
   state: () => ipcRenderer.invoke(WLD.state),
