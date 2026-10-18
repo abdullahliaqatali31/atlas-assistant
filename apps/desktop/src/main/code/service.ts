@@ -309,6 +309,16 @@ export class CodeService {
         void this.scan()
         return `Updated "${op.section}" in ${p.name}/${STATUS_FILE}.`
       }
+      case 'brief': {
+        const p = this.byName(op.project)
+        if (p.access === 'see') throw new Error(`Atlas may not write in ${p.name}; give it "See + status file" access in Projects › Code.`)
+        if (!/^[\w-]{1,80}\.md$/.test(op.file)) throw new Error('Invalid brief file name.')
+        // Also keeps .atlas/ out of git.
+        this.createStatus(p)
+        const rel = `.atlas/improvements/${op.file}`
+        writeAtomic(join(p.path, ...rel.split('/')), op.text.slice(0, 20_000))
+        return `${p.name}/${rel}`
+      }
     }
   }
 

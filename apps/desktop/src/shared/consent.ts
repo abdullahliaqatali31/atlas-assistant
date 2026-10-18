@@ -42,6 +42,10 @@ export const approvalQuestion = (tool: string, input: Record<string, unknown>, o
       const list = paths.slice(0, 5).join(', ') + (paths.length > 5 ? ` aur ${paths.length - 5} aur` : '')
       return urdu ? ur(`kya main ye Recycle Bin mein daal doon: ${list}?`) : en(`shall I move these to the Recycle Bin: ${list}?`)
     }
+    case 'improvement_propose':
+      return urdu
+        ? ur(`kya main “${clip(str(input.title))}” ko apni improvement list mein daal kar task aur brief bana doon?`)
+        : en(`shall I put “${clip(str(input.title))}” on my improvement list, as a task with a brief?`)
     case 'desktop_act':
       return urdu ? ur(`kya main ${str(input.app)} mein “${str(input.label)}” daba doon?`) : en(`shall I press “${str(input.label)}” in ${str(input.app)}?`)
     case 'desktop_keys':

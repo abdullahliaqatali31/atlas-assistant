@@ -104,6 +104,16 @@ export class HostCode {
     })
   }
 
+  /** Followed projects by name. */
+  projectNames(): string[] {
+    return this.snapshot.projects.map(p => p.name)
+  }
+
+  /** Saves an improvement brief in a project's .atlas/improvements/ (main checks the project's access). */
+  writeBrief(project: string, file: string, text: string): Promise<string> {
+    return this.request({ kind: 'brief', project, file, text })
+  }
+
   tools(): RuntimeTool[] {
     const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
     return [

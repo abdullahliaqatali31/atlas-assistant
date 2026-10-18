@@ -174,6 +174,9 @@ const learning: LearningBridge = {
   runSkill: id => ipcRenderer.invoke(LC.skillRun, id),
   teach: () => ipcRenderer.invoke(LC.teach),
   runNow: () => ipcRenderer.invoke(LC.runNow),
+  improvementDone: id => ipcRenderer.invoke(LC.improvementDone, id),
+  improvementRemove: id => ipcRenderer.invoke(LC.improvementRemove, id),
+  improvementProject: name => ipcRenderer.invoke(LC.improvementProject, name),
   onChanged: cb => subscribe<LearningView>(LC.changed, cb),
 }
 

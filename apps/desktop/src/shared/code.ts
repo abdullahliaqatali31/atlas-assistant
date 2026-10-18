@@ -160,6 +160,8 @@ export type CodeOp =
   | { kind: 'stop'; project?: string | undefined }
   | { kind: 'logs'; project: string; lines?: number | undefined }
   | { kind: 'status'; project: string; section: keyof Omit<StatusDoc, 'updatedAt'>; text: string }
+  /** An improvement brief, written only to .atlas/improvements/ in a project the owner allowed a status file. */
+  | { kind: 'brief'; project: string; file: string; text: string }
 
 // ── validation ──────────────────────────────────────────────
 

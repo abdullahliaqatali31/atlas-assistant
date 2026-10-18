@@ -65,6 +65,12 @@ export const registerLearningIpc = (deps: LearningIpcDeps) => {
   deps.handle(LC.teach, () => ask({ kind: 'teach' }))
   // A learning pass makes one model call; give it time.
   deps.handle(LC.runNow, () => ask({ kind: 'run' }, 120_000))
+  deps.handle(LC.improvementDone, v => ask({ kind: 'improvement-done', id: id(v) }))
+  deps.handle(LC.improvementRemove, v => ask({ kind: 'improvement-remove', id: id(v) }))
+  deps.handle(LC.improvementProject, v => {
+    if (v !== null && (typeof v !== 'string' || !v.trim() || v.length > 200)) throw new Error('Choose a project.')
+    return ask({ kind: 'improvement-project', name: v })
+  })
 
   return {
     onHostEvent(e: LearningHostEvent) {

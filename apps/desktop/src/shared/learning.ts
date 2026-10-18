@@ -36,6 +36,24 @@ export interface SkillView {
   lastRun: { at: number; ok: boolean | null; summary: string | null } | null
 }
 
+/** An improvement to Atlas the owner approved: a task plus a brief for their coding agent. */
+export interface ImprovementView {
+  id: string
+  title: string
+  problem: string
+  example: string | null
+  done: string | null
+  area: string | null
+  status: 'open' | 'done'
+  createdAt: number
+  doneAt: number | null
+  taskId: string | null
+  /** Where the brief file was saved in the chosen project, if any. */
+  briefFile: string | null
+  /** The brief itself, ready to copy. */
+  brief: string
+}
+
 export interface LearningView {
   /** Tasks the owner taught. */
   skills: SkillView[]
@@ -49,6 +67,11 @@ export interface LearningView {
   running: boolean
   /** Plain summary of the last pass ("Learned 2 facts, 1 suggestion"). */
   lastResult: string | null
+  improvements: ImprovementView[]
+  /** The coding project improvement briefs are saved in, if the owner chose one. */
+  improvementProject: string | null
+  /** Followed coding projects the owner can choose from. */
+  projects: string[]
 }
 
 export const LC = {
@@ -62,6 +85,9 @@ export const LC = {
   skillRun: 'learning:skill-run',
   teach: 'learning:teach',
   runNow: 'learning:run-now',
+  improvementDone: 'learning:improvement-done',
+  improvementRemove: 'learning:improvement-remove',
+  improvementProject: 'learning:improvement-project',
   changed: 'learning:changed',
 } as const
 
@@ -81,6 +107,10 @@ export interface LearningBridge {
   teach(): Promise<LearningView>
   /** Learn from today's conversation now instead of waiting for idle time. */
   runNow(): Promise<LearningView>
+  improvementDone(id: string): Promise<LearningView>
+  improvementRemove(id: string): Promise<LearningView>
+  /** Where briefs are saved: a followed coding project's name, or null for the app only. */
+  improvementProject(name: string | null): Promise<LearningView>
   onChanged(cb: (v: LearningView) => void): () => void
 }
 
@@ -95,6 +125,9 @@ export type LearningOp =
   | { kind: 'skill-run'; id: string }
   | { kind: 'teach' }
   | { kind: 'run' }
+  | { kind: 'improvement-done'; id: string }
+  | { kind: 'improvement-remove'; id: string }
+  | { kind: 'improvement-project'; name: string | null }
 
 export const isLearningId = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f-]{8,64}$/i.test(v)
 

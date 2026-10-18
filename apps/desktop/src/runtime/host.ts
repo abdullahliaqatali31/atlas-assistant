@@ -42,6 +42,7 @@ import { CODE_RULES, HostCode } from './code.ts'
 import { DESKTOP_RULES, HostDesktop } from './desktop.ts'
 import { FILE_RULES, HostFiles } from './files.ts'
 import { HostUi, UI_RULES } from './ui.ts'
+import { IMPROVEMENT_RULES, Improvements } from './improvements.ts'
 import { HostNews, NEWS_RULES } from './news.ts'
 import { HostControls } from './controls.ts'
 import { InitiativeService, parseQuietHours } from './initiative.ts'
@@ -89,7 +90,7 @@ const controls = new HostControls({
   log: (level, message) => log(level, message),
   now: () => systemClock.now(),
   extensionToken: () => store.get('PLAYWRIGHT_MCP_EXTENSION_TOKEN'),
-  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES],
+  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...IMPROVEMENT_RULES],
 })
 let voice: VoiceProvider | null = null
 let speechEnabled = true
@@ -190,7 +191,10 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   sttLanguage = sttPin(memory, configuredLanguages)
   for (const t of memory.recoverInterrupted()) log('warn', `"${t.title}" was interrupted last time; it is waiting for verification.`)
   learning?.stop()
+  const improvements = new Improvements({ memory, clock: systemClock, writeBrief: (project, file, text) => code.writeBrief(project, file, text) })
   learning = new HostLearning({
+    improvements,
+    projects: () => code.projectNames(),
     memory,
     // Background learning runs on the cheaper background model, metered and within the monthly budget.
     llm: meterLlm(createLlm(config.llm, 'background'), { purpose: 'background', memory, clock: systemClock, utcOffsetMin: config.owner.utcOffsetMin, onRecord: () => schedulePush() }),
@@ -225,7 +229,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   })
   // Local tools now; MCP servers start in the background and join when ready.
   // Answers to its own questions (project status, learning suggestions) go through these.
-  void controls.attach(assistant, [...localTools(memory, systemClock), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
+  void controls.attach(assistant, [...localTools(memory, systemClock), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...improvements.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
   const agendaMemory = memory
   const wrapUpMinute = parseClock(merged.ASSISTANT_WRAP_UP) ?? 18 * 60
   initiative = new InitiativeService(
@@ -248,6 +252,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
           ...skillAgenda(agendaMemory, now, { utcOffsetMin: config.owner.utcOffsetMin }),
           ...buildAgenda(agendaMemory, now, { utcOffsetMin: config.owner.utcOffsetMin, wrapUpMinute }),
           ...code.agenda(now),
+          ...improvements.agenda(now),
         ].sort((a, b) => b.priority - a.priority)
       },
     },

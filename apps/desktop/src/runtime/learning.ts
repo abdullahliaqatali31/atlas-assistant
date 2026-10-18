@@ -11,6 +11,7 @@ import type { Clock } from '@assistant/shared'
 
 import type { SessionChange } from '../shared/ipc.ts'
 import type { LearningHostEvent, LearningHostRequest, LearningView } from '../shared/learning.ts'
+import type { Improvements } from './improvements.ts'
 
 const PERIOD_MS = 30 * 60_000
 
@@ -45,6 +46,9 @@ export class HostLearning {
       post: (e: LearningHostEvent) => void
       /** True while a reply is streaming: learning waits. */
       busy: () => boolean
+      improvements?: Improvements | undefined
+      /** Followed coding projects, for choosing where briefs go. */
+      projects?: () => string[]
       log: (level: 'info' | 'warn', message: string) => void
     },
   ) {
@@ -90,6 +94,9 @@ export class HostLearning {
       lastRunAt: s.lastRunAt,
       running: this.running !== null,
       lastResult: this.lastResult,
+      improvements: this.deps.improvements?.list() ?? [],
+      improvementProject: this.deps.improvements?.project ?? null,
+      projects: this.deps.projects?.() ?? [],
     }
   }
 
@@ -192,6 +199,16 @@ export class HostLearning {
         }
         case 'run':
           await this.runIdle(true)
+          return ok()
+        case 'improvement-done':
+          this.deps.improvements?.markDone(req.op.id)
+          return ok()
+        case 'improvement-remove':
+          this.deps.improvements?.remove(req.op.id)
+          return ok()
+        case 'improvement-project':
+          if (req.op.name !== null && !(this.deps.projects?.() ?? []).includes(req.op.name)) throw new Error('Choose one of your followed coding projects.')
+          this.deps.improvements?.setProject(req.op.name)
           return ok()
       }
     } catch (error) {

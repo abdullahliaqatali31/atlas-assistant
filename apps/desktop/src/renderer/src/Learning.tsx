@@ -1,4 +1,4 @@
-import { Brain, Check, GraduationCap, Lightbulb, ListChecks, MessageCircleQuestion, RefreshCw, Repeat, Sparkles, Trash2, UserCog, X } from 'lucide-react'
+import { Brain, Check, ClipboardCopy, GraduationCap, Lightbulb, ListChecks, MessageCircleQuestion, RefreshCw, Repeat, Sparkles, Trash2, UserCog, Wrench, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import type { LearningView, ProposalView } from '../../shared/learning.ts'
@@ -108,6 +108,8 @@ export function Learning({ onTalk }: { /** Teach and Run now continue in the con
           ))}
         </Section>
 
+        <Improvements view={view} run={run} />
+
         <Section icon={<Lightbulb className="size-3.5" />} title="What I’ve learned" aside={view.learned.length ? String(view.learned.length) : undefined}>
           {view.learned.length === 0 && <Empty>Nothing yet. Talk to me for a while, then press Learn now or step away.</Empty>}
           {view.learned.map(m => (
@@ -180,3 +182,76 @@ function Section({ icon, title, aside, children }: { icon: ReactNode; title: str
 }
 
 const Empty = ({ children }: { children: ReactNode }) => <p className="px-1 text-xs text-muted">{children}</p>
+
+/**
+ * Improvements to Atlas you approved: each is a task plus a brief you hand to
+ * your coding agent (Claude Code, Codex…) and review. Atlas only writes the
+ * brief; it never changes code.
+ */
+function Improvements({ view, run }: { view: LearningView; run: (fn: () => Promise<LearningView>) => Promise<void> }) {
+  const [copied, setCopied] = useState<string | null>(null)
+  const open = view.improvements.filter(i => i.status === 'open')
+  const done = view.improvements.filter(i => i.status === 'done')
+  const copy = async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(id)
+      setTimeout(() => setCopied(c => (c === id ? null : c)), 2000)
+    } catch {
+      // Clipboard unavailable (window not focused): the brief is also in the project file.
+    }
+  }
+  return (
+    <Section icon={<Wrench className="size-3.5" />} title="Improvements to me" aside={open.length ? String(open.length) : undefined}>
+      <p className="px-1 text-xs text-muted">
+        When I struggle with something, I suggest a fix and ask you. On your yes it becomes a task with a brief. Give the brief to Claude Code (or your coding agent) yourself and
+        review the change; I never change my own code.
+      </p>
+      <label className="flex flex-wrap items-center gap-2 px-1 text-xs text-muted">
+        Save briefs in project
+        <select
+          className="field w-auto py-1 text-xs"
+          value={view.improvementProject ?? ''}
+          onChange={e => void run(() => window.learning.improvementProject(e.target.value || null))}
+          aria-label="Project for improvement briefs"
+        >
+          <option value="">Only here in the app</option>
+          {view.projects.map(name => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        {view.projects.length === 0 && <span>(follow Atlas’s own folder in Projects › Code to save briefs there)</span>}
+      </label>
+      {view.improvements.length === 0 && <Empty>Nothing yet.</Empty>}
+      {open.map(i => (
+        <article key={i.id} className="tile space-y-1.5 p-3">
+          <p className="font-medium" dir="auto">
+            {i.title}
+          </p>
+          <p className="text-xs text-muted" dir="auto">
+            {i.problem}
+          </p>
+          {i.briefFile && <p className="truncate font-mono text-[11px] text-muted">{i.briefFile}</p>}
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button type="button" className="btn h-7 px-2 text-xs" onClick={() => void copy(i.id, i.brief)}>
+              <ClipboardCopy className="size-3.5" aria-hidden /> {copied === i.id ? 'Copied' : 'Copy brief'}
+            </button>
+            <button type="button" className="btn h-7 px-2 text-xs" onClick={() => void run(() => window.learning.improvementDone(i.id))}>
+              <Check className="size-3.5" aria-hidden /> It works now
+            </button>
+            <button type="button" className="icon-btn size-7" onClick={() => void run(() => window.learning.improvementRemove(i.id))} aria-label={`Remove ${i.title}`} title="Remove">
+              <Trash2 className="size-3.5" aria-hidden />
+            </button>
+          </div>
+        </article>
+      ))}
+      {done.length > 0 && (
+        <p className="px-1 text-[11px] text-muted">
+          Done: {done.map(i => i.title).join(' · ')}
+        </p>
+      )}
+    </Section>
+  )
+}
