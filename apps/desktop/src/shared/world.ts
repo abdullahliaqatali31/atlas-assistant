@@ -81,6 +81,47 @@ export interface WorldSnapshot {
   problems: string[]
 }
 
+/** An aircraft broadcasting its position (ADS-B), from adsb.lol. */
+export interface Flight {
+  hex: string
+  callsign: string
+  registration: string
+  type: string
+  lat: number
+  lon: number
+  /** Feet; null on the ground or unknown. */
+  altitude: number | null
+  /** Knots. */
+  speed: number
+  /** Degrees. */
+  track: number
+  military: boolean
+}
+
+/** Orbit elements of one satellite (CelesTrak OMM JSON), positions are computed on the page. */
+export type SatelliteElements = Record<string, string | number>
+
+/** Parses adsb.lol's v2 answer. */
+export const parseFlights = (j: unknown): Flight[] => {
+  const ac = (j as { ac?: Record<string, unknown>[] })?.ac ?? []
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  return ac
+    .filter(a => n(a.lat) !== null && n(a.lon) !== null)
+    .map(a => ({
+      hex: String(a.hex ?? ''),
+      callsign: String(a.flight ?? '').trim(),
+      registration: String(a.r ?? ''),
+      type: String(a.t ?? ''),
+      lat: n(a.lat)!,
+      lon: n(a.lon)!,
+      altitude: a.alt_baro === 'ground' ? null : n(a.alt_baro),
+      speed: n(a.gs) ?? 0,
+      track: n(a.track) ?? n(a.true_heading) ?? 0,
+      // adsb.lol marks military aircraft with bit 1 of dbFlags.
+      military: ((n(a.dbFlags) ?? 0) & 1) === 1,
+    }))
+}
+
 export type WorldOp = { kind: 'add'; name: string } | { kind: 'remove'; id: string } | { kind: 'refresh' }
 
 export const WLD = {
@@ -88,6 +129,8 @@ export const WLD = {
   add: 'world:add',
   remove: 'world:remove',
   refresh: 'world:refresh',
+  flights: 'world:flights',
+  satellites: 'world:satellites',
   changed: 'world:changed',
 } as const
 
@@ -96,13 +139,17 @@ export interface WorldBridge {
   add(name: string): Promise<WorldSnapshot>
   remove(id: string): Promise<WorldSnapshot>
   refresh(): Promise<WorldSnapshot>
+  /** Aircraft within dist nautical miles (up to 250) of a point. */
+  flights(lat: number, lon: number, dist: number): Promise<Flight[]>
+  /** The ISS, stations and the brightest satellites. */
+  satellites(): Promise<SatelliteElements[]>
   onChanged(cb: (s: WorldSnapshot) => void): () => void
 }
 
 export const EMPTY_WORLD: WorldSnapshot = { places: [], quakes: [], events: [], updatedAt: null, problems: [] }
 
 export const ATTRIBUTION =
-  'Weather and air quality: Open-Meteo.com (CC BY 4.0) · Earthquakes: USGS · Natural events: NASA EONET · News: GDELT Project · Map: OpenFreeMap, © OpenMapTiles, © OpenStreetMap contributors'
+  'Weather and air quality: Open-Meteo.com (CC BY 4.0) · Earthquakes: USGS · Natural events: NASA EONET · News: GDELT Project · Flights: adsb.lol (ODbL) · Satellites: CelesTrak · Map: OpenFreeMap, © OpenMapTiles, © OpenStreetMap contributors'
 
 /** Great-circle distance in km. */
 export const kmBetween = (a: { lat: number; lon: number }, b: { lat: number; lon: number }): number => {

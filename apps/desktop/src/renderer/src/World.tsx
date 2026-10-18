@@ -2,9 +2,10 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 
 import { Globe2, MapPin, Plus, RefreshCw, Trash2, Wind } from 'lucide-react'
 import maplibregl, { type GeoJSONSource, type Map as MapLibre } from 'maplibre-gl'
+import * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
-import { ATTRIBUTION, EMPTY_WORLD, type PlaceStatus, type WorldSnapshot } from '../../shared/world.ts'
+import { ATTRIBUTION, EMPTY_WORLD, type Flight, type PlaceStatus, type WorldSnapshot } from '../../shared/world.ts'
 import { ago, useNow } from './Jarvis.tsx'
 
 const cleanError = (err: unknown) =>
@@ -41,11 +42,85 @@ const toFeatures = (w: WorldSnapshot): { places: FC; quakes: FC; events: FC } =>
   },
 })
 
-/** The map: places, earthquakes (size by magnitude) and natural events, with a card on click. */
+type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'satellites'
+const LAYERS: { id: LayerId; label: string; dot: string }[] = [
+  { id: 'places', label: 'Your places', dot: '#22d3ee' },
+  { id: 'flights', label: 'Flights (live)', dot: '#fbbf24' },
+  { id: 'satellites', label: 'Satellites & ISS', dot: '#c084fc' },
+  { id: 'quakes', label: 'Earthquakes (M4+)', dot: '#f97316' },
+  { id: 'events', label: 'Fires, storms, volcanoes, floods', dot: '#ef4444' },
+]
+/** Map layers drawn for each switch. */
+const MAP_LAYERS: Record<LayerId, string[]> = { places: ['places', 'place-labels'], quakes: ['quakes'], events: ['events'], flights: ['flights', 'flight-labels'], satellites: ['satellites', 'satellite-labels'] }
+
+const readLayers = (): Record<LayerId, boolean> => {
+  const all = { places: true, quakes: true, events: true, flights: true, satellites: true }
+  try {
+    return { ...all, ...(JSON.parse(localStorage.getItem('world.layers') ?? '{}') as Partial<Record<LayerId, boolean>>) }
+  } catch {
+    return all
+  }
+}
+
+/** An arrow pointing up, drawn once; tinted per aircraft (signed distance field). */
+const planeIcon = () => {
+  const size = 32
+  const c = document.createElement('canvas')
+  c.width = c.height = size
+  const g = c.getContext('2d')!
+  g.fillStyle = '#fff'
+  g.beginPath()
+  g.moveTo(16, 2)
+  g.lineTo(27, 28)
+  g.lineTo(16, 22)
+  g.lineTo(5, 28)
+  g.closePath()
+  g.fill()
+  return g.getImageData(0, 0, size, size)
+}
+
+const flightFeatures = (flights: Flight[]): FC => ({
+  type: 'FeatureCollection',
+  features: flights.map(f => ({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [f.lon, f.lat] },
+    properties: {
+      title: `${f.callsign || f.registration || f.hex}${f.type ? ` · ${f.type}` : ''}${f.military ? ' · military' : ''}`,
+      detail: `${f.altitude === null ? 'On the ground' : `${Math.round(f.altitude).toLocaleString()} ft`} · ${Math.round(f.speed)} kt${f.registration ? ` · ${f.registration}` : ''}`,
+      callsign: f.callsign,
+      track: f.track,
+      color: f.military ? '#ef4444' : '#fbbf24',
+    },
+  })),
+})
+
+/** Satellite positions now, from their orbit elements. */
+const satelliteFeatures = (sats: { name: string; rec: satellite.SatRec }[], at: Date): FC => {
+  const gmst = satellite.gstime(at)
+  const features: FC['features'] = []
+  for (const s of sats) {
+    const pv = satellite.propagate(s.rec, at)
+    if (!pv || typeof pv.position !== 'object' || !pv.position) continue
+    const geo = satellite.eciToGeodetic(pv.position, gmst)
+    const iss = /^ISS \(ZARYA\)/.test(s.name)
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [satellite.degreesLong(geo.longitude), satellite.degreesLat(geo.latitude)] },
+      properties: { title: iss ? 'ISS · International Space Station' : s.name, detail: `${Math.round(geo.height)} km up`, label: iss ? 'ISS' : '', size: iss ? 7 : 3.5 },
+    })
+  }
+  return { type: 'FeatureCollection', features }
+}
+
+/** The map: places, live flights, satellites, earthquakes and natural events, with switches and a card on click. */
 function WorldMap({ world }: { world: WorldSnapshot }) {
   const box = useRef<HTMLDivElement>(null)
   const map = useRef<MapLibre | null>(null)
+  const [ready, setReady] = useState(false)
   const fitted = useRef(false)
+  const [layers, setLayers] = useState(readLayers)
+  const [counts, setCounts] = useState<Partial<Record<LayerId, number>>>({})
+  const [flightNote, setFlightNote] = useState('')
   const data = useMemo(() => toFeatures(world), [world])
   const dataRef = useRef(data)
   dataRef.current = data
@@ -58,9 +133,9 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
     m.on('load', () => {
       const d = dataRef.current
-      m.addSource('quakes', { type: 'geojson', data: d.quakes })
-      m.addSource('events', { type: 'geojson', data: d.events })
-      m.addSource('places', { type: 'geojson', data: d.places })
+      const empty: FC = { type: 'FeatureCollection', features: [] }
+      m.addImage('plane', planeIcon(), { sdf: true })
+      for (const [id, fc] of [['quakes', d.quakes], ['events', d.events], ['places', d.places], ['flights', empty], ['satellites', empty]] as const) m.addSource(id, { type: 'geojson', data: fc })
       m.addLayer({
         id: 'quakes',
         type: 'circle',
@@ -74,6 +149,29 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
         },
       })
       m.addLayer({ id: 'events', type: 'circle', source: 'events', paint: { 'circle-radius': 5, 'circle-color': ['get', 'color'], 'circle-opacity': 0.85, 'circle-stroke-width': 1, 'circle-stroke-color': '#0b1020' } })
+      m.addLayer({ id: 'satellites', type: 'circle', source: 'satellites', paint: { 'circle-radius': ['get', 'size'], 'circle-color': '#c084fc', 'circle-stroke-width': 1, 'circle-stroke-color': '#0b1020' } })
+      m.addLayer({
+        id: 'satellite-labels',
+        type: 'symbol',
+        source: 'satellites',
+        layout: { 'text-field': ['get', 'label'], 'text-offset': [0, 1.1], 'text-size': 11, 'text-anchor': 'top' },
+        paint: { 'text-color': '#e9d5ff', 'text-halo-color': '#0b1020', 'text-halo-width': 1.5 },
+      })
+      m.addLayer({
+        id: 'flights',
+        type: 'symbol',
+        source: 'flights',
+        layout: { 'icon-image': 'plane', 'icon-size': 0.55, 'icon-rotate': ['get', 'track'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true },
+        paint: { 'icon-color': ['get', 'color'], 'icon-halo-color': '#0b1020', 'icon-halo-width': 1 },
+      })
+      m.addLayer({
+        id: 'flight-labels',
+        type: 'symbol',
+        source: 'flights',
+        minzoom: 6.5,
+        layout: { 'text-field': ['get', 'callsign'], 'text-offset': [0, 1.2], 'text-size': 10, 'text-anchor': 'top' },
+        paint: { 'text-color': '#fde68a', 'text-halo-color': '#0b1020', 'text-halo-width': 1.5 },
+      })
       m.addLayer({ id: 'places', type: 'circle', source: 'places', paint: { 'circle-radius': 7, 'circle-color': '#22d3ee', 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
       m.addLayer({
         id: 'place-labels',
@@ -82,22 +180,22 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
         layout: { 'text-field': ['get', 'title'], 'text-offset': [0, 1.3], 'text-size': 12, 'text-anchor': 'top' },
         paint: { 'text-color': '#e2e8f0', 'text-halo-color': '#0b1020', 'text-halo-width': 1.5 },
       })
-      for (const layer of ['quakes', 'events', 'places']) {
+      for (const layer of ['quakes', 'events', 'places', 'flights', 'satellites']) {
         m.on('click', layer, e => {
           const f = e.features?.[0]
           if (!f) return
           const p = f.properties as Record<string, string | number>
           const el = document.createElement('div')
           el.className = 'text-xs text-slate-900'
-          const title = document.createElement('p')
-          title.className = 'font-medium'
-          title.textContent = String(p.title)
-          el.append(title)
-          if (p.time) {
-            const t = document.createElement('p')
-            t.textContent = new Date(Number(p.time)).toLocaleString()
-            el.append(t)
+          const line = (text: string, cls = '') => {
+            const x = document.createElement('p')
+            x.className = cls
+            x.textContent = text
+            el.append(x)
           }
+          line(String(p.title), 'font-medium')
+          if (p.detail) line(String(p.detail))
+          if (p.time) line(new Date(Number(p.time)).toLocaleString())
           if (typeof p.url === 'string' && p.url.startsWith('https://')) {
             const a = document.createElement('a')
             a.href = p.url
@@ -112,6 +210,7 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
         m.on('mouseenter', layer, () => (m.getCanvas().style.cursor = 'pointer'))
         m.on('mouseleave', layer, () => (m.getCanvas().style.cursor = ''))
       }
+      setReady(true)
     })
     const resize = new ResizeObserver(() => m.resize())
     resize.observe(box.current)
@@ -122,22 +221,122 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
     }
   }, [])
 
-  // New data: update the sources; frame the places the first time there are some.
+  // Places, quakes and events: update the sources; frame the places the first time.
   useEffect(() => {
     const m = map.current
-    if (!m || !m.isStyleLoaded()) return
+    if (!m || !ready) return
     ;(m.getSource('quakes') as GeoJSONSource | undefined)?.setData(data.quakes)
     ;(m.getSource('events') as GeoJSONSource | undefined)?.setData(data.events)
     ;(m.getSource('places') as GeoJSONSource | undefined)?.setData(data.places)
+    setCounts(c => ({ ...c, places: data.places.features.length, quakes: data.quakes.features.length, events: data.events.features.length }))
     if (!fitted.current && data.places.features.length) {
       fitted.current = true
       const b = new maplibregl.LngLatBounds()
       for (const f of data.places.features) b.extend(f.geometry.coordinates as [number, number])
-      m.fitBounds(b, { padding: 80, maxZoom: 6, duration: 0 })
+      m.fitBounds(b, { padding: 80, maxZoom: 5.5, duration: 0 })
     }
-  }, [data])
+  }, [data, ready])
 
-  return <div ref={box} className="h-full min-h-[260px] w-full overflow-hidden rounded-xl" aria-label="World map" role="region" />
+  // Switches: show or hide each group of map layers, remembered.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    for (const id of Object.keys(MAP_LAYERS) as LayerId[]) for (const l of MAP_LAYERS[id]) m.setLayoutProperty(l, 'visibility', layers[id] ? 'visible' : 'none')
+    try {
+      localStorage.setItem('world.layers', JSON.stringify(layers))
+    } catch {
+      // Remembering the switches is a convenience only.
+    }
+  }, [layers, ready])
+
+  // Live flights around the map's centre: when it stops moving and every 20 s, if zoomed in enough.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !layers.flights) return
+    let stopped = false
+    const load = async () => {
+      if (stopped || document.hidden) return
+      if (m.getZoom() < 4) {
+        setFlightNote('Zoom in to see flights')
+        ;(m.getSource('flights') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: [] })
+        setCounts(c => ({ ...c, flights: 0 }))
+        return
+      }
+      const c = m.getCenter()
+      try {
+        const flights = await window.world.flights(c.lat, c.lng, 250)
+        if (stopped) return
+        ;(m.getSource('flights') as GeoJSONSource | undefined)?.setData(flightFeatures(flights))
+        setCounts(x => ({ ...x, flights: flights.length }))
+        setFlightNote('Within 250 nm of the map centre')
+      } catch {
+        setFlightNote('Flights unavailable right now')
+      }
+    }
+    void load()
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const onMove = () => {
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => void load(), 600)
+    }
+    m.on('moveend', onMove)
+    const timer = setInterval(() => void load(), 20_000)
+    return () => {
+      stopped = true
+      m.off('moveend', onMove)
+      clearInterval(timer)
+      if (debounce) clearTimeout(debounce)
+    }
+  }, [ready, layers.flights])
+
+  // Satellites: orbit elements once, positions every 2 s.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !layers.satellites) return
+    let stopped = false
+    let sats: { name: string; rec: satellite.SatRec }[] = []
+    const draw = () => {
+      if (stopped || document.hidden || !sats.length) return
+      ;(m.getSource('satellites') as GeoJSONSource | undefined)?.setData(satelliteFeatures(sats, new Date()))
+    }
+    void window.world.satellites().then(list => {
+      sats = list.flatMap(s => {
+        try {
+          return [{ name: String(s.OBJECT_NAME ?? ''), rec: satellite.json2satrec(s as unknown as satellite.OMMJsonObject) }]
+        } catch {
+          return []
+        }
+      })
+      setCounts(c => ({ ...c, satellites: sats.length }))
+      draw()
+    }, () => undefined)
+    const timer = setInterval(draw, 2_000)
+    return () => {
+      stopped = true
+      clearInterval(timer)
+    }
+  }, [ready, layers.satellites])
+
+  return (
+    <div className="relative h-full min-h-[260px] w-full overflow-hidden rounded-xl">
+      <div ref={box} className="h-full w-full" aria-label="World map" role="region" />
+      <fieldset className="glass absolute left-2 top-2 max-w-[calc(100%-4rem)] space-y-1 rounded-xl px-3 py-2 text-xs">
+        <legend className="sr-only">Map layers</legend>
+        {LAYERS.map(l => (
+          <label key={l.id} className="flex cursor-pointer items-center gap-2">
+            <input type="checkbox" checked={layers[l.id]} onChange={() => setLayers(x => ({ ...x, [l.id]: !x[l.id] }))} />
+            <span className="size-2 shrink-0 rounded-full" style={{ background: l.dot }} aria-hidden />
+            <span className="truncate">{l.label}</span>
+            {layers[l.id] && counts[l.id] !== undefined && <span className="ml-auto pl-2 font-mono text-muted">{counts[l.id]}</span>}
+          </label>
+        ))}
+        {layers.flights && flightNote && <p className="pl-6 text-[10px] text-muted">{flightNote}</p>}
+        <p className="pl-6 text-[10px] text-muted" title="Ships need a free AISStream key; public traffic cameras are mostly in the US, UK and EU">
+          Ships and cameras: not yet
+        </p>
+      </fieldset>
+    </div>
+  )
 }
 
 function PlaceCard({ s, now, onRemove }: { s: PlaceStatus; now: number; onRemove: () => void }) {

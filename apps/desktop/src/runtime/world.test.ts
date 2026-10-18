@@ -8,7 +8,7 @@ import { DEFAULT_RULES } from '@assistant/runtime'
 import { fixedClock, HOUR, MINUTE } from '@assistant/shared'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { kmBetween } from '../shared/world.ts'
+import { kmBetween, parseFlights } from '../shared/world.ts'
 import { parseAir, parseEvents, parseGeocode, parseNews, parseQuakes, parseWeather, quakeMatters, WORLD_RULES, WorldWatch } from './world.ts'
 
 const NOW = Date.parse('2026-10-18T08:00:00Z')
@@ -94,6 +94,19 @@ describe('parsers', () => {
     const news = parseNews(NEWS)
     expect(news).toHaveLength(1)
     expect(news[0]).toMatchObject({ title: 'Smog returns to Lahore', time: Date.parse('2026-10-18T07:00:00Z') })
+  })
+
+  it('reads live flights from adsb.lol, marking military aircraft and planes on the ground', () => {
+    const flights = parseFlights({
+      ac: [
+        { hex: '491d88', flight: 'NJE576G ', r: 'CS-GLH', t: 'GLEX', lat: 31.9, lon: 74.1, alt_baro: 40000, gs: 472.6, track: 348.4 },
+        { hex: 'ae1234', flight: 'RCH123', t: 'C17', lat: 30.1, lon: 72.2, alt_baro: 'ground', gs: 0, true_heading: 90, dbFlags: 1 },
+        { hex: 'nopos', flight: 'X' },
+      ],
+    })
+    expect(flights).toHaveLength(2)
+    expect(flights[0]).toMatchObject({ callsign: 'NJE576G', registration: 'CS-GLH', type: 'GLEX', altitude: 40000, track: 348.4, military: false })
+    expect(flights[1]).toMatchObject({ altitude: null, track: 90, military: true })
   })
 
   it('measures distance and judges which quakes matter', () => {
