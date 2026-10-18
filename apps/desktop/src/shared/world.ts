@@ -185,6 +185,62 @@ export const parseAisMessage = (m: unknown): { mmsi: number; fields: Partial<Shi
   return { mmsi, fields: { name: name || undefined, lat, lon, speed: n(body.Sog) ?? 0, course: n(body.Cog) ?? 0, heading: heading !== null && heading < 360 ? heading : null, at } as Partial<Ship> & { at: number } }
 }
 
+/** A public camera from an official open feed. */
+export interface Camera {
+  id: string
+  name: string
+  lat: number
+  lon: number
+  country: string
+  /** Who runs it, credited on the card. */
+  source: string
+  image: string
+}
+
+/** Where official public cameras are available without a key. */
+export const CAMERA_COVERAGE = 'London (TfL), California (Caltrans), Finland (Fintraffic), Hong Kong (Transport Department), Singapore (LTA)'
+
+/** Each agency's own format into one list. Unknown or broken entries are skipped. */
+export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; finland?: unknown; hongKong?: string; singapore?: unknown }): Camera[] => {
+  const out: Camera[] = []
+  const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN)
+  const push = (c: Camera) => {
+    if (Number.isFinite(c.lat) && Number.isFinite(c.lon) && Math.abs(c.lat) <= 90 && Math.abs(c.lon) <= 180 && c.image.startsWith('https://')) out.push(c)
+  }
+  for (const p of Array.isArray(raw.tfl) ? (raw.tfl as Record<string, unknown>[]) : []) {
+    const props = (p.additionalProperties as { key: string; value: string }[] | undefined) ?? []
+    const prop = (k: string) => props.find(x => x.key === k)?.value
+    if (prop('available') === 'false') continue
+    push({ id: `tfl:${String(p.id)}`, name: String(p.commonName ?? 'London camera'), lat: num(p.lat), lon: num(p.lon), country: 'United Kingdom', source: 'Transport for London (TfL Open Data)', image: prop('imageUrl') ?? '' })
+  }
+  for (const d of raw.caltrans ?? []) {
+    for (const item of ((d as { data?: { cctv?: Record<string, unknown> }[] })?.data ?? [])) {
+      const c = item.cctv
+      if (!c || c.inService === 'false') continue
+      const loc = (c.location as Record<string, unknown> | undefined) ?? {}
+      const img = ((c.imageData as Record<string, unknown> | undefined)?.static as Record<string, unknown> | undefined)?.currentImageURL
+      push({ id: `ct:${String(loc.district)}-${String(c.index)}`, name: String(loc.locationName ?? 'California camera'), lat: num(loc.latitude), lon: num(loc.longitude), country: 'United States', source: 'Caltrans', image: typeof img === 'string' ? img : '' })
+    }
+  }
+  for (const f of ((raw.finland as { features?: Record<string, unknown>[] })?.features ?? [])) {
+    const props = (f.properties as { name?: string; presets?: { id: string; inCollection?: boolean }[] } | undefined) ?? {}
+    const preset = props.presets?.find(x => x.inCollection !== false)
+    const coords = (f.geometry as { coordinates?: number[] } | undefined)?.coordinates ?? []
+    if (!preset) continue
+    push({ id: `fi:${preset.id}`, name: String(props.name ?? 'Road weather camera').replace(/_/g, ' '), lat: num(coords[1]), lon: num(coords[0]), country: 'Finland', source: 'Fintraffic Digitraffic (CC BY 4.0)', image: `https://weathercam.digitraffic.fi/${preset.id}.jpg` })
+  }
+  const xml = raw.hongKong ?? ''
+  const tag = (block: string, t: string) => new RegExp(`<${t}>([^<]*)</${t}>`).exec(block)?.[1]?.trim() ?? ''
+  for (const block of xml.split('<image>').slice(1)) {
+    push({ id: `hk:${tag(block, 'key')}`, name: tag(block, 'description').replace(/&amp;/g, '&'), lat: num(tag(block, 'latitude')), lon: num(tag(block, 'longitude')), country: 'Hong Kong', source: 'Hong Kong Transport Department', image: tag(block, 'url') })
+  }
+  for (const c of ((raw.singapore as { items?: { cameras?: Record<string, unknown>[] }[] })?.items?.[0]?.cameras ?? [])) {
+    const loc = (c.location as { latitude?: number; longitude?: number } | undefined) ?? {}
+    push({ id: `sg:${String(c.camera_id)}`, name: `Singapore traffic camera ${String(c.camera_id)}`, lat: num(loc.latitude), lon: num(loc.longitude), country: 'Singapore', source: 'Land Transport Authority (data.gov.sg)', image: String(c.image ?? '') })
+  }
+  return out
+}
+
 export type WorldOp = { kind: 'add'; name: string } | { kind: 'remove'; id: string } | { kind: 'refresh' }
 
 export const WLD = {
@@ -196,6 +252,8 @@ export const WLD = {
   satellites: 'world:satellites',
   ships: 'world:ships',
   shipsKey: 'world:ships-key',
+  cameras: 'world:cameras',
+  cameraImage: 'world:camera-image',
   changed: 'world:changed',
 } as const
 
@@ -212,13 +270,17 @@ export interface WorldBridge {
   ships(box: { south: number; west: number; north: number; east: number }): Promise<ShipsResult>
   /** Saves the AISStream key in the Windows credential store (null removes it). */
   setShipsKey(key: string | null): Promise<{ hasKey: boolean }>
+  /** Public cameras from official open feeds (only where such feeds exist). */
+  cameras(): Promise<Camera[]>
+  /** A camera's latest frame, fetched by Atlas, as a data URL. */
+  cameraImage(id: string): Promise<{ dataUrl: string; at: number }>
   onChanged(cb: (s: WorldSnapshot) => void): () => void
 }
 
 export const EMPTY_WORLD: WorldSnapshot = { places: [], quakes: [], events: [], updatedAt: null, problems: [] }
 
 export const ATTRIBUTION =
-  'Weather and air quality: Open-Meteo.com (CC BY 4.0) · Earthquakes: USGS · Natural events: NASA EONET · News: GDELT Project · Flights: adsb.lol (ODbL) · Ships: AISStream · Satellites: CelesTrak · Map: OpenFreeMap, © OpenMapTiles, © OpenStreetMap contributors'
+  'Weather and air quality: Open-Meteo.com (CC BY 4.0) · Earthquakes: USGS · Natural events: NASA EONET · News: GDELT Project · Flights: adsb.lol (ODbL) · Ships: AISStream · Cameras: TfL, Caltrans, Fintraffic, HK Transport Department, LTA Singapore · Satellites: CelesTrak · Map: OpenFreeMap, © OpenMapTiles, © OpenStreetMap contributors'
 
 /** Great-circle distance in km. */
 export const kmBetween = (a: { lat: number; lon: number }, b: { lat: number; lon: number }): number => {

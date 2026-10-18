@@ -5,7 +5,7 @@ import maplibregl, { type GeoJSONSource, type Map as MapLibre } from 'maplibre-g
 import * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
-import { ATTRIBUTION, EMPTY_WORLD, type Flight, type PlaceStatus, type Ship, type ShipsResult, type WorldSnapshot } from '../../shared/world.ts'
+import { ATTRIBUTION, CAMERA_COVERAGE, EMPTY_WORLD, type Flight, type PlaceStatus, type Ship, type ShipsResult, type WorldSnapshot } from '../../shared/world.ts'
 import { ago, useNow } from './Jarvis.tsx'
 
 const cleanError = (err: unknown) =>
@@ -42,20 +42,21 @@ const toFeatures = (w: WorldSnapshot): { places: FC; quakes: FC; events: FC } =>
   },
 })
 
-type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites'
+type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras'
 const LAYERS: { id: LayerId; label: string; dot: string }[] = [
   { id: 'places', label: 'Your places', dot: '#22d3ee' },
   { id: 'flights', label: 'Flights (live)', dot: '#fbbf24' },
   { id: 'ships', label: 'Ships (live)', dot: '#34d399' },
+  { id: 'cameras', label: 'Public cameras', dot: '#2dd4bf' },
   { id: 'satellites', label: 'Satellites & ISS', dot: '#c084fc' },
   { id: 'quakes', label: 'Earthquakes (M4+)', dot: '#f97316' },
   { id: 'events', label: 'Fires, storms, volcanoes, floods', dot: '#ef4444' },
 ]
 /** Map layers drawn for each switch. */
-const MAP_LAYERS: Record<LayerId, string[]> = { places: ['places', 'place-labels'], quakes: ['quakes'], events: ['events'], flights: ['flights', 'flight-labels'], ships: ['ships', 'ship-labels'], satellites: ['satellites', 'satellite-labels'] }
+const MAP_LAYERS: Record<LayerId, string[]> = { places: ['places', 'place-labels'], quakes: ['quakes'], events: ['events'], flights: ['flights', 'flight-labels'], ships: ['ships', 'ship-labels'], cameras: ['cameras'], satellites: ['satellites', 'satellite-labels'] }
 
 const readLayers = (): Record<LayerId, boolean> => {
-  const all = { places: true, quakes: true, events: true, flights: true, ships: true, satellites: true }
+  const all = { places: true, quakes: true, events: true, flights: true, ships: true, satellites: true, cameras: true }
   try {
     return { ...all, ...(JSON.parse(localStorage.getItem('world.layers') ?? '{}') as Partial<Record<LayerId, boolean>>) }
   } catch {
@@ -176,7 +177,7 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
       const empty: FC = { type: 'FeatureCollection', features: [] }
       m.addImage('plane', planeIcon(), { sdf: true })
       m.addImage('ship', shipIcon(), { sdf: true })
-      for (const [id, fc] of [['quakes', d.quakes], ['events', d.events], ['places', d.places], ['flights', empty], ['ships', empty], ['satellites', empty]] as const) m.addSource(id, { type: 'geojson', data: fc })
+      for (const [id, fc] of [['quakes', d.quakes], ['events', d.events], ['places', d.places], ['flights', empty], ['ships', empty], ['satellites', empty], ['cameras', empty]] as const) m.addSource(id, { type: 'geojson', data: fc })
       m.addLayer({
         id: 'quakes',
         type: 'circle',
@@ -189,6 +190,50 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
           'circle-stroke-color': '#0b1020',
         },
       })
+      m.addLayer({
+        id: 'cameras',
+        type: 'circle',
+        source: 'cameras',
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 2, 10, 5], 'circle-color': '#2dd4bf', 'circle-opacity': 0.8, 'circle-stroke-width': 0.5, 'circle-stroke-color': '#0b1020' },
+      })
+      // A camera opens its latest frame, fetched by Atlas (the page itself loads only map tiles).
+      m.on('click', 'cameras', e => {
+        const f = e.features?.[0]
+        if (!f) return
+        const p = f.properties as Record<string, string>
+        const el = document.createElement('div')
+        el.className = 'w-64 text-xs text-slate-900'
+        const title = document.createElement('p')
+        title.className = 'font-medium'
+        title.textContent = p.title ?? 'Camera'
+        const img = document.createElement('img')
+        img.alt = p.title ?? 'Camera snapshot'
+        img.className = 'mt-1 w-full rounded bg-slate-200'
+        img.style.minHeight = '120px'
+        const meta = document.createElement('p')
+        meta.className = 'mt-1 text-[10px] text-slate-600'
+        meta.textContent = 'Loading the latest frame…'
+        const again = document.createElement('button')
+        again.type = 'button'
+        again.className = 'mt-1 underline'
+        again.textContent = 'Refresh'
+        const load = () => {
+          meta.textContent = 'Loading the latest frame…'
+          void window.world.cameraImage(p.id!).then(
+            r => {
+              img.src = r.dataUrl
+              meta.textContent = `${p.source} · ${new Date(r.at).toLocaleTimeString()}`
+            },
+            () => (meta.textContent = `${p.source} · image unavailable right now`),
+          )
+        }
+        again.addEventListener('click', load)
+        el.append(title, img, meta, again)
+        load()
+        new maplibregl.Popup({ closeButton: true, maxWidth: '300px' }).setLngLat((f.geometry as unknown as PointGeometry).coordinates as [number, number]).setDOMContent(el).addTo(m)
+      })
+      m.on('mouseenter', 'cameras', () => (m.getCanvas().style.cursor = 'pointer'))
+      m.on('mouseleave', 'cameras', () => (m.getCanvas().style.cursor = ''))
       m.addLayer({ id: 'events', type: 'circle', source: 'events', paint: { 'circle-radius': 5, 'circle-color': ['get', 'color'], 'circle-opacity': 0.85, 'circle-stroke-width': 1, 'circle-stroke-color': '#0b1020' } })
       m.addLayer({ id: 'satellites', type: 'circle', source: 'satellites', paint: { 'circle-radius': ['get', 'size'], 'circle-color': '#c084fc', 'circle-stroke-width': 1, 'circle-stroke-color': '#0b1020' } })
       m.addLayer({
@@ -391,6 +436,24 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
     }
   }
 
+  // Public cameras: the list once (only where official open feeds exist).
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !layers.cameras) return
+    let stopped = false
+    void window.world.cameras().then(list => {
+      if (stopped) return
+      ;(m.getSource('cameras') as GeoJSONSource | undefined)?.setData({
+        type: 'FeatureCollection',
+        features: list.map(c => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lon, c.lat] }, properties: { id: c.id, title: c.name, source: c.source } })),
+      })
+      setCounts(x => ({ ...x, cameras: list.length }))
+    }, () => undefined)
+    return () => {
+      stopped = true
+    }
+  }, [ready, layers.cameras])
+
   // Satellites: orbit elements once, positions every 2 s.
   useEffect(() => {
     const m = map.current
@@ -458,9 +521,7 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
           </form>
         )}
         {layers.ships && shipState.status === 'error' && !/key/i.test(shipState.message ?? '') && <p className="pl-6 text-[10px] text-warm">{shipState.message}</p>}
-        <p className="pl-6 text-[10px] text-muted" title="Public traffic cameras are mostly in the US, UK and EU">
-          Cameras: not yet
-        </p>
+        {layers.cameras && <p className="max-w-56 pl-6 text-[10px] leading-snug text-muted">Official open feeds only: {CAMERA_COVERAGE}</p>}
       </fieldset>
     </div>
   )

@@ -8,6 +8,7 @@ import type { HostEvent, HostRequest } from '../shared/ipc.ts'
 import { osCredentialStore } from '@assistant/runtime'
 
 import { EMPTY_WORLD, parseFlights, WLD, type Flight, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
+import { CameraDirectory } from './cameras.ts'
 import { ShipFeed } from './ships.ts'
 
 const TIMEOUT_MS = 60_000
@@ -30,6 +31,7 @@ export class WorldService {
   private flightsPausedUntil = 0
   private lastFlights: Flight[] = []
   private satellites: { at: number; list: SatelliteElements[] } | null = null
+  private readonly cams = new CameraDirectory((level, message) => this.deps.log?.(level, message))
   readonly ships = new ShipFeed({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
 
   constructor(
@@ -137,6 +139,11 @@ export class WorldService {
       const ok = (v: unknown, max: number) => typeof v === 'number' && Math.abs(v) <= max
       if (!b || !ok(b.south, 90) || !ok(b.north, 90) || !ok(b.west, 180) || !ok(b.east, 180)) throw new Error('Bad map area.')
       return this.ships.view({ south: b.south as number, north: b.north as number, west: b.west as number, east: b.east as number })
+    })
+    handle(WLD.cameras, () => this.cams.cameras())
+    handle(WLD.cameraImage, id => {
+      if (typeof id !== 'string' || !/^[a-z]{2,3}:[\w.-]{1,40}$/.test(id)) throw new Error('Unknown camera.')
+      return this.cams.image(id)
     })
     handle(WLD.shipsKey, owner(key => {
       if (key !== null && typeof key !== 'string') throw new Error('Paste the key.')
