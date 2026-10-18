@@ -86,7 +86,7 @@ describe('provider config', () => {
   it('accepts any provider with its own key, and needs a model where there is no default', () => {
     expect(loadConfig({ ...base, ANTHROPIC_API_KEY: 'k' }, '/x').config?.llm).toMatchObject({ provider: 'anthropic', apiKey: 'k' })
     const groq = loadConfig({ ...base, ASSISTANT_LLM_PROVIDER: 'groq', GROQ_API_KEY: 'g', ASSISTANT_LLM_MODEL: 'llama-x', ASSISTANT_LLM_BACKGROUND_MODEL: 'small' }, '/x')
-    expect(groq.config?.llm).toEqual({ provider: 'groq', apiKey: 'g', model: 'llama-x', baseUrl: undefined, backgroundModel: 'small' })
+    expect(groq.config?.llm).toEqual({ provider: 'groq', apiKey: 'g', model: 'llama-x', baseUrl: undefined, backgroundModel: 'small', quickModel: undefined, routing: 'auto' })
     expect(loadConfig({ ...base, ASSISTANT_LLM_PROVIDER: 'groq', GROQ_API_KEY: 'g' }, '/x').problems.map(p => p.key)).toEqual(['ASSISTANT_LLM_MODEL'])
     expect(loadConfig({ ...base, ASSISTANT_LLM_PROVIDER: 'openai', ASSISTANT_LLM_MODEL: 'm' }, '/x').problems.map(p => p.key)).toEqual(['OPENAI_API_KEY'])
   })

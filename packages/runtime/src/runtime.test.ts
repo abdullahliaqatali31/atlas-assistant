@@ -126,6 +126,21 @@ describe('Assistant', () => {
     memory.close()
   })
 
+  it('answers a simple message with the quick model, and hands a tool-needing one to the main model unheard', async () => {
+    const quick = new FakeLlm((req, n) => (n === 0 ? say('Wa alaikum salam!') : use('q1', 'tasks_list', {})))
+    const { assistant, llm, memory } = setup(() => say('Main model here.'), { quickLlm: quick, routing: 'auto' })
+    expect(await drain(assistant.reply('salam'))).toBe('Wa alaikum salam!')
+    expect(llm.requests).toHaveLength(0)
+    // The quick model reaches for a tool on a message that looked simple: its draft is dropped.
+    expect(await drain(assistant.reply('acha suno'))).toBe('Main model here.')
+    expect(quick.requests).toHaveLength(2)
+    expect(llm.requests).toHaveLength(1)
+    // Work goes straight to the main model; 'main' routing never uses the quick one.
+    await drain(assistant.reply('aaj ki news map pe dikhao'))
+    expect(quick.requests).toHaveLength(2)
+    memory.close()
+  })
+
   it('cuts a huge tool result before it reaches the model, saying so', async () => {
     const big: RuntimeTool = { name: 'dump', description: 'd', inputSchema: { type: 'object' }, actionClass: 'observe', isUntrusted: false, run: async () => 'x'.repeat(50_000) }
     const { assistant, llm, memory } = setup((_, n) => (n === 0 ? use('d1', 'dump', {}) : say('ok')), { rules: () => [...DEFAULT_RULES, { id: 'dump', tool: 'dump', actionClass: 'observe', effect: 'allow' }] }, [big])

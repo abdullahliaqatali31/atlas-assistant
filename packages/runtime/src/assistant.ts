@@ -12,6 +12,7 @@ import { DAY, newId, type Clock, type ConversationMode, type InitiativeEvent } f
 import { dayContext, startOfLocalDay } from './day.ts'
 import { defuseTags, formatEvidence, gatherEvidence, wrapUntrusted, type EvidenceBlock, type EvidenceSource } from './evidence.ts'
 import { addressee, briefingInstruction, systemPrompt, welcomeInstruction } from './persona.ts'
+import { routeMessage, type Route } from './routing.ts'
 import { validateInput, type RuntimeTool } from './tools.ts'
 
 /** Today's newest turns kept word for word; older ones become a digest in the context packet. */
@@ -64,6 +65,10 @@ export interface AssistantDeps {
   learning?: { observeOwner(text: string): unknown; contextLines(): string[] }
   /** Sources read right before the daily briefing (connected calendar and email, window activity). */
   briefingSources?: () => readonly EvidenceSource[]
+  /** A fast, cheap model for short, simple messages (routing.ts); without it every turn uses `llm`. */
+  quickLlm?: LlmProvider
+  /** 'main' sends every message to the main model even when a quick one is set. */
+  routing?: 'auto' | 'main'
 }
 
 export class Assistant {
@@ -112,7 +117,8 @@ export class Assistant {
     this.deps.memory.addMessage(this.session.conversationId, 'owner', text)
     // Style feedback ("hamesha chhote jawab") updates the profile before this reply is written.
     this.deps.learning?.observeOwner(text)
-    yield* this.turn(text, this.contextPacket(text), signal)
+    const route = this.deps.quickLlm && this.deps.routing !== 'main' ? routeMessage(text) : 'main'
+    yield* this.turn(text, this.contextPacket(text), signal, false, route)
   }
 
   /** An event that might warrant speaking up; yields nothing when the attention policy stays silent. */
@@ -213,8 +219,11 @@ export class Assistant {
    * it turns true for the rest of the loop once an untrusted tool result
    * lands. From then on every non-observe action needs the owner's yes.
    */
-  private async *turn(userText: string, context: string, signal?: AbortSignal, tainted = false): AsyncIterable<string> {
-    const { llm } = this.deps
+  private async *turn(userText: string, context: string, signal?: AbortSignal, tainted = false, route: Route = 'main'): AsyncIterable<string> {
+    // A simple message starts on the quick model; its reply is held until it is done, and if the
+    // quick model wants a tool (or declines) the main model takes the whole turn instead.
+    let llm = route === 'quick' && this.deps.quickLlm ? this.deps.quickLlm : this.deps.llm
+    let quick = llm !== this.deps.llm
     const tools = [...this.tools.values()].map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))
     // Fixed for the whole tool loop, so one turn never mixes two profiles.
     // A new day starts a fresh conversation (yesterday stays in long-term memory).
@@ -236,8 +245,13 @@ export class Assistant {
 
       // Text after a tool step starts a new paragraph, so it never runs into what came before ("265,000.Abdullah").
       let first = step > 0 && spoken !== '' && !/\s$/.test(spoken)
+      let held = ''
+      let escalate = false
       for await (const ev of llm.stream({ system, turns: working, tools, effort: 'low' }, signal)) {
-        if (ev.type === 'text') {
+        if (quick && (ev.type === 'tool_use' || ev.type === 'refused')) escalate = true
+        if (escalate) continue
+        if (quick && ev.type === 'text') held += ev.text
+        else if (ev.type === 'text') {
           const text = first && ev.text ? `\n\n${ev.text.replace(/^\s+/, '')}` : ev.text
           if (ev.text) first = false
           spoken += text
@@ -255,6 +269,17 @@ export class Assistant {
         }
       }
 
+      if (quick) {
+        quick = false
+        if (escalate) {
+          // Nothing was said or done yet: the main model answers from the same starting point.
+          llm = this.deps.llm
+          step--
+          continue
+        }
+        spoken += held
+        if (held) yield held
+      }
       if (stop !== 'tool_use' || calls.length === 0) break
       if (step === MAX_TOOL_STEPS) {
         const note = '\n(I stopped after several steps; tell me if you want me to continue.)'

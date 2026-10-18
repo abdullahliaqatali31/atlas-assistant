@@ -73,7 +73,15 @@ export const loadConfig = (
     if (!model && !('defaultModel' in info)) problems.push({ key: 'ASSISTANT_LLM_MODEL', message: `Choose a model for ${info.label}.` })
     if (llmProvider === 'custom' && !baseUrl) problems.push({ key: 'ASSISTANT_LLM_BASE_URL', message: 'Set the server address, e.g. http://localhost:8000/v1.' })
     if (baseUrl && !/^https?:\/\/[^\s]+$/.test(baseUrl)) problems.push({ key: 'ASSISTANT_LLM_BASE_URL', message: 'The server address must start with http:// or https://.' })
-    llm = { provider: llmProvider, apiKey, model, baseUrl, backgroundModel: env.ASSISTANT_LLM_BACKGROUND_MODEL || undefined }
+    llm = {
+      provider: llmProvider,
+      apiKey,
+      model,
+      baseUrl,
+      backgroundModel: env.ASSISTANT_LLM_BACKGROUND_MODEL || undefined,
+      quickModel: env.ASSISTANT_LLM_QUICK_MODEL || undefined,
+      routing: env.ASSISTANT_LLM_ROUTING === 'main' ? 'main' : 'auto',
+    }
   }
 
   const voiceProvider = voiceProviderOf(env)

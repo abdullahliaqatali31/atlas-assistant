@@ -15,6 +15,8 @@ export interface LlmProviderInfo {
   defaultModel?: string
   /** A cheaper model for background work (learning, curiosity), when one is known. */
   backgroundModel?: string
+  /** A fast, cheap model for short, simple messages. */
+  quickModel?: string
   maxTokensParam?: 'max_tokens' | 'max_completion_tokens'
   /** Where to get a key. */
   keyUrl?: string
@@ -28,6 +30,7 @@ export const LLM_PROVIDERS = {
     baseUrl: null,
     defaultModel: 'claude-opus-5-5',
     backgroundModel: 'claude-haiku-5-5',
+    quickModel: 'claude-haiku-5-5',
     keyUrl: 'https://console.anthropic.com/settings/keys',
   },
   openai: { label: 'OpenAI', keyName: 'OPENAI_API_KEY', baseUrl: 'https://api.openai.com/v1', maxTokensParam: 'max_completion_tokens', keyUrl: 'https://platform.openai.com/api-keys' },
@@ -89,13 +92,21 @@ export interface LlmConfig {
   baseUrl?: string | undefined
   /** Model for background work; falls back to the provider's known cheap model, then the main model. */
   backgroundModel?: string | undefined
+  /** Model for short, simple messages; falls back to the provider's known quick model, then the main model. */
+  quickModel?: string | undefined
+  /** 'auto' sends simple messages to the quick model; 'main' always uses the main model. */
+  routing?: 'auto' | 'main' | undefined
 }
 
 const info = (id: LlmProviderId): LlmProviderInfo => LLM_PROVIDERS[id]
 
-/** The model a config resolves to, for the main conversation or for background work. */
-export const modelFor = (cfg: LlmConfig, purpose: 'chat' | 'background' = 'chat'): string => {
+export type ModelPurpose = 'chat' | 'background' | 'quick'
+
+/** The model a config resolves to: the main conversation, background work, or quick replies to simple messages. */
+export const modelFor = (cfg: LlmConfig, purpose: ModelPurpose = 'chat'): string => {
   const main = cfg.model || info(cfg.provider).defaultModel || ''
-  return purpose === 'background' ? cfg.backgroundModel || info(cfg.provider).backgroundModel || main : main
+  if (purpose === 'background') return cfg.backgroundModel || info(cfg.provider).backgroundModel || main
+  if (purpose === 'quick') return cfg.quickModel || info(cfg.provider).quickModel || main
+  return main
 }
 

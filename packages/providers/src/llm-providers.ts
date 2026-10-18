@@ -1,11 +1,11 @@
 /** One factory for every configured LLM provider. */
 import { AnthropicProvider } from './anthropic.ts'
 import type { LlmProvider } from './llm.ts'
-import { LLM_PROVIDERS, modelFor, type LlmConfig } from './llm-presets.ts'
+import { LLM_PROVIDERS, modelFor, type LlmConfig, type ModelPurpose } from './llm-presets.ts'
 import { OpenAICompatibleProvider } from './openai-compatible.ts'
 
 /** One adapter for any configured provider. */
-export const createLlm = (cfg: LlmConfig, purpose: 'chat' | 'background' = 'chat', fetchImpl?: typeof fetch): LlmProvider => {
+export const createLlm = (cfg: LlmConfig, purpose: ModelPurpose = 'chat', fetchImpl?: typeof fetch): LlmProvider => {
   const model = modelFor(cfg, purpose)
   if (cfg.provider === 'anthropic') return new AnthropicProvider(cfg.apiKey, model)
   const p = LLM_PROVIDERS[cfg.provider] as { label: string; baseUrl: string | null; maxTokensParam?: 'max_tokens' | 'max_completion_tokens' }

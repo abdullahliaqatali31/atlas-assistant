@@ -8,7 +8,7 @@ import { mkdirSync } from 'node:fs'
 
 import { DEFAULT_PREFS } from '@assistant/initiative'
 import { MemoryStore } from '@assistant/memory'
-import { createLlm, isLlmProvider, listLlmModels, LLM_PROVIDERS, type VoiceProvider } from '@assistant/providers'
+import { createLlm, isLlmProvider, listLlmModels, LLM_PROVIDERS, modelFor, type VoiceProvider } from '@assistant/providers'
 import {
   Assistant,
   createVoice,
@@ -219,6 +219,11 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   assistant = new Assistant({
     // Every reply is metered (tokens and cost per day and model).
     llm: meterLlm(llm, { purpose: 'chat', memory, clock: systemClock, utcOffsetMin: offset, onRecord: () => schedulePush() }),
+    // Short, simple messages go to a cheaper quick model (when it differs from the main one).
+    ...(modelFor(config.llm, 'quick') !== modelFor(config.llm, 'chat')
+      ? { quickLlm: meterLlm(createLlm(config.llm, 'quick'), { purpose: 'chat', memory, clock: systemClock, utcOffsetMin: offset, onRecord: () => schedulePush() }) }
+      : {}),
+    routing: config.llm.routing ?? 'auto',
     memory,
     // What Atlas learned and taught tasks, plus one line on its own window.
     learning: { observeOwner: text => learning?.observeOwner(text), contextLines: () => [...(learning?.contextLines() ?? []), ...ui.contextLines()] },

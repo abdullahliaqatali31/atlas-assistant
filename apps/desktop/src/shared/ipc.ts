@@ -135,6 +135,10 @@ export interface SetupSummary {
   llmModel: string
   llmBaseUrl: string
   llmBackgroundModel: string
+  /** The quick model for short, simple messages (empty: the provider's default). */
+  llmQuickModel: string
+  /** 'auto' sends simple messages to the quick model; 'main' always uses the main model. */
+  llmRouting: 'auto' | 'main'
   /** ElevenLabs voice id, or the Azure voice name when Azure is selected. */
   voiceId: string
   voiceProvider: VoiceProviderChoice
@@ -152,6 +156,8 @@ export interface SetupInput {
   llmModel?: string | undefined
   llmBaseUrl?: string | undefined
   llmBackgroundModel?: string | undefined
+  llmQuickModel?: string | undefined
+  llmRouting?: 'auto' | 'main' | undefined
   voiceId: string
   /** Empty string keeps the stored key. */
   llmKey: string
@@ -309,10 +315,13 @@ export const parseSetup = (v: unknown): SetupInput | null => {
   }
   const llmModel = o.llmModel === undefined ? undefined : field(o.llmModel, 200)
   const llmBackgroundModel = o.llmBackgroundModel === undefined ? undefined : field(o.llmBackgroundModel, 200)
+  const llmQuickModel = o.llmQuickModel === undefined ? undefined : field(o.llmQuickModel, 200)
+  if (o.llmRouting !== undefined && o.llmRouting !== 'auto' && o.llmRouting !== 'main') return null
+  const llmRouting = o.llmRouting as 'auto' | 'main' | undefined
   const llmBaseUrl = o.llmBaseUrl === undefined ? undefined : field(o.llmBaseUrl, 300)
-  if (llmModel === null || llmBackgroundModel === null || llmBaseUrl === null) return null
+  if (llmModel === null || llmBackgroundModel === null || llmQuickModel === null || llmBaseUrl === null) return null
   if (llmBaseUrl && !/^https?:\/\/[^\s]+$/.test(llmBaseUrl)) return null
-  return { ownerName, voiceId, llmKey, voiceKey, voiceProvider, azureRegion, llmProvider, llmModel, llmBaseUrl, llmBackgroundModel }
+  return { ownerName, voiceId, llmKey, voiceKey, voiceProvider, azureRegion, llmProvider, llmModel, llmBaseUrl, llmBackgroundModel, llmQuickModel, llmRouting }
 }
 
 // ── main ⇄ runtime host messages ────────────────────────────

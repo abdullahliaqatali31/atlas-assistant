@@ -47,6 +47,8 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
     llmModel: setup.llmModel,
     llmBaseUrl: setup.llmBaseUrl,
     llmBackgroundModel: setup.llmBackgroundModel,
+    llmQuickModel: setup.llmQuickModel,
+    llmRouting: setup.llmRouting,
   })
   const [models, setModels] = useState<string[]>([])
   const [loadingModels, setLoadingModels] = useState(false)
@@ -76,6 +78,7 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
       // Switching provider: the old model names mean nothing there.
       llmModel: p === setup.llmProvider ? setup.llmModel : '',
       llmBackgroundModel: p === setup.llmProvider ? setup.llmBackgroundModel : '',
+      llmQuickModel: p === setup.llmProvider ? setup.llmQuickModel : '',
       llmBaseUrl: p === setup.llmProvider ? setup.llmBaseUrl : '',
     }))
   }
@@ -198,6 +201,26 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
           onChange={set('llmBackgroundModel')}
           placeholder={'backgroundModel' in llmInfo ? `${llmInfo.backgroundModel} (cheaper default)` : 'Same as the main model, or pick a cheaper one'}
         />
+        <Field
+          id="llmQuickModel"
+          label="Quick model (short, simple messages)"
+          list="llm-models"
+          value={form.llmQuickModel ?? ''}
+          onChange={set('llmQuickModel')}
+          placeholder={'quickModel' in llmInfo ? `${llmInfo.quickModel} (much cheaper default)` : 'Same as the main model, or pick a cheaper one'}
+        />
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={(form.llmRouting ?? 'auto') === 'auto'}
+            onChange={e => setForm(f => ({ ...f, llmRouting: e.target.checked ? 'auto' : 'main' }))}
+          />
+          <span>
+            Answer simple messages with the quick model
+            <span className="block text-[11px] text-muted">Greetings, thanks and short chat cost far less this way. Anything that needs tools or thinking still goes to the main model, automatically.</span>
+          </span>
+        </label>
       </section>
 
       <section className="space-y-3">

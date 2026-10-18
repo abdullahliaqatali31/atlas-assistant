@@ -28,9 +28,13 @@ interface Stored {
   llmModel: string
   llmBaseUrl: string
   llmBackgroundModel: string
+  /** Model for short, simple messages; empty uses the provider's quick default. */
+  llmQuickModel: string
+  /** 'main' turns the quick model off. */
+  llmRouting: 'auto' | 'main'
 }
 
-const DEFAULTS: Stored = { ownerName: '', voiceId: '', voiceProvider: '', azureRegion: '', azureVoice: '', speakReplies: true, llmProvider: '', llmModel: '', llmBaseUrl: '', llmBackgroundModel: '' }
+const DEFAULTS: Stored = { ownerName: '', voiceId: '', voiceProvider: '', azureRegion: '', azureVoice: '', speakReplies: true, llmProvider: '', llmModel: '', llmBaseUrl: '', llmBackgroundModel: '', llmQuickModel: '', llmRouting: 'auto' }
 const DEFAULT_AZURE_VOICE = 'ur-PK-UzmaNeural'
 const AZURE_VOICE = /^[a-z]{2,3}-[A-Z]{2,4}-[A-Za-z0-9]+Neural$/
 const file = () => join(app.getPath('userData'), 'setup.json')
@@ -67,7 +71,9 @@ export const saveSetup = (input: SetupInput, provider: VoiceProviderChoice) => {
     next.llmModel = input.llmModel ?? ''
     next.llmBaseUrl = input.llmBaseUrl ?? ''
     next.llmBackgroundModel = input.llmBackgroundModel ?? ''
+    next.llmQuickModel = input.llmQuickModel ?? ''
   }
+  if (input.llmRouting) next.llmRouting = input.llmRouting
   if (provider === 'azure') {
     if (input.azureRegion !== undefined) next.azureRegion = input.azureRegion
     if (AZURE_VOICE.test(input.voiceId)) next.azureVoice = input.voiceId
@@ -110,7 +116,11 @@ export const runtimeEnv = (devEnvFile: string | null): Record<string, string> =>
     else delete env.ASSISTANT_LLM_BASE_URL
     if (s.llmBackgroundModel) env.ASSISTANT_LLM_BACKGROUND_MODEL = s.llmBackgroundModel
     else delete env.ASSISTANT_LLM_BACKGROUND_MODEL
+    if (s.llmQuickModel) env.ASSISTANT_LLM_QUICK_MODEL = s.llmQuickModel
+    else delete env.ASSISTANT_LLM_QUICK_MODEL
   }
+  if (s.llmRouting === 'main') env.ASSISTANT_LLM_ROUTING = 'main'
+  else if (s.llmRouting === 'auto') delete env.ASSISTANT_LLM_ROUTING
   if (s.voiceId) env.ELEVENLABS_VOICE_ID = s.voiceId
   if (s.azureRegion) env.AZURE_SPEECH_REGION = s.azureRegion
   if (s.azureVoice) env.AZURE_SPEECH_VOICE = s.azureVoice
@@ -128,6 +138,8 @@ export const setupSummary = (env: Record<string, string>, keys: { llm: boolean; 
     llmModel: env.ASSISTANT_LLM_MODEL ?? '',
     llmBaseUrl: env.ASSISTANT_LLM_BASE_URL ?? '',
     llmBackgroundModel: env.ASSISTANT_LLM_BACKGROUND_MODEL ?? '',
+    llmQuickModel: env.ASSISTANT_LLM_QUICK_MODEL ?? '',
+    llmRouting: env.ASSISTANT_LLM_ROUTING === 'main' ? 'main' : 'auto',
     voiceProvider,
     voiceId: voiceProvider === 'azure' ? (env.AZURE_SPEECH_VOICE ?? DEFAULT_AZURE_VOICE) : (env.ELEVENLABS_VOICE_ID ?? ''),
     azureRegion: voiceProvider === 'azure' ? (env.AZURE_SPEECH_REGION ?? '') : '',
