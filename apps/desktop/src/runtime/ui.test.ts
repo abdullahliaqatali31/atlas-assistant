@@ -38,6 +38,27 @@ describe('map tools', () => {
     expect(posted.map(o => (o.kind === 'map' ? o.op.kind : o.kind))).toEqual(['find', 'pins'])
   })
 
+  it('places story items by name, looking each place up once, and says which it could not place', async () => {
+    const looked: string[] = []
+    const { posted, tool } = setup(async name => {
+      looked.push(name)
+      return name === 'Gaza' ? { name: 'Gaza', country: null, lat: 31.5, lon: 34.47 } : null
+    })
+    const out = await tool('map_story').run({
+      title: 'Middle East',
+      items: [
+        { label: 'Aid convoy reaches Gaza', place: 'Gaza' },
+        { label: 'Second Gaza report', place: 'gaza' },
+        { label: 'Talks in Doha', place: 'Doha', lat: 25.29, lon: 51.53 },
+        { label: 'Somewhere odd', place: 'Atlantis' },
+      ],
+    })
+    expect(looked).toEqual(['Gaza', 'Atlantis'])
+    const op = posted[0]
+    expect(op?.kind === 'map' && op.op.kind === 'story' && op.op.story?.items.map(i => i.label)).toEqual(['Aid convoy reaches Gaza', 'Second Gaza report', 'Talks in Doha'])
+    expect(out).toContain('Not placed (unknown places): Atlantis')
+  })
+
   it('lets every map tool run without asking, even after untrusted content', () => {
     for (const name of MAP_TOOLS) {
       const d = evaluate({ tool: name, actionClass: 'observe', fromUntrustedSource: true }, UI_RULES, 0)

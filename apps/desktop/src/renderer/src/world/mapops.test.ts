@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { MAP_LAYERS } from '../../../shared/map.ts'
 import type { FC } from './geo.ts'
 import { LAYERS } from './layers.ts'
-import { describeFound, describeVisible, findItems, inBounds, pinFeatures, ZOOM_FOR } from './mapops.ts'
+import { describeFound, describeVisible, findItems, inBounds, linkFeatures, pinFeatures, storyFeatures, ZOOM_FOR } from './mapops.ts'
 
 const fc = (items: { lon: number; lat: number; props: Record<string, string | number> }[]): FC => ({
   type: 'FeatureCollection',
@@ -52,7 +52,42 @@ describe('map ops', () => {
     expect(text).toContain('Flights (live): 2 on screen, e.g. PIA301 · A320; UAE612 · B77W.')
     // The tanker in Hormuz is not on this screen.
     expect(text).not.toContain('FRONT ALTAIR')
-    expect(text).toContain('Layers off: quakes, cameras, events, satellites, pins.')
+    expect(text).toContain('Layers off: quakes, cameras, events, satellites, pins, story.')
+  })
+
+  const story = {
+    title: 'Pacific',
+    items: [
+      { lat: 35.7, lon: 139.7, label: 'Tokyo summit', severity: 3 },
+      { lat: 37.8, lon: -122.4, label: 'San Francisco deal', severity: 9 },
+    ],
+    links: [{ from: 1, to: 2, reason: 'same talks' }],
+  }
+
+  it('numbers story items and colours them by severity', () => {
+    const f = storyFeatures(story).features
+    expect(f.map(x => x.properties.n)).toEqual([1, 2])
+    expect(f[1]?.properties).toMatchObject({ title: 'San Francisco deal', color: '#ef4444', severity: 9 })
+    expect(storyFeatures(null).features).toEqual([])
+  })
+
+  it('finds a story item by its number', () => {
+    const sources = { story: storyFeatures(story) }
+    expect(findItems(sources, '#2')[0]).toMatchObject({ kind: 'story', title: 'San Francisco deal' })
+    expect(findItems(sources, '2')[0]?.title).toBe('San Francisco deal')
+  })
+
+  it('draws a link as one unbroken arc, even across the date line', () => {
+    const line = linkFeatures(story).features[0]!.geometry.coordinates
+    expect(line[0]![0]).toBeCloseTo(139.7, 6)
+    expect(line[0]![1]).toBeCloseTo(35.7, 6)
+    const [lon, lat] = line.at(-1)!
+    // Unwrapped: -122.4 becomes 237.6 so the line crosses the Pacific instead of the whole world.
+    expect(lon).toBeCloseTo(237.6, 5)
+    expect(lat).toBeCloseTo(37.8, 5)
+    for (let i = 1; i < line.length; i++) expect(Math.abs(line[i]![0] - line[i - 1]![0])).toBeLessThan(10)
+    // A great circle from Tokyo to San Francisco bows north of both ends.
+    expect(Math.max(...line.map(p => p[1]))).toBeGreaterThan(45)
   })
 
   it('turns pins into map features with their labels and notes', () => {

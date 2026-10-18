@@ -100,12 +100,12 @@ describe('layer registry', () => {
     expect(new Set(ids).size).toBe(ids.length)
     for (const l of LAYERS) {
       expect(OWN_SOURCES.has(l.source)).toBe(true)
-      for (const d of l.draw) expect('source' in d && d.source).toBe(l.source)
+      for (const d of l.draw) expect([l.source, ...(l.extraSources ?? [])]).toContain('source' in d && d.source)
     }
     expect(new Set(LAYERS.map(l => l.pickRank)).size).toBe(LAYERS.length)
   })
 
-  it('picks Atlas’s pins and your places first, then cameras, flights and ships', () => {
-    expect(PICKABLE.slice(0, 5).map(p => p.kind)).toEqual(['pins', 'places', 'cameras', 'flights', 'ships'])
+  it('picks Atlas’s story and pins and your places first, then cameras, flights and ships', () => {
+    expect(PICKABLE.slice(0, 6).map(p => p.kind)).toEqual(['story', 'pins', 'places', 'cameras', 'flights', 'ships'])
   })
 })

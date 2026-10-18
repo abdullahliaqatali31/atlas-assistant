@@ -5,7 +5,7 @@
  */
 import type { LayerSpecification } from 'maplibre-gl'
 
-export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras' | 'pins'
+export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras' | 'pins' | 'story'
 
 export interface LayerDef {
   id: LayerId
@@ -21,6 +21,10 @@ export interface LayerDef {
   draw: LayerSpecification[]
   /** Lower wins when several items sit under the pointer. */
   pickRank: number
+  /** The map layer that can be clicked, when it is not the first one drawn. */
+  pickLayer?: string
+  /** More sources this layer draws from (e.g. the lines between story items). */
+  extraSources?: string[]
 }
 
 const HALO = '#0b1020'
@@ -183,6 +187,63 @@ export const LAYERS: LayerDef[] = [
       },
     ],
   },
+  {
+    id: 'story',
+    label: 'News story',
+    kind: 'News',
+    dot: '#fbbf24',
+    source: 'story',
+    extraSources: ['story-links'],
+    pickRank: -2,
+    pickLayer: 'story',
+    draw: [
+      // Lines between related items, under the markers; their dashes march (MapView animates them).
+      {
+        id: 'story-links',
+        type: 'line',
+        source: 'story-links',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#fbbf24', 'line-width': 2, 'line-opacity': 0.85, 'line-dasharray': [0, 4, 3] },
+      },
+      {
+        id: 'story-glow',
+        type: 'circle',
+        source: 'story',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['get', 'severity'], 0, 14, 10, 26],
+          'circle-color': ['get', 'color'],
+          'circle-opacity': 0.18,
+          'circle-blur': 0.6,
+        },
+      },
+      {
+        id: 'story',
+        type: 'circle',
+        source: 'story',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['get', 'severity'], 0, 9, 10, 13],
+          'circle-color': ['get', 'color'],
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#0b1020',
+        },
+      },
+      {
+        id: 'story-numbers',
+        type: 'symbol',
+        source: 'story',
+        layout: { 'text-field': ['to-string', ['get', 'n']], 'text-size': 11, 'text-allow-overlap': true, 'text-ignore-placement': true },
+        paint: { 'text-color': '#0b1020' },
+      },
+      {
+        id: 'story-labels',
+        type: 'symbol',
+        source: 'story',
+        minzoom: 2.5,
+        layout: { 'text-field': ['get', 'title'], 'text-offset': [0, 1.6], 'text-size': 11, 'text-anchor': 'top', 'text-max-width': 14 },
+        paint: { 'text-color': '#fde68a', 'text-halo-color': HALO, 'text-halo-width': 1.6 },
+      },
+    ],
+  },
 ]
 
 /** The ring around the picked item, above every layer. */
@@ -194,10 +255,10 @@ export const SELECTED_LAYER: LayerSpecification = {
 }
 
 /** Every source the map owns (kept across style switches). */
-export const OWN_SOURCES: ReadonlySet<string> = new Set([...LAYERS.map(l => l.source), 'selected'])
+export const OWN_SOURCES: ReadonlySet<string> = new Set([...LAYERS.flatMap(l => [l.source, ...(l.extraSources ?? [])]), 'selected'])
 
 /** Layers that can be clicked, top priority first. */
-export const PICKABLE = [...LAYERS].sort((a, b) => a.pickRank - b.pickRank).map(l => ({ layer: l.draw[0]!.id, kind: l.id }))
+export const PICKABLE = [...LAYERS].sort((a, b) => a.pickRank - b.pickRank).map(l => ({ layer: l.pickLayer ?? l.draw[0]!.id, kind: l.id }))
 
 export const layerDef = (id: LayerId) => LAYERS.find(l => l.id === id)!
 

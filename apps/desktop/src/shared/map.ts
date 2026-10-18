@@ -7,7 +7,7 @@
  */
 
 /** Mirrors the renderer's layer registry (a test keeps them equal). */
-export const MAP_LAYERS = ['places', 'quakes', 'events', 'flights', 'ships', 'satellites', 'cameras', 'pins'] as const
+export const MAP_LAYERS = ['places', 'quakes', 'events', 'flights', 'ships', 'satellites', 'cameras', 'pins', 'story'] as const
 export type MapLayer = (typeof MAP_LAYERS)[number]
 
 export const MAP_STYLES = ['satellite', 'today', 'relief', 'dark', 'light'] as const
@@ -20,6 +20,39 @@ export interface Pin {
   note?: string | undefined
 }
 
+/** One news item placed where it happens, in the order the assistant tells it. */
+export interface StoryItem {
+  lat: number
+  lon: number
+  /** Short headline. */
+  label: string
+  /** One or two sentences in the owner's language. */
+  summary?: string | undefined
+  /** Outlet or feed name. */
+  source?: string | undefined
+  url?: string | undefined
+  /** Where it is, as said ("Gaza", "Strait of Hormuz"). */
+  place?: string | undefined
+  /** 0-10, how much it matters; bigger markers for bigger stories. */
+  severity?: number | undefined
+}
+
+/** Why two story items are joined by a line. */
+export interface StoryLink {
+  /** 1-based item numbers. */
+  from: number
+  to: number
+  reason?: string | undefined
+}
+
+export interface Story {
+  title: string
+  items: StoryItem[]
+  links: StoryLink[]
+}
+
+export const MAX_STORY_ITEMS = 20
+
 export type MapOp =
   | { kind: 'view'; lat?: number | undefined; lon?: number | undefined; zoom?: number | undefined; label?: string | undefined; style?: MapStyle | undefined; globe?: boolean | undefined }
   | { kind: 'layers'; show: MapLayer[]; hide: MapLayer[] }
@@ -29,6 +62,8 @@ export type MapOp =
   | { kind: 'clear-selection' }
   | { kind: 'pins'; add: Pin[]; clear: boolean }
   | { kind: 'back' }
+  | { kind: 'story'; story: Story | null }
+  | { kind: 'tour'; action: 'play' | 'stop'; secondsEach: number }
 
 export const MC = {
   op: 'map:op',
@@ -63,6 +98,39 @@ export const parsePin = (v: unknown): Pin | null => {
   const label = text(o.label, 80)
   if (lat === undefined || lon === undefined || !label) return null
   return { lat, lon, label, note: text(o.note, 240) }
+}
+
+const httpsUrl = (v: unknown) => {
+  const u = text(v, 500)
+  return u && /^https:\/\/[^\s]+$/.test(u) ? u : undefined
+}
+
+/** A story from tool input: items need a real coordinate (the runtime resolves place names first). */
+export const parseStory = (input: Record<string, unknown>): Story => {
+  const title = text(input.title, 100) ?? 'News on the map'
+  const raw = Array.isArray(input.items) ? input.items : []
+  const items: StoryItem[] = []
+  for (const r of raw.slice(0, MAX_STORY_ITEMS)) {
+    if (!r || typeof r !== 'object') continue
+    const o = r as Record<string, unknown>
+    const lat = num(o.lat, -90, 90)
+    const lon = num(o.lon, -180, 180)
+    const label = text(o.label, 140)
+    if (lat === undefined || lon === undefined || !label) continue
+    items.push({ lat, lon, label, summary: text(o.summary, 400), source: text(o.source, 80), url: httpsUrl(o.url), place: text(o.place, 80), severity: num(o.severity, 0, 10) })
+  }
+  if (!items.length) throw new Error('A story needs items, each with a label and either lat/lon or a place name.')
+  const links: StoryLink[] = []
+  for (const r of Array.isArray(input.links) ? input.links : []) {
+    if (!r || typeof r !== 'object') continue
+    const o = r as Record<string, unknown>
+    const from = num(o.from, 1, items.length)
+    const to = num(o.to, 1, items.length)
+    if (from === undefined || to === undefined || from === to || !Number.isInteger(from) || !Number.isInteger(to)) continue
+    if (links.some(l => (l.from === from && l.to === to) || (l.from === to && l.to === from))) continue
+    links.push({ from, to, reason: text(o.reason, 120) })
+  }
+  return { title, items, links: links.slice(0, 40) }
 }
 
 /** Builds and checks one map op from a map_* tool's input. Errors are written for the model. */
@@ -107,6 +175,14 @@ export const mapOpFromTool = (tool: string, input: Record<string, unknown>): Map
     }
     case 'map_back':
       return { kind: 'back' }
+    case 'map_story': {
+      if (input.clear === true && input.items === undefined) return { kind: 'story', story: null }
+      return { kind: 'story', story: parseStory(input) }
+    }
+    case 'map_tour': {
+      const action = input.action === 'stop' ? 'stop' : 'play'
+      return { kind: 'tour', action, secondsEach: num(input.seconds_each, 3, 30) ?? 7 }
+    }
   }
   throw new Error(`Unknown map tool ${tool}.`)
 }

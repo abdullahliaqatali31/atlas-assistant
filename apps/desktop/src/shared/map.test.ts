@@ -41,6 +41,35 @@ describe('mapOpFromTool', () => {
     expect(mapOpFromTool('map_pins', { clear: true })).toEqual({ kind: 'pins', add: [], clear: true })
   })
 
+  it('builds a story: items need a place, links must join two real items once, links only https', () => {
+    const op = mapOpFromTool('map_story', {
+      title: 'Red Sea shipping',
+      items: [
+        { lat: 15.5, lon: 42.5, label: 'Ship attacked off Yemen', severity: 8, url: 'https://example.com/a' },
+        { lat: 30.0, lon: 32.5, label: 'Suez traffic down', url: 'javascript:alert(1)' },
+        { label: 'No place given' },
+      ],
+      links: [
+        { from: 1, to: 2, reason: 'cause and effect' },
+        { from: 2, to: 1 },
+        { from: 1, to: 1 },
+        { from: 1, to: 9 },
+      ],
+    })
+    expect(op).toMatchObject({ kind: 'story', story: { title: 'Red Sea shipping', links: [{ from: 1, to: 2, reason: 'cause and effect' }] } })
+    const items = (op as { story: { items: { url?: string }[] } }).story.items
+    expect(items).toHaveLength(2)
+    expect(items[0]?.url).toBe('https://example.com/a')
+    expect(items[1]?.url).toBeUndefined()
+    expect(() => mapOpFromTool('map_story', { items: [{ label: 'x' }] })).toThrow('A story needs items')
+    expect(mapOpFromTool('map_story', { clear: true })).toEqual({ kind: 'story', story: null })
+  })
+
+  it('plays or stops a tour with a sensible pace', () => {
+    expect(mapOpFromTool('map_tour', {})).toEqual({ kind: 'tour', action: 'play', secondsEach: 7 })
+    expect(mapOpFromTool('map_tour', { action: 'stop', seconds_each: 1 })).toEqual({ kind: 'tour', action: 'stop', secondsEach: 7 })
+  })
+
   it('rejects tools it does not know', () => {
     expect(() => mapOpFromTool('map_delete', {})).toThrow('Unknown map tool')
   })

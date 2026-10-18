@@ -10,14 +10,15 @@ import maplibregl, { type GeoJSONSource, type Map as MapLibre, type StyleSpecifi
 import * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { MAX_PINS, type MapOp, type Pin } from '../../../shared/map.ts'
+import { MAX_PINS, type MapOp, type Pin, type Story } from '../../../shared/map.ts'
 import { CAMERA_COVERAGE, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
 import { cleanError, flightFeatures, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
 import { nearbyItems, type NearbyItem } from './hover.ts'
 import { HoverCard } from './HoverCard.tsx'
 import type { Selected } from './Inspector.tsx'
 import { layerDef, LAYERS, OWN_SOURCES, PICKABLE, readLayers, SELECTED_LAYER, type LayerId } from './layers.ts'
-import { describeFound, describeVisible, findItems, pinFeatures, ZOOM_FOR } from './mapops.ts'
+import { describeFound, describeVisible, findItems, linkFeatures, pinFeatures, storyFeatures, ZOOM_FOR } from './mapops.ts'
+import { NewsCanvas } from './NewsCanvas.tsx'
 import { pickAt } from './pick.ts'
 import { BASE_URL, carryOverlays, composeStyle, creditLine, STYLES, type CreditPart, type StyleId } from './styles.ts'
 
@@ -206,8 +207,29 @@ export function MapView({
   // ── The assistant's map ops (map_* tools): run here, answered in words ──
 
   const pins = useRef<Pin[]>([])
-  const now$ = useRef({ prefs, layers, selected, globe })
-  now$.current = { prefs, layers, selected, globe }
+  /** The news story on the map (map_story), the canvas item lit by hover, and a running tour. */
+  const [story, setStory] = useState<Story | null>(null)
+  const [hoverItem, setHoverItem] = useState<number | null>(null)
+  const [tour, setTour] = useState<{ i: number; secs: number } | null>(null)
+  const now$ = useRef({ prefs, layers, selected, globe, story })
+  now$.current = { prefs, layers, selected, globe, story }
+
+  const showStory = (s: Story | null) => {
+    setStory(s)
+    put('story', storyFeatures(s))
+    ;(map.current?.getSource('story-links') as GeoJSONSource | undefined)?.setData(linkFeatures(s) as unknown as FC)
+    if (!s && now$.current.selected?.kind === 'story') selectRef.current(null)
+  }
+
+  /** Fly to one story item and open its card. */
+  const focusItem = (i: number) => {
+    const m = map.current
+    const f = storyFeatures(now$.current.story).features[i]
+    if (!m || !f) return
+    const lngLat = f.geometry.coordinates as [number, number]
+    selectRef.current({ kind: 'story', lngLat, props: f.properties })
+    void fly(m, { center: lngLat, zoom: Math.max(m.getZoom(), ZOOM_FOR.story) })
+  }
 
   /** Fly and wait until the map settles (or a few seconds pass), keeping the view for Back. */
   const fly = (m: MapLibre, to: { center?: [number, number]; zoom?: number }) =>
@@ -292,10 +314,83 @@ export function MapView({
         if (!history.current.length) return 'There is no earlier view to go back to.'
         back()
         return 'Back to the previous view.'
+      case 'story': {
+        setTour(null)
+        if (!op.story) {
+          showStory(null)
+          return 'Took the story off the map.'
+        }
+        showStory(op.story)
+        showLayer('story')
+        const b = new maplibregl.LngLatBounds()
+        for (const it of op.story.items) b.extend([it.lon, it.lat])
+        history.current = [...history.current, viewOf(m)].slice(-20)
+        setCanGoBack(true)
+        if (op.story.items.length === 1) m.flyTo({ center: [op.story.items[0]!.lon, op.story.items[0]!.lat], zoom: Math.max(m.getZoom(), 5), duration: isLite() ? 0 : 1_400 })
+        else m.fitBounds(b, { padding: { top: 90, bottom: 110, left: 60, right: 360 }, maxZoom: 7, duration: isLite() ? 0 : 1_600 })
+        const { items, links } = op.story
+        return `Story "${op.story.title}" is on the map: ${items.length} numbered item${items.length === 1 ? '' : 's'}${links.length ? `, ${links.length} connection${links.length === 1 ? '' : 's'} drawn` : ''}; the News canvas is open. The owner can say "focus on number 2" (map_focus with query "#2") or ask for a tour (map_tour).`
+      }
+      case 'tour': {
+        const s = now$.current.story
+        if (op.action === 'stop') {
+          setTour(null)
+          return 'Tour stopped.'
+        }
+        if (!s) throw new Error('There is no story on the map to tour; put one there with map_story first.')
+        setTour({ i: 0, secs: op.secondsEach })
+        return `Tour started: ${s.items.length} stops, ${op.secondsEach} s each. Each stop opens its card.`
+      }
     }
   }
   const runOpRef = useRef(runOp)
   runOpRef.current = runOp
+
+  // The tour: one stop at a time, each card open for a few seconds, then the next; stops at the end.
+  useEffect(() => {
+    if (!tour || !story) return
+    focusItem(tour.i)
+    const next = setTimeout(() => setTour(t => (t && t.i + 1 < story.items.length ? { ...t, i: t.i + 1 } : null)), tour.secs * 1_000)
+    return () => clearTimeout(next)
+  }, [tour, story])
+
+  // Marching dashes along the story's connections; not in Lite mode, paused while the window is hidden.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !story?.links.length || isLite()) return
+    const steps: number[][] = [
+      [0, 4, 3],
+      [0.5, 4, 2.5],
+      [1, 4, 2],
+      [1.5, 4, 1.5],
+      [2, 4, 1],
+      [2.5, 4, 0.5],
+      [3, 4, 0],
+      [0, 0.5, 3, 3.5],
+      [0, 1, 3, 3],
+      [0, 1.5, 3, 2.5],
+      [0, 2, 3, 2],
+      [0, 2.5, 3, 1.5],
+      [0, 3, 3, 1],
+      [0, 3.5, 3, 0.5],
+    ]
+    let k = 0
+    const timer = setInterval(() => {
+      if (document.hidden || !m.getLayer('story-links')) return
+      k = (k + 1) % steps.length
+      m.setPaintProperty('story-links', 'line-dasharray', steps[k])
+    }, 70)
+    return () => clearInterval(timer)
+  }, [ready, story])
+
+  // The canvas item under the pointer lights its marker.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !m.getLayer('story-glow')) return
+    const base = ['interpolate', ['linear'], ['get', 'severity'], 0, 14, 10, 26]
+    m.setPaintProperty('story-glow', 'circle-radius', hoverItem === null ? base : ['case', ['==', ['get', 'n'], hoverItem + 1], 34, base])
+    m.setPaintProperty('story-glow', 'circle-opacity', hoverItem === null ? 0.18 : ['case', ['==', ['get', 'n'], hoverItem + 1], 0.45, 0.12])
+  }, [hoverItem, ready])
 
   useEffect(() => {
     if (!ready) return
@@ -518,6 +613,24 @@ export function MapView({
     <div className="relative h-full w-full overflow-hidden">
       <div ref={box} className="h-full w-full" aria-label="World map" role="region" />
       <HoverCard map={map.current} ready={ready} world={world} now={now} />
+      {story && (
+        <NewsCanvas
+          story={story}
+          active={tour ? tour.i : selected?.kind === 'story' ? Number(selected.props.n) - 1 : null}
+          playing={tour !== null}
+          onFocus={i => {
+            setTour(null)
+            focusItem(i)
+          }}
+          onHover={setHoverItem}
+          onPlay={() => setTour({ i: 0, secs: 7 })}
+          onStop={() => setTour(null)}
+          onClose={() => {
+            setTour(null)
+            showStory(null)
+          }}
+        />
+      )}
       {toolbar(controls)}
       <MapCredit parts={creditLine(prefs.style, LAYERS.filter(l => layers[l.id]).map(l => l.id))} />
       {styleError && <p className="glass absolute bottom-16 left-2 z-10 rounded-lg bg-solid/85 px-2 py-1 text-[11px] text-warm">{styleError}</p>}
