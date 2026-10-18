@@ -468,8 +468,9 @@ export function Companion({
   useEffect(() => onPresence?.({ state: presence, level: listening ? level : 0 }), [onPresence, presence, level, listening])
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-x-2 gap-y-2 border-b border-border px-4 py-2.5">
+    // A container: the header adapts to the panel width (side panel, drawer or compact window), not the screen.
+    <div className="@container flex min-h-0 flex-1 flex-col">
+      <header className="flex items-center gap-2 border-b border-border px-3 py-2 @[420px]:px-4 @[420px]:py-2.5">
         <span
           className={`size-2 rounded-full ${listening ? 'bg-danger' : ready ? 'bg-accent' : 'bg-muted'} ${replyId || speaking || listening ? 'thinking-dot' : ''}`}
           aria-hidden
@@ -483,15 +484,28 @@ export function Companion({
             {[nameOn ? wake?.aliases[0] : null, wake?.clap ? '👏👏' : null, wake?.whistle ? 'seeti' : null].filter(Boolean).join(' · ')}
           </span>
         )}
-        <span className="text-xs text-muted" role="status">
+        <span className="min-w-0 truncate text-xs text-muted" role="status">
           {state}
         </span>
+        {/* Narrow panels: the mode as a compact menu instead of four buttons. */}
+        <select
+          value={status.mode}
+          onChange={e => void window.assistant.setMode(e.target.value as UiMode)}
+          aria-label="Mode"
+          className="field ml-auto w-auto shrink-0 py-1 text-xs capitalize @[420px]:hidden"
+        >
+          {MODES.map(m => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
         <ToggleGroup.Root
           type="single"
           value={status.mode}
           onValueChange={v => v && void window.assistant.setMode(v as UiMode)}
           aria-label="Mode"
-          className="ml-auto flex rounded-xl border border-border bg-bg p-0.5"
+          className="ml-auto hidden shrink-0 rounded-xl border border-border bg-bg p-0.5 @[420px]:flex"
         >
           {MODES.map(m => (
             <ToggleGroup.Item
@@ -516,7 +530,7 @@ export function Companion({
           </button>
         )}
         {onOpenControls && (
-          <button type="button" onClick={onOpenControls} className="icon-btn" aria-label="Connections, permissions and activity" title="Connections, permissions and activity">
+          <button type="button" onClick={onOpenControls} className="icon-btn hidden @[360px]:inline-flex" aria-label="Connections, permissions and activity" title="Connections, permissions and activity">
             <SlidersIcon />
           </button>
         )}

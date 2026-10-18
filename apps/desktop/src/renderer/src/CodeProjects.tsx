@@ -129,11 +129,12 @@ function Overview({ state, onOpen, onFolders }: { state: CodeState; onOpen: (id:
     )
   }
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    // minmax(0, 1fr): long project text truncates instead of widening the card past a narrow window.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
       {state.projects.map(p => {
         const live = state.running.filter(r => r.projectId === p.id && !r.endedAt)
         return (
-          <button key={p.id} type="button" onClick={() => onOpen(p.id)} className="tile rise-in space-y-2 p-3 text-left transition-colors hover:border-accent/40">
+          <button key={p.id} type="button" onClick={() => onOpen(p.id)} className="tile rise-in min-w-0 space-y-2 p-3 text-left transition-colors hover:border-accent/40">
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1.5 truncate font-medium">

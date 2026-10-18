@@ -29,6 +29,7 @@ import { AudioGate } from './bargein.ts'
 import { Controls } from './controls.ts'
 import { DesktopService } from './desktop/service.ts'
 import { FileService } from './files/service.ts'
+import { UiService } from './ui.ts'
 import { IdentityGate } from './identity.ts'
 import { registerBackupIpc } from './backup.ts'
 import { CodeService } from './code/service.ts'
@@ -184,6 +185,13 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
     usage = u
     toRenderer(CH.usageChanged, u)
   },
+  onUi: e => {
+    // The model's window tools.
+    void ui.handleOp(e.op).then(
+      result => supervisor.files({ type: 'ui-result', requestId: e.requestId, result }),
+      error => supervisor.files({ type: 'ui-result', requestId: e.requestId, error: error instanceof Error ? error.message : String(error) }),
+    )
+  },
   onDesktop: e => {
     // The model's desktop-app tools, answered by request id; failures go back as text the model can relay.
     void desktop.handleOp(e.op).then(
@@ -249,6 +257,7 @@ const createWindow = ({ inactive = false } = {}) => {
     },
   })
   win.once('ready-to-show', () => (inactive ? win?.showInactive() : win?.show()))
+  ui.watch(win)
   win.on('focus', () => win?.flashFrame(false))
   // Closing the window destroys the renderer (keeping idle RAM low); the tray and runtime stay up.
   win.on('closed', () => {
@@ -374,6 +383,21 @@ files.register()
 /** Desktop apps: the owner's chosen apps, UI Automation through a PowerShell worker, WhatsApp, "watch me". */
 const desktop = new DesktopService({ handle, toRenderer, requireOwner: () => requireOwner(), log: (level, message) => log(level, message) })
 desktop.register()
+/** Atlas's own window: page, conversation, size, compact mode, kept on top. */
+const ui = new UiService({
+  window: () => win,
+  open: async () => {
+    createWindow()
+    for (let i = 0; i < 100 && !rendererReady; i++) await new Promise(r => setTimeout(r, 100))
+    if (!win) throw new Error('The window did not open.')
+    return win
+  },
+  toRenderer,
+  handle,
+  requireOwner: () => requireOwner(),
+  onChange: state => supervisor.ui(state),
+})
+ui.register()
 handle(CH.send, arg => {
   const text = parseMessage(arg)
   if (text === null) throw new Error('Message must be non-empty text under 8000 characters.')

@@ -1,9 +1,10 @@
-import { AppWindow, Brain, FolderKanban, FolderOpen, LayoutDashboard, MessageSquare, Newspaper, Settings2, SlidersHorizontal } from 'lucide-react'
+import { AppWindow, Brain, FolderKanban, FolderOpen, LayoutDashboard, Maximize2, MessageSquare, Minimize2, Newspaper, Pin, PinOff, Settings2, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import type { ControlState } from '../../shared/control.ts'
 import type { IdentityView } from '../../shared/identity.ts'
 import type { RuntimeStatus } from '../../shared/ipc.ts'
+import { isView, type UiChange, type View } from '../../shared/ui.ts'
 import logo from './assets/logo.svg'
 import { Companion } from './Companion.tsx'
 import { Controls, PausedBanner } from './Controls.tsx'
@@ -18,10 +19,10 @@ import { ProjectsHome } from './ProjectsHome.tsx'
 import { SetupSections } from './Personality.tsx'
 import { Setup } from './Setup.tsx'
 
-type View = 'home' | 'news' | 'projects' | 'files' | 'apps' | 'learning' | 'controls' | 'setup'
-
 /** Wide enough for the canvas and the chat side by side; narrower, the chat slides over the canvas. */
 const WIDE = '(min-width: 1100px)'
+/** Phone-width windows put the rail at the bottom. */
+const PHONE = '(max-width: 639px)'
 
 const useMedia = (query: string) => {
   const [match, setMatch] = useState(() => window.matchMedia(query).matches)
@@ -50,18 +51,26 @@ const store = (key: string, value: string) => {
 }
 
 /**
- * Layout: the rail on the left, then the conversation as a side panel, and
- * the broad canvas (Home, News, Projects…) filling the right. The chat
- * stays mounted when hidden, so a conversation survives; it opens by itself
- * when Atlas speaks up.
+ * Layout, by width: wide windows have the rail, the conversation as a side
+ * panel and the canvas; narrower ones slide the conversation over the canvas;
+ * phone-width ones move the rail to a bottom bar. Compact mode is a small
+ * chat-only window. The conversation stays mounted through all of these, so
+ * nothing is lost; it opens by itself when Atlas speaks up. The page tells
+ * main what it shows, and Atlas can change it (views, chat, size).
  */
 export function App() {
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [controls, setControls] = useState<ControlState | null>(null)
-  const [view, setView] = useState<View>(() => (stored('view', 'home') as View))
+  const [view, setView] = useState<View>(() => {
+    const v = stored('view', 'home')
+    return isView(v) ? v : 'home'
+  })
   const [presence, setPresence] = useState<Presence>({ state: 'idle', level: 0 })
   const wide = useMedia(WIDE)
+  const phone = useMedia(PHONE)
   const [chatOpen, setChatOpen] = useState(() => stored('chat', 'open') === 'open')
+  const [compact, setCompact] = useState(false)
+  const [pinned, setPinned] = useState(false)
   const [identity, setIdentity] = useState<IdentityView | null>(null)
   const [suggestions, setSuggestions] = useState(0)
 
@@ -74,9 +83,19 @@ export function App() {
     const offIdentity = window.identity.onChanged(setIdentity)
     void window.learning.get().then(v => setSuggestions(v.pending.length), () => undefined)
     const offLearning = window.learning.onChanged(v => setSuggestions(v.pending.length))
+    void window.ui.state().then(s => setPinned(s.pinned), () => undefined)
     // Atlas speaks up on its own: show the conversation.
     const offReply = window.assistant.onReply(e => {
       if (e.type === 'initiative') openChat(true)
+    })
+    // Atlas (through main) changes the page, the conversation or compact mode.
+    const offCommand = window.ui.onCommand(c => {
+      if (c.compact !== undefined) setCompact(c.compact)
+      if (c.view) {
+        setView(c.view)
+        store('view', c.view)
+      }
+      if (c.chat !== undefined) openChat(c.chat)
     })
     return () => {
       off()
@@ -84,8 +103,14 @@ export function App() {
       offIdentity()
       offLearning()
       offReply()
+      offCommand()
     }
   }, [])
+
+  // Main (and so Atlas) always knows what the window shows.
+  useEffect(() => {
+    window.ui.report({ view, chatOpen, compact })
+  }, [view, chatOpen, compact])
 
   const go = (v: View) => {
     setView(v)
@@ -97,6 +122,10 @@ export function App() {
     setChatOpen(open)
     store('chat', open ? 'open' : 'closed')
   }
+  const setWindow = async (change: UiChange) => {
+    const s = await window.ui.set(change).catch(() => null)
+    if (s) setPinned(s.pinned)
+  }
 
   if (!status) return <div className="aurora" />
 
@@ -104,7 +133,7 @@ export function App() {
   if (status.phase === 'setup') {
     return (
       <Frame status={status}>
-        <div className="glass mx-auto my-6 h-[calc(100%-3rem)] w-full max-w-xl overflow-hidden rounded-3xl">
+        <div className="glass mx-auto my-3 h-[calc(100%-1.5rem)] w-full max-w-xl overflow-hidden rounded-3xl sm:my-6 sm:h-[calc(100%-3rem)]">
           <Setup status={status} onSaved={setStatus} />
         </div>
       </Frame>
@@ -130,6 +159,32 @@ export function App() {
     ['controls', 'Connections, permissions and activity', <SlidersHorizontal key="c" className="size-[18px]" />],
     ['setup', 'Setup and personality', <Settings2 key="s" className="size-[18px]" />],
   ]
+  const navButtons = nav.map(([id, label, icon]) => (
+    <RailButton key={id} label={label} active={view === id} onClick={() => go(id)}>
+      {icon}
+    </RailButton>
+  ))
+  const chatButton = (
+    <RailButton label={chatOpen ? 'Hide the conversation' : 'Talk to Atlas'} active={chatOpen} onClick={() => openChat(!chatOpen)}>
+      <span className="relative">
+        <MessageSquare className="size-[18px]" />
+        {presence.state !== 'idle' && <span className="thinking-dot absolute -right-1 -top-1 size-2 rounded-full bg-accent" aria-hidden />}
+      </span>
+    </RailButton>
+  )
+  const compactButton = (
+    <RailButton label="Compact mode: a small chat window" active={false} onClick={() => void setWindow({ size: 'compact' })}>
+      <Minimize2 className="size-[18px]" />
+    </RailButton>
+  )
+
+  const asideClass = compact
+    ? 'mx-2 mb-2 flex-1'
+    : phone
+      ? `absolute inset-x-0 top-0 bottom-0 z-30 mx-2 mb-2 bg-bg/95 shadow-2xl backdrop-blur-xl ${chatOpen ? '' : 'hidden'}`
+      : wide
+        ? `mb-2 ml-2 w-[380px] shrink-0 xl:w-[420px] 2xl:w-[460px] ${chatOpen ? '' : 'hidden'}`
+        : `absolute inset-y-0 left-0 z-30 mb-2 ml-2 w-[min(440px,calc(100%-1rem))] bg-bg/95 shadow-2xl backdrop-blur-xl ${chatOpen ? '' : 'hidden'}`
 
   return (
     <Frame
@@ -137,45 +192,58 @@ export function App() {
       locked={locked}
       overlay={identity && locked ? <LockScreen view={identity} ownerName={status.setup.ownerName} voice={status.speech.available} /> : null}
     >
-      <nav className="glass mb-2 ml-2 flex w-14 shrink-0 flex-col items-center gap-1 rounded-2xl py-3" aria-label="Main">
-        {nav.map(([id, label, icon]) => (
-          <RailButton key={id} label={label} active={view === id} onClick={() => go(id)}>
-            {icon}
-          </RailButton>
-        ))}
-        <div className="flex-1" />
-        <RailButton label={chatOpen ? 'Hide the conversation' : 'Talk to Atlas'} active={chatOpen} onClick={() => openChat(!chatOpen)}>
-          <span className="relative">
-            <MessageSquare className="size-[18px]" />
-            {presence.state !== 'idle' && <span className="thinking-dot absolute -right-1 -top-1 size-2 rounded-full bg-accent" aria-hidden />}
-          </span>
-        </RailButton>
-      </nav>
+      {!compact && !phone && (
+        <nav className="glass mb-2 ml-2 flex w-14 shrink-0 flex-col items-center gap-1 overflow-y-auto rounded-2xl py-3" aria-label="Main">
+          {navButtons}
+          <div className="flex-1" />
+          {compactButton}
+          {chatButton}
+        </nav>
+      )}
 
-      <div className="relative flex min-w-0 flex-1">
-        {/* The conversation: a side panel on the left when wide, a drawer over the canvas when narrow. Always mounted. */}
-        <aside
-          aria-label="Conversation"
-          className={`glass mb-2 ml-2 flex min-h-0 flex-col overflow-hidden rounded-2xl ${
-            wide ? `w-[400px] shrink-0 xl:w-[440px] ${chatOpen ? '' : 'hidden'}` : `absolute inset-y-0 left-0 z-30 w-[min(440px,calc(100%-1rem))] shadow-2xl ${chatOpen ? '' : 'hidden'}`
-          }`}
-        >
-          <Companion status={status} onOpenSetup={() => go('setup')} onOpenControls={() => go('controls')} onPresence={setPresence} />
-        </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          {/* Over the canvas (narrow windows): a dimmed backdrop; clicking it puts the conversation away. */}
+          {!compact && !wide && chatOpen && <button type="button" aria-label="Close the conversation" className="absolute inset-0 z-20 rounded-2xl bg-black/30" onClick={() => openChat(false)} />}
+          {/* The conversation: side panel, drawer, full width on phones, or the whole compact window. Always mounted. */}
+          <aside aria-label="Conversation" className={`glass flex min-h-0 flex-col overflow-hidden rounded-2xl ${asideClass}`}>
+            {compact && (
+              <div className="flex items-center gap-1 border-b border-border px-2 py-1">
+                <span className="hud-label flex-1 pl-1">Compact</span>
+                <button type="button" className="icon-btn size-8" onClick={() => void setWindow({ pinned: !pinned })} aria-pressed={pinned} aria-label={pinned ? 'Stop keeping on top' : 'Keep on top of other windows'} title={pinned ? 'Stop keeping on top' : 'Keep on top'}>
+                  {pinned ? <PinOff className="size-4" aria-hidden /> : <Pin className="size-4" aria-hidden />}
+                </button>
+                <button type="button" className="icon-btn size-8" onClick={() => void setWindow({ size: 'normal' })} aria-label="Back to the full window" title="Full window">
+                  <Maximize2 className="size-4" aria-hidden />
+                </button>
+              </div>
+            )}
+            <Companion status={status} onOpenSetup={() => go('setup')} onOpenControls={() => go('controls')} onPresence={setPresence} />
+          </aside>
 
-        <main className="glass mx-2 mb-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl">
-          {controls && <PausedBanner state={controls} />}
-          <div className="min-h-0 flex-1">
-            {view === 'home' && <Home status={status} controls={controls} presence={presence} ownerName={status.setup.ownerName} go={go} />}
-            {view === 'news' && <NewsPage />}
-            {view === 'projects' && <ProjectsHome />}
-            {view === 'files' && <FilesPage onTalk={() => openChat(true)} />}
-            {view === 'apps' && <AppsPage onTalk={() => openChat(true)} />}
-            {view === 'learning' && <Learning onTalk={() => openChat(true)} />}
-            {view === 'controls' && controls && <Controls state={controls} onBack={() => go('home')} />}
-            {view === 'setup' && (status.phase === 'ready' ? <SetupSections connection={setup} onClose={() => go('home')} /> : setup)}
-          </div>
-        </main>
+          {!compact && (
+            <main className={`glass mx-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl ${phone ? 'mb-1' : 'mb-2'}`}>
+              {controls && <PausedBanner state={controls} />}
+              <div className="min-h-0 flex-1">
+                {view === 'home' && <Home status={status} controls={controls} presence={presence} ownerName={status.setup.ownerName} go={go} />}
+                {view === 'news' && <NewsPage />}
+                {view === 'projects' && <ProjectsHome />}
+                {view === 'files' && <FilesPage onTalk={() => openChat(true)} />}
+                {view === 'apps' && <AppsPage onTalk={() => openChat(true)} />}
+                {view === 'learning' && <Learning onTalk={() => openChat(true)} />}
+                {view === 'controls' && controls && <Controls state={controls} onBack={() => go('home')} />}
+                {view === 'setup' && (status.phase === 'ready' ? <SetupSections connection={setup} onClose={() => go('home')} /> : setup)}
+              </div>
+            </main>
+          )}
+        </div>
+
+        {!compact && phone && (
+          <nav className="glass mx-2 mb-2 flex h-12 shrink-0 items-center gap-0.5 overflow-x-auto rounded-2xl px-1" aria-label="Main">
+            {chatButton}
+            {navButtons}
+          </nav>
+        )}
       </div>
     </Frame>
   )

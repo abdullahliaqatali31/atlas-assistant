@@ -13,6 +13,7 @@ import { BC, type BackupBridge } from '../shared/backup.ts'
 import { KC, type CodeBridge, type CodeState } from '../shared/code.ts'
 import { DC, type DesktopBridge, type DesktopState } from '../shared/desktop.ts'
 import { FC, type FilesBridge, type FilesState } from '../shared/files.ts'
+import { UC, type PageCommand, type UiBridge } from '../shared/ui.ts'
 import { NC, type NewsBridge, type NewsResult } from '../shared/news.ts'
 import { WC, type WakeBridge, type WakeView } from '../shared/wake.ts'
 import { PC, type PersonalityBridge, type PersonalityView } from '../shared/personality.ts'
@@ -232,3 +233,11 @@ const desktop: DesktopBridge = {
   onChanged: cb => subscribe<DesktopState>(DC.changed, cb),
 }
 contextBridge.exposeInMainWorld('desktop', desktop)
+
+const ui: UiBridge = {
+  report: state => ipcRenderer.send(UC.report, state),
+  onCommand: cb => subscribe<PageCommand>(UC.command, cb),
+  set: change => ipcRenderer.invoke(UC.set, change),
+  state: () => ipcRenderer.invoke(UC.state),
+}
+contextBridge.exposeInMainWorld('ui', ui)

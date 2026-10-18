@@ -61,6 +61,7 @@ export interface SupervisorDeps {
   onCode?: (e: Extract<HostEvent, { type: 'code' | 'code-minutes' }>) => void
   onFiles?: (e: Extract<HostEvent, { type: 'files' }>) => void
   onDesktop?: (e: Extract<HostEvent, { type: 'desktop' }>) => void
+  onUi?: (e: Extract<HostEvent, { type: 'ui' }>) => void
 }
 
 const STABLE_MS = 60_000
@@ -75,6 +76,7 @@ export class RuntimeSupervisor {
   private mode: UiMode = 'companion'
   private speech = true
   private lastNews: Extract<HostRequest, { type: 'news-snapshot' }>['headlines'] = []
+  private lastUi: Extract<HostRequest, { type: 'ui-snapshot' }>['state'] | null = null
   private activeReply: string | null = null
   private readonly taskRequests = new Map<string, (t: TaskView[]) => void>()
   private readonly todayRequests = new Map<string, (l: DayLine[]) => void>()
@@ -292,8 +294,14 @@ export class RuntimeSupervisor {
     return true
   }
 
-  /** File and desktop-app tool answers. */
-  files(msg: Extract<HostRequest, { type: 'files-result' | 'desktop-result' }>): boolean {
+  /** Atlas's own window, kept for a restarted runtime too. */
+  ui(state: Extract<HostRequest, { type: 'ui-snapshot' }>['state']) {
+    this.lastUi = state
+    if (this.child) this.post({ type: 'ui-snapshot', state })
+  }
+
+  /** File, desktop-app and window tool answers. */
+  files(msg: Extract<HostRequest, { type: 'files-result' | 'desktop-result' | 'ui-result' }>): boolean {
     if (!this.child) return false
     this.post(msg)
     return true
@@ -333,6 +341,7 @@ export class RuntimeSupervisor {
           if (this.mode !== 'companion') this.post({ type: 'set-mode', mode: this.mode })
           this.post({ type: 'set-speech', enabled: this.speech })
           if (this.lastNews.length) this.post({ type: 'news-snapshot', headlines: this.lastNews })
+          if (this.lastUi) this.post({ type: 'ui-snapshot', state: this.lastUi })
         }
         this.deps.onStatus(e)
         break
@@ -412,6 +421,9 @@ export class RuntimeSupervisor {
         break
       case 'desktop':
         this.deps.onDesktop?.(e)
+        break
+      case 'ui':
+        this.deps.onUi?.(e)
         break
       case 'log':
         this.deps.log(e.level, e.message)
