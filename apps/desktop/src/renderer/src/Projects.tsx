@@ -74,10 +74,8 @@ export function Projects() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-        <FolderKanban className="size-4 text-accent" aria-hidden />
-        <h1 className="flex-1 text-sm font-semibold">Projects</h1>
-        <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+      <header className="flex items-center justify-end gap-2 border-b border-border px-3 py-1.5">
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => setCreating(true)}>
           <Plus className="size-3.5" aria-hidden /> New project
         </button>
       </header>
@@ -87,8 +85,8 @@ export function Projects() {
         </p>
       )}
 
-      <div className="flex min-h-0 flex-1">
-        <nav className="w-60 shrink-0 space-y-1.5 overflow-y-auto border-r border-border p-3" aria-label="Project list">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto @2xl:flex-row @2xl:overflow-hidden">
+        <nav className="max-h-56 shrink-0 space-y-1.5 overflow-y-auto border-b border-border p-3 @2xl:max-h-none @2xl:w-60 @2xl:border-b-0 @2xl:border-r" aria-label="Project list">
           {creating && (
             <NewProject
               onCancel={() => setCreating(false)}
@@ -123,7 +121,7 @@ export function Projects() {
           ))}
         </nav>
 
-        <section className="min-w-0 flex-1 overflow-y-auto px-5 py-4" aria-live="polite">
+        <section className="min-w-0 flex-1 px-3 py-3 @2xl:overflow-y-auto @2xl:px-5 @2xl:py-4" aria-live="polite">
           {detail ? <Detail key={detail.id} project={detail} run={run} /> : <p className="text-sm text-muted">Pick a project.</p>}
         </section>
       </div>
@@ -144,7 +142,7 @@ function Detail({ project: p, run }: { project: ProjectDetailView; run: Run }) {
   return (
     <div className="mx-auto max-w-2xl space-y-4">
       <div className="flex items-start gap-3">
-        <h2 className="min-w-0 flex-1 text-lg font-semibold">{p.name}</h2>
+        <h2 className="min-w-0 flex-1 text-base font-semibold">{p.name}</h2>
         <div className="w-36">
           <Select
             label="Project status"
@@ -156,7 +154,7 @@ function Detail({ project: p, run }: { project: ProjectDetailView; run: Run }) {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @xl:grid-cols-2">
         <label className="flex flex-col gap-1.5 text-xs">
           <span className="hud-label">Goals</span>
           <textarea value={goals} onChange={e => setGoals(e.target.value)} rows={3} maxLength={2000} className="field resize-none text-sm" placeholder="What does done look like?" />
@@ -339,7 +337,7 @@ function AddCommitment({ onAdd }: { onAdd: (what: string, toWhom: string, dueAt:
     }
   }
   return (
-    <form onSubmit={e => void submit(e)} className="grid grid-cols-[1fr_8rem] gap-2 pt-1 sm:grid-cols-[1fr_8rem_12rem_auto]">
+    <form onSubmit={e => void submit(e)} className="grid grid-cols-[1fr_8rem] gap-2 pt-1 @2xl:grid-cols-[1fr_8rem_12rem_auto]">
       <input value={what} onChange={e => setWhat(e.target.value)} maxLength={500} placeholder="What was promised…" className="field py-1 text-xs" aria-label="What was promised" />
       <input value={toWhom} onChange={e => setToWhom(e.target.value)} maxLength={120} placeholder="To whom" className="field py-1 text-xs" aria-label="Promised to" />
       <input type="datetime-local" value={due} onChange={e => setDue(e.target.value)} className="field py-1 text-xs" aria-label="Due (optional)" />

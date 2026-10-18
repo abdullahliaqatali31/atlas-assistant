@@ -47,19 +47,19 @@ export function NewsCard({ h, saved, onToggle, compact = false }: { h: Headline;
     <article className="tile rise-in group flex min-w-0 flex-col overflow-hidden">
       <a href={h.link} target="_blank" rel="noreferrer" className="block" title="Open the article">
         {h.image && !broken ? (
-          <img src={h.image} alt="" loading="lazy" onError={() => setBroken(true)} className={`w-full object-cover ${compact ? 'h-28' : 'h-40'} transition-transform duration-300 group-hover:scale-[1.02]`} />
+          <img src={h.image} alt="" loading="lazy" onError={() => setBroken(true)} className={`aspect-[16/8] w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]`} />
         ) : (
-          <div className={`flex w-full items-center justify-center bg-surface-strong text-muted ${compact ? 'h-16' : 'h-24'}`}>
+          <div className={`flex w-full items-center justify-center bg-surface-strong text-muted ${compact ? 'h-12' : 'h-16'}`}>
             <Newspaper className="size-6" aria-hidden />
           </div>
         )}
       </a>
-      <div className="flex flex-1 flex-col gap-1.5 p-3">
-        <a href={h.link} target="_blank" rel="noreferrer" className={`font-medium leading-snug hover:text-accent ${compact ? 'line-clamp-2 text-sm' : 'line-clamp-3'}`} dir="auto">
+      <div className="flex flex-1 flex-col gap-1 p-2.5">
+        <a href={h.link} target="_blank" rel="noreferrer" className="line-clamp-2 text-sm font-medium leading-snug hover:text-accent" dir="auto">
           {h.title}
         </a>
         {!compact && h.summary && (
-          <p className="line-clamp-3 text-xs text-muted" dir="auto">
+          <p className="line-clamp-2 text-xs text-muted" dir="auto">
             {h.summary}
           </p>
         )}
@@ -145,8 +145,8 @@ export function NewsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
-        <div className="flex flex-wrap rounded-xl border border-border bg-bg p-0.5" role="tablist" aria-label="News categories">
+      <header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5">
+        <div className="no-scrollbar flex max-w-full overflow-x-auto rounded-xl border border-border bg-bg p-0.5" role="tablist" aria-label="News categories">
           {(['all', ...CATEGORIES, 'saved'] as Tab[]).map(t => (
             <button
               key={t}
@@ -154,18 +154,18 @@ export function NewsPage() {
               role="tab"
               aria-selected={tab === t}
               onClick={() => choose(t)}
-              className={`rounded-lg px-2.5 py-1 text-xs transition-colors ${tab === t ? 'bg-accent-soft text-accent' : 'text-muted hover:text-text'}`}
+              className={`shrink-0 rounded-lg px-2 py-0.5 text-xs transition-colors ${tab === t ? 'bg-accent-soft text-accent' : 'text-muted hover:text-text'}`}
             >
               {t === 'all' ? 'All' : t === 'saved' ? `Saved (${saved.length})` : CATEGORY_LABEL[t]}
             </button>
           ))}
         </div>
         <span className="ml-auto text-[11px] text-muted">{news?.fetchedAt ? `Updated ${ago(news.fetchedAt, Date.now())}` : ''}</span>
-        <button type="button" className="btn" onClick={() => void refresh()} disabled={busy}>
-          <RefreshCw className={`size-3.5 ${busy ? 'animate-spin' : ''}`} aria-hidden /> Refresh
+        <button type="button" className="icon-btn size-7" onClick={() => void refresh()} disabled={busy} aria-label="Refresh news" title="Refresh">
+          <RefreshCw className={`size-3.5 ${busy ? 'animate-spin' : ''}`} aria-hidden />
         </button>
-        <button type="button" className="btn" aria-expanded={showSources} onClick={() => setShowSources(v => !v)}>
-          <Settings2 className="size-3.5" aria-hidden /> Sources
+        <button type="button" className={`icon-btn size-7 ${showSources ? 'text-accent' : ''}`} aria-expanded={showSources} onClick={() => setShowSources(v => !v)} aria-label="News sources" title="Sources">
+          <Settings2 className="size-3.5" aria-hidden />
         </button>
       </header>
       {showSources && sources && (
@@ -190,7 +190,7 @@ export function NewsPage() {
         {list.length === 0 && (news || tab === 'saved') && (
           <p className="pt-10 text-center text-sm text-muted">{tab === 'saved' ? 'Nothing saved yet. Tap the bookmark on a story to keep it here.' : 'No stories here right now.'}</p>
         )}
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <div className="grid gap-2.5 @md:grid-cols-2 @3xl:grid-cols-3 @5xl:grid-cols-4">
           {list.map(h => (
             <NewsCard key={h.id} h={h} saved={isSaved(h.id)} onToggle={() => void toggle(h)} />
           ))}

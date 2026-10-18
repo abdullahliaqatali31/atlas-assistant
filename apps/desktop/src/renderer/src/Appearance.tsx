@@ -14,12 +14,12 @@ const PREVIEW: Record<Exclude<ThemeName, 'system'>, { bg: string; card: string; 
 export function AppearanceSettings() {
   const [a, set] = useAppearance()
   return (
-    <div className="mx-auto max-w-2xl space-y-5 p-4">
+    <div className="mx-auto max-w-2xl space-y-5 p-3">
       <section className="space-y-3">
         <h3 className="flex items-center gap-2 font-medium">
           <Palette className="size-4 text-accent" aria-hidden /> Theme
         </h3>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Theme">
+        <div className="grid grid-cols-2 gap-2 @md:grid-cols-3" role="radiogroup" aria-label="Theme">
           {THEMES.map(t => {
             const p = PREVIEW[t === 'system' ? 'midnight' : t]
             const selected = a.theme === t

@@ -586,7 +586,7 @@ export function App() {
         return <Learning onTalk={() => open("chat")} />;
       case "controls":
         return controls ? (
-          <Controls state={controls} onBack={() => open(null)} />
+          <Controls state={controls} />
         ) : null;
       case "setup":
         return status.phase === "ready" ? (
@@ -610,10 +610,10 @@ export function App() {
   const drawerClass = compact
     ? "mx-2 mb-2 flex-1"
     : phone
-      ? `absolute inset-0 z-30 mx-2 mb-2 bg-solid/95 ${drawer ? "" : "hidden"}`
+      ? `absolute inset-0 z-30 mx-2 mb-2 bg-solid ${drawer ? "" : "hidden"}`
       : docked
         ? `mb-2 mr-2 shrink-0 ${wideDrawer ? "w-[min(560px,40vw)]" : "w-[clamp(360px,30vw,440px)]"} ${drawer ? "" : "hidden"}`
-        : `absolute inset-y-0 right-0 z-30 mb-2 mr-2 ${wideDrawer ? "w-[min(620px,calc(100%-1rem))]" : "w-[min(440px,calc(100%-1rem))]"} bg-solid/95 shadow-2xl ${drawer ? "" : "hidden"}`;
+        : `absolute inset-y-0 right-0 z-30 mb-2 mr-2 ${wideDrawer ? "w-[min(620px,calc(100%-1rem))]" : "w-[min(440px,calc(100%-1rem))]"} bg-solid shadow-2xl ${drawer ? "" : "hidden"}`;
 
   return (
     <Frame
@@ -780,7 +780,7 @@ export function App() {
                 />
               </div>
               {!compact && drawer && drawer !== "chat" && (
-                <div className="min-h-0 flex-1">
+                <div className="drawer-body @container min-h-0 flex-1">
                   <Suspense fallback={<Loading />}>
                     {drawerContent(drawer)}
                   </Suspense>

@@ -1,4 +1,4 @@
-import { FolderOpen, FolderPlus, History, ShieldCheck, Trash2, Undo2 } from 'lucide-react'
+import { FolderOpen, FolderPlus, History, MessageSquare, Trash2, Undo2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { FileAccess, FileBatchView, FilesState } from '../../shared/files.ts'
@@ -9,8 +9,8 @@ const cleanError = (err: unknown) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.'
 
 const ACCESS_LABEL: Record<FileAccess, string> = {
-  read: 'Read only: list, search, read',
-  organise: 'Organise: move, rename, copy, Recycle Bin',
+  read: 'Read only',
+  organise: 'Organise (move, rename, Recycle Bin)',
 }
 
 const EXAMPLES = [
@@ -49,35 +49,33 @@ export function FilesPage({ onTalk }: { onTalk: () => void }) {
   if (!state) return <div className="p-6 text-sm text-muted">{error || 'Loading…'}</div>
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto p-4">
-      <div className="mx-auto grid max-w-5xl gap-4 xl:grid-cols-[1fr_380px]">
-        <section className="glass rise-in space-y-3 rounded-2xl p-4">
-          <header className="flex items-center gap-2">
-            <FolderOpen className="size-4 text-accent" aria-hidden />
-            <h2 className="flex-1 font-semibold">Folders Atlas looks after</h2>
-            <button type="button" className="btn btn-primary" onClick={() => void run(() => window.files.pick())}>
-              <FolderPlus className="size-4" aria-hidden /> Add folders
+    <div className="d-page">
+      <div className="grid gap-5 @4xl:grid-cols-[minmax(0,1fr)_340px]">
+        <section className="d-section">
+          <header className="d-head">
+            <h2 className="d-title">
+              <FolderOpen aria-hidden /> Folders · {state.folders.length}
+            </h2>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => void run(() => window.files.pick())}>
+              <FolderPlus className="size-3.5" aria-hidden /> Add
             </button>
           </header>
-          <p className="text-xs text-muted">
-            Atlas only sees the folders you add here. Start with read only; allow organising where you want it to move, rename and tidy. Every change can be undone, and
-            removing always goes to the Recycle Bin after asking you.
-          </p>
           {error && (
-            <p role="alert" className="text-sm text-danger">
+            <p role="alert" className="text-xs text-danger">
               {error}
             </p>
           )}
-          {state.folders.length === 0 && <p className="tile px-3 py-4 text-center text-sm text-muted">No folders yet. Downloads, Documents and Desktop are good first choices.</p>}
+          {state.folders.length === 0 && <p className="d-note rounded-lg border border-dashed border-border px-3 py-4 text-center">No folders yet. Downloads, Documents and Desktop are good first choices.</p>}
           {state.folders.map(f => (
-            <div key={f.id} className="tile flex flex-wrap items-center gap-3 px-3 py-2.5">
+            <div key={f.id} className="d-row">
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{f.name}</p>
-                <p className="truncate font-mono text-[11px] text-muted" title={f.path}>
+                <p className="truncate font-mono text-[10px] text-muted" title={f.path}>
                   {f.path}
                 </p>
               </div>
-              <div className="w-64">
+              <div className="flex w-full items-center gap-1 @md:w-auto">
+              <div className="min-w-0 flex-1 @md:w-52 @md:flex-none">
                 <Select
                   label={`What Atlas may do in ${f.name}`}
                   value={f.access}
@@ -86,36 +84,45 @@ export function FilesPage({ onTalk }: { onTalk: () => void }) {
                   className="py-1 text-xs"
                 />
               </div>
-              <button type="button" className="icon-btn" onClick={() => void run(() => window.files.reveal(f.path))} aria-label={`Open ${f.name} in Explorer`} title="Open in Explorer">
-                <FolderOpen className="size-4" aria-hidden />
-              </button>
-              <button type="button" className="icon-btn" onClick={() => void run(() => window.files.remove(f.id))} aria-label={`Stop looking after ${f.name}`} title="Remove (the folder itself is not touched)">
-                <Trash2 className="size-4" aria-hidden />
-              </button>
+              <span className="flex">
+                <button type="button" className="icon-btn size-7" onClick={() => void run(() => window.files.reveal(f.path))} aria-label={`Open ${f.name} in Explorer`} title="Open in Explorer">
+                  <FolderOpen className="size-3.5" aria-hidden />
+                </button>
+                <button type="button" className="icon-btn size-7" onClick={() => void run(() => window.files.remove(f.id))} aria-label={`Stop looking after ${f.name}`} title="Remove (the folder itself is not touched)">
+                  <Trash2 className="size-3.5" aria-hidden />
+                </button>
+              </span>
+              </div>
             </div>
           ))}
-
-          <div className="tile space-y-1.5 px-3 py-3">
-            <p className="hud-label flex items-center gap-1.5">
-              <ShieldCheck className="size-3.5" aria-hidden /> Ask Atlas, for example
-            </p>
-            {EXAMPLES.map(e => (
-              <p key={e} className="text-sm text-muted">
-                “{e}”
+          <details className="d-how">
+            <summary>How this works · things to ask</summary>
+            <div className="mt-2 space-y-2 pl-3">
+              <p className="d-note">
+                Atlas only sees the folders you add here. Start with read only; allow organising where you want it to move, rename and tidy. Every change can be undone, and removing always
+                goes to the Recycle Bin after asking you.
               </p>
-            ))}
-            <button type="button" className="btn mt-1" onClick={onTalk}>
-              Talk to Atlas
-            </button>
-          </div>
+              <ul className="space-y-1">
+                {EXAMPLES.map(e => (
+                  <li key={e} className="text-xs text-muted" dir="auto">
+                    “{e}”
+                  </li>
+                ))}
+              </ul>
+              <button type="button" className="btn btn-sm" onClick={onTalk}>
+                <MessageSquare className="size-3.5" aria-hidden /> Talk to Atlas
+              </button>
+            </div>
+          </details>
         </section>
 
-        <section className="glass rise-in space-y-2 rounded-2xl p-4">
-          <header className="flex items-center gap-2">
-            <History className="size-4 text-accent" aria-hidden />
-            <h2 className="flex-1 font-semibold">What Atlas changed</h2>
+        <section className="d-section">
+          <header className="d-head">
+            <h2 className="d-title">
+              <History aria-hidden /> What Atlas changed
+            </h2>
           </header>
-          {state.history.length === 0 && <p className="text-xs text-muted">Nothing yet. Moves, renames, new folders and Recycle Bin items appear here, with undo.</p>}
+          {state.history.length === 0 && <p className="d-note">Nothing yet. Moves, renames, new folders and Recycle Bin items appear here, with undo.</p>}
           {state.history.map(b => (
             <Change key={b.id} b={b} now={now} onUndo={() => void run(() => window.files.undo(b.id))} />
           ))}
@@ -128,7 +135,7 @@ export function FilesPage({ onTalk }: { onTalk: () => void }) {
 function Change({ b, now, onUndo }: { b: FileBatchView; now: number; onUndo: () => void }) {
   const trashOnly = b.changes.every(c => c.kind === 'trash')
   return (
-    <div className={`tile px-3 py-2 ${b.undoneAt ? 'opacity-60' : ''}`}>
+    <div className={`d-row block py-2 pr-2 ${b.undoneAt ? 'opacity-60' : ''}`}>
       <p className="text-sm" dir="auto">
         {b.summary}
       </p>
@@ -142,7 +149,7 @@ function Change({ b, now, onUndo }: { b: FileBatchView; now: number; onUndo: () 
         ) : trashOnly ? (
           <span title="Restore from the Recycle Bin">In the Recycle Bin</span>
         ) : (
-          <button type="button" className="btn h-7 px-2 text-xs" onClick={onUndo}>
+          <button type="button" className="btn btn-sm" onClick={onUndo}>
             <Undo2 className="size-3.5" aria-hidden /> Undo
           </button>
         )}

@@ -57,7 +57,7 @@ export function CodeProjects() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+      <header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5">
         <div className="flex rounded-xl border border-border bg-bg p-0.5" role="tablist" aria-label="Code views">
           {(
             [
@@ -90,7 +90,7 @@ export function CodeProjects() {
       </header>
       {error && <p className="border-b border-border px-4 py-2 text-xs text-danger">{error}</p>}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {tab === 'overview' &&
           (project ? (
             <ProjectDetail project={project} state={state} run={run} onBack={() => setSelected(null)} onError={setError} />
@@ -130,7 +130,7 @@ function Overview({ state, onOpen, onFolders }: { state: CodeState; onOpen: (id:
   }
   return (
     // minmax(0, 1fr): long project text truncates instead of widening the card past a narrow window.
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5 @2xl:grid-cols-2">
       {state.projects.map(p => {
         const live = state.running.filter(r => r.projectId === p.id && !r.endedAt)
         return (
@@ -194,7 +194,7 @@ function ProjectDetail({ project: p, state, run, onBack, onError }: { project: C
         </div>
       </div>
 
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid gap-3 @xl:grid-cols-3">
         <Stat label="Today" value={dayLine(p.today)} />
         <Stat label="Last 7 days" value={dayLine(p.week)} extra={p.week.commits ? `+${p.week.added} / −${p.week.removed} lines` : undefined} />
         <Stat label="Git" value={p.git ? `${p.git.branch} · ${p.git.uncommitted} uncommitted` : 'Not a git repository'} extra={p.git?.lastCommit ? `Last: “${p.git.lastCommit}” ${ago(p.git.lastCommitAt)}` : undefined} />
@@ -202,7 +202,7 @@ function ProjectDetail({ project: p, state, run, onBack, onError }: { project: C
 
       <Card icon={<FileText className="size-3.5" />} title="Status (.atlas/STATUS.md)">
         {p.status ? (
-          <div className="grid gap-3 text-xs sm:grid-cols-2">
+          <div className="grid gap-3 text-xs @xl:grid-cols-2">
             {(
               [
                 ['now', 'Now'],
@@ -218,7 +218,7 @@ function ProjectDetail({ project: p, state, run, onBack, onError }: { project: C
                 </p>
               </div>
             ))}
-            <p className="text-[11px] text-muted sm:col-span-2">Updated {ago(p.status.updatedAt)}. Your coding agents keep it current; you can also tell me (“CSi ka next step login fix hai”).</p>
+            <p className="text-[11px] text-muted @xl:col-span-2">Updated {ago(p.status.updatedAt)}. Your coding agents keep it current; you can also tell me (“CSi ka next step login fix hai”).</p>
           </div>
         ) : (
           <div className="space-y-2 text-xs text-muted">

@@ -70,6 +70,7 @@ export function Orb({ state, level = 0, size = 220 }: { state: OrbState; level?:
     const particles = Array.from({ length: 36 }, (_, i) => ({ a: (i / 36) * Math.PI * 2, r: 0.62 + Math.random() * 0.3, s: 0.2 + Math.random() * 0.6, z: Math.random() }))
 
     let raf = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
     let last = performance.now()
     let angle = 0
     let glow = LOOKS[stateRef.current].glow
@@ -182,19 +183,32 @@ export function Orb({ state, level = 0, size = 220 }: { state: OrbState; level?:
       ctx.arc(cx, cy, R * 0.45 * pulse, 0, Math.PI * 2)
       ctx.fill()
 
-      if (!reduced) raf = requestAnimationFrame(draw)
+      if (!reduced) schedule()
     }
 
-    const start = () => {
+    // Full frame rate only while listening, thinking or speaking; a calm 20 fps (8 in Lite mode) at rest.
+    const schedule = () => {
+      const active = LOOKS[stateRef.current].wave || stateRef.current === 'thinking'
+      const lite = document.documentElement.dataset.lite === 'true'
+      const fps = active ? (lite ? 30 : 60) : lite ? 8 : 20
+      if (fps >= 60) raf = requestAnimationFrame(draw)
+      else timer = setTimeout(() => (raf = requestAnimationFrame(draw)), 1000 / fps)
+    }
+
+    const stop = () => {
       cancelAnimationFrame(raf)
+      clearTimeout(timer)
+    }
+    const start = () => {
+      stop()
       last = performance.now()
       raf = requestAnimationFrame(draw)
     }
-    const onVisibility = () => (document.hidden ? cancelAnimationFrame(raf) : start())
+    const onVisibility = () => (document.hidden ? stop() : start())
     document.addEventListener('visibilitychange', onVisibility)
     start()
     return () => {
-      cancelAnimationFrame(raf)
+      stop()
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [size, reduced, redrawKey])

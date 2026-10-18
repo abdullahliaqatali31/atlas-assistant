@@ -37,11 +37,17 @@ export const ago = (t: number, now: number) => {
   return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`
 }
 
+/** The time, ticking every `ms`; paused while the window is hidden and caught up when it shows again. */
 export const useNow = (ms: number) => {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms)
-    return () => clearInterval(t)
+    const tick = () => !document.hidden && setNow(Date.now())
+    const t = setInterval(tick, ms)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', tick)
+    }
   }, [ms])
   return now
 }

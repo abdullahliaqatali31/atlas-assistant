@@ -67,21 +67,22 @@ export function Learning({ onTalk }: { /** Teach and Run now continue in the con
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-        <Brain className="size-4 text-accent" aria-hidden />
-        <h1 className="flex-1 text-sm font-semibold">Learning</h1>
-        <span className="text-[11px] text-muted">{view.running ? 'Learning…' : view.lastRunAt ? `Last learned ${ago(view.lastRunAt)}` : 'Not run yet'}</span>
-        <button type="button" className="btn" onClick={() => void learnNow()} disabled={busy || view.running} title="Read today’s conversation now">
+      <header className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+        <span className="flex-1 text-[11px] text-muted">{view.running ? 'Learning…' : view.lastRunAt ? `Last learned ${ago(view.lastRunAt)}` : 'Not run yet'}</span>
+        <button type="button" className="btn btn-sm" onClick={() => void learnNow()} disabled={busy || view.running} title="Read today’s conversation now">
           <RefreshCw className={`size-3.5 ${busy || view.running ? 'animate-spin' : ''}`} aria-hidden /> Learn now
         </button>
       </header>
       {error && <p className="border-b border-border px-4 py-2 text-xs text-danger">{error}</p>}
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-        <p className="text-xs text-muted">
-          While you’re away, I read today’s conversation and keep what lasts. Facts you stated are saved right away; anything that would change how I behave
-          waits for your yes. {view.lastResult && <span className="text-text">{view.lastResult}</span>}
-        </p>
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
+        {view.lastResult && <p className="text-xs">{view.lastResult}</p>}
+        <details className="d-how">
+          <summary>How learning works</summary>
+          <p className="d-note mt-2 pl-3">
+            While you’re away, I read today’s conversation and keep what lasts. Facts you stated are saved right away; anything that would change how I behave waits for your yes.
+          </p>
+        </details>
 
         <Skills skills={view.skills} run={run} onTalk={onTalk} />
 

@@ -155,4 +155,11 @@ reduced shadows, map at lower pixel ratio. Also follows
    tasks, failures and what Atlas raised, "Needs you" first, filter chips;
    corner widget on the World stage when it is wide enough)*
 6. Restyle each drawer's content to the new density; responsive and
-   performance pass; `ui_control` maps to stages and drawers.
+   performance pass; `ui_control` maps to stages and drawers. *(done: drawers are size containers, so
+   pages lay out by the drawer's width, not the window's; flat sections,
+   compact rows, explanations folded behind "How this works"; no glass on
+   glass. Performance: the orb runs at 20 fps at rest (8 in Lite), full
+   rate only while listening, thinking or speaking; only the clock ticks
+   each second and clocks pause while the window is hidden (idle script
+   work while hidden went from 9-23 ms/s to ~0); the production build was
+   fixed (ES-module workers) after the satellite library broke it)*

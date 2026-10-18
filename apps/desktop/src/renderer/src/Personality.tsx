@@ -43,9 +43,6 @@ export function SetupSections({ connection, onClose }: { connection: ReactNode; 
             </ToggleGroup.Item>
           ))}
         </ToggleGroup.Root>
-        <button type="button" onClick={onClose} className="ml-auto text-xs text-muted hover:text-text">
-          Close
-        </button>
       </nav>
       <div className="min-h-0 flex-1 overflow-y-auto">{section === 'appearance' ? <AppearanceSettings /> : section === 'connection' ? connection : section === 'personality' ? <PersonalitySettings onRunIntro={onClose} /> : <SecuritySettings assistantName={assistantName} />}</div>
     </div>

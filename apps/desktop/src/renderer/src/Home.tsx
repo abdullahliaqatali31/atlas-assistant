@@ -49,17 +49,33 @@ const when = (t: number, now: number) => {
   return sameDay ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
+/** The time and greeting: the only part of Home that ticks every second. */
+function Clock({ ownerName }: { ownerName: string }) {
+  const date = new Date(useNow(1000))
+  return (
+    <>
+      <p className="mt-1 font-mono text-4xl font-extralight tracking-wider tabular-nums @[480px]:text-5xl">
+        {date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+        <span className="text-lg text-muted">:{String(date.getSeconds()).padStart(2, '0')}</span>
+      </p>
+      <p className="mt-1 text-sm text-muted">
+        {date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} · {greetingFor(date.getHours())}
+        {ownerName ? `, ${ownerName}` : ''}
+      </p>
+    </>
+  )
+}
+
 /**
  * Home, calm: the orb, the time, a greeting and one line on what matters now,
  * then at most three "now" cards (a question waiting, the next task, what is
  * running or a nearby alert). Everything else lives in the drawers.
  */
 export function Home({ status, controls, presence, ownerName, open }: { status: RuntimeStatus; controls: ControlState | null; presence: Presence; ownerName: string; open: (t: HomeTarget) => void }) {
-  const now = useNow(1000)
+  const now = useNow(30_000)
   const ready = status.phase === 'ready'
   const { tasks, code, world } = useHomeData(ready)
   const orbState: OrbState = controls?.paused ? 'paused' : !ready ? 'offline' : presence.state
-  const date = new Date(now)
 
   const overdue = (tasks ?? []).filter(t => t.dueAt !== null && t.dueAt < now)
   const next = (tasks ?? []).filter(t => t.dueAt !== null && t.dueAt >= now).sort((a, b) => a.dueAt! - b.dueAt!)[0] ?? (tasks ?? []).find(t => t.dueAt === null)
@@ -97,14 +113,7 @@ export function Home({ status, controls, presence, ownerName, open }: { status: 
     <div className="@container flex h-full min-h-0 flex-col items-center justify-center overflow-y-auto px-4 py-6">
       <div className="flex w-full max-w-2xl flex-col items-center text-center">
         <Orb state={orbState} level={presence.level} size={150} />
-        <p className="mt-1 font-mono text-4xl font-extralight tracking-wider tabular-nums @[480px]:text-5xl">
-          {date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-          <span className="text-lg text-muted">:{String(date.getSeconds()).padStart(2, '0')}</span>
-        </p>
-        <p className="mt-1 text-sm text-muted">
-          {date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} · {greetingFor(date.getHours())}
-          {ownerName ? `, ${ownerName}` : ''}
-        </p>
+        <Clock ownerName={ownerName} />
         <p className="mt-3 max-w-xl text-[15px] leading-relaxed">
           <span className={`mr-1.5 inline-block size-1.5 rounded-full align-middle ${orbState === 'listening' ? 'bg-warm' : orbState === 'paused' ? 'bg-danger' : 'bg-accent'}`} aria-hidden />
           <span className="text-muted">{STATE_LABEL[orbState]} · </span>

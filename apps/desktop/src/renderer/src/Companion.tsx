@@ -580,7 +580,7 @@ export function Companion({
           />
         </div>
       )}
-      <main className={`flex-1 space-y-3 overflow-y-auto px-5 py-4 ${conversation ? 'hidden' : ''}`} aria-live="polite">
+      <main className={`flex-1 space-y-3 overflow-y-auto px-3 py-3 @[480px]:px-4 ${conversation ? 'hidden' : ''}`} aria-live="polite">
         {lines.length === 0 && (
           <p className="pt-16 text-center text-sm text-muted">
             {!ready ? `${PHASE_TEXT[status.phase]}…` : voice ? 'Type, or tap the mic (Ctrl+Space) and talk.' : 'Type to start talking.'}

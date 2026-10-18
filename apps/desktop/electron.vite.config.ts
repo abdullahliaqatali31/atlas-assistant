@@ -34,5 +34,7 @@ export default defineConfig({
     root: resolve('src/renderer'),
     build: { rollupOptions: { input: { index: resolve('src/renderer/index.html') } } },
     plugins: [react(), tailwindcss()],
+    // satellite.js ships an optional WebAssembly worker that uses top-level await: bundle workers as ES modules.
+    worker: { format: 'es' },
   },
 })

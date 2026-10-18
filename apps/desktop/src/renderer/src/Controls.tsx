@@ -33,7 +33,7 @@ const cleanError = (err: unknown) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.'
 
 /** The owner's control room: what the assistant may reach, what it may do without asking, and what it did. */
-export function Controls({ state, initialTab = 'connections', onBack }: { state: ControlState; initialTab?: ControlsTab; onBack: () => void }) {
+export function Controls({ state, initialTab = 'connections', onBack }: { state: ControlState; initialTab?: ControlsTab; onBack?: (() => void) | undefined }) {
   const [tab, setTab] = useState<ControlsTab>(initialTab)
   const [error, setError] = useState('')
 
@@ -50,10 +50,12 @@ export function Controls({ state, initialTab = 'connections', onBack }: { state:
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-x-2 gap-y-2 border-b border-border px-4 py-2.5">
-        <button type="button" onClick={onBack} className="rounded-md px-1 text-sm text-muted hover:text-text" aria-label="Back to the companion">
-          ←
-        </button>
+      <header className="flex flex-wrap items-center gap-x-2 gap-y-2 border-b border-border px-3 py-1.5">
+        {onBack && (
+          <button type="button" onClick={onBack} className="rounded-md px-1 text-sm text-muted hover:text-text" aria-label="Back to the companion">
+            ←
+          </button>
+        )}
         <nav className="flex gap-1 rounded-xl border border-border bg-bg p-0.5" aria-label="Controls">
           {TABS.map(t => (
             <button
@@ -77,7 +79,7 @@ export function Controls({ state, initialTab = 'connections', onBack }: { state:
           {error}
         </p>
       )}
-      <main className="flex-1 overflow-y-auto px-5 py-4 text-sm">
+      <main className="flex-1 overflow-y-auto px-3 py-3 text-sm">
         {tab === 'connections' && <Connections state={state} run={run} />}
         {tab === 'permissions' && <Permissions state={state} run={run} />}
         {tab === 'activity' && <Activity state={state} />}
