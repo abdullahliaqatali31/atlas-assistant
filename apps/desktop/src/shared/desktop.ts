@@ -55,6 +55,7 @@ export type DesktopOp =
   | { kind: 'wa-chats'; filter: 'all' | 'unread' }
   | { kind: 'wa-read'; chat: string; count?: number | undefined }
   | { kind: 'wa-send'; chat: string; text: string }
+  | { kind: 'wa-download'; chat: string; file?: string | undefined }
 
 export const ACT_ACTIONS = ['click', 'type', 'replace', 'select', 'toggle', 'expand', 'collapse', 'focus'] as const
 export type ActAction = (typeof ACT_ACTIONS)[number]

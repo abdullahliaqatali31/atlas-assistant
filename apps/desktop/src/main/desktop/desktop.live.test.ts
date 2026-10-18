@@ -5,13 +5,14 @@
  * Part B uses your real LLM key.
  *   ATLAS_LIVE=1 pnpm vitest run apps/desktop/src/main/desktop/desktop.live.test.ts
  */
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterAll, describe, expect, it, vi } from 'vitest'
 
-const dir = mkdtempSync(join(tmpdir(), 'atlas-desktop-live-'))
+// Not under AppData: Windows redirects Store apps' (WhatsApp's) writes there into their private storage.
+const dir = mkdtempSync(join(homedir(), 'atlas-desktop-live-'))
 vi.mock('electron', () => ({ app: { getPath: () => dir } }))
 
 const live = !!process.env.ATLAS_LIVE
@@ -134,5 +135,24 @@ describe.skipIf(!live)('desktop control, live', () => {
     expect(rows).toBeGreaterThan(0)
     await expect(svc.handleOp({ kind: 'wa-read', chat: 'zzqx no such chat 4821' })).rejects.toThrow(/No WhatsApp chat matches/)
     await expect(svc.handleOp({ kind: 'wa-send', chat: 'zzqx no such chat 4821', text: 'x' })).rejects.toThrow(/control/)
+  })
+
+  it('D. WhatsApp download: saves the asked document (here into a temp folder) and reads it', async () => {
+    const chat = process.env.ATLAS_LIVE_WA_CHAT
+    const file = process.env.ATLAS_LIVE_WA_FILE
+    if (!chat || !file) return console.log('  (skipped: set ATLAS_LIVE_WA_CHAT and ATLAS_LIVE_WA_FILE to a chat and a document in it)')
+    const apps = (svc as unknown as { apps: { name: string; access: string }[] }).apps
+    apps.find(a => a.name === 'WhatsApp')!.access = 'control'
+    const realDownloads = join(process.env.USERPROFILE ?? '', 'Downloads')
+    const before = readdirSync(realDownloads).length
+    const out = await svc.handleOp({ kind: 'wa-download', chat, file })
+    // Content is not printed: only that it was saved and read.
+    const [head, , ...body] = out.split('\n')
+    console.log(`  ${head?.replace(/"[^"]+"/, '"…"')} — read ${body.join('\n').length} characters (not printed)`)
+    expect(out).toMatch(/^Saved ".+\.(docx|xlsx|pptx|pdf)" from /)
+    expect(body.join('\n').length).toBeGreaterThan(50)
+    expect(readdirSync(dir).some(f => f.toLowerCase().includes(file.toLowerCase()))).toBe(true)
+    expect(readdirSync(realDownloads).length).toBe(before)
+    apps.find(a => a.name === 'WhatsApp')!.access = 'read'
   })
 })

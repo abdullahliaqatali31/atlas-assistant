@@ -36,6 +36,7 @@ import { systemClock, type InitiativeEvent } from '@assistant/shared'
 
 import type { HostEvent, HostRequest, InitiativeItem, RuntimePhase, SetupProblem } from '../shared/ipc.ts'
 import type { ActivitySettings } from '../shared/activity.ts'
+import { approvalQuestion, parseConsent } from '../shared/consent.ts'
 import { HostActivity } from './activity.ts'
 import { CODE_RULES, HostCode } from './code.ts'
 import { DESKTOP_RULES, HostDesktop } from './desktop.ts'
@@ -97,7 +98,9 @@ let speechEnabled = true
  */
 let sttLanguage: string | undefined
 let configuredLanguages: string[] = []
-let current: { replyId: string; abort: AbortController } | null = null
+let current: { replyId: string; abort: AbortController; say?: (text: string) => void } | null = null
+/** Who Atlas asks, and in which language, when an action needs a yes. */
+let asking = { name: '', urdu: false }
 let initiative: InitiativeService | null = null
 /** Opt-in window tracking; settings can arrive from main before the database exists. */
 let activity: HostActivity | null = null
@@ -144,9 +147,12 @@ const askOwner = (tool: RuntimeTool, input: Record<string, unknown>, reason: str
     signal?.addEventListener('abort', () => settle(false), { once: true })
     approvals.set(id, settle)
     const shown = JSON.stringify(input)
+    const question = redact(approvalQuestion(tool.name, input, asking.name, asking.urdu))
+    // Asked in the conversation itself (and aloud when the owner is talking): "haan" or "nahi" answers it.
+    current?.say?.(`\n\n${question}`)
     post({
       type: 'approval',
-      request: { id, tool: tool.name, actionClass: tool.actionClass, input: redact(shown.length > 400 ? `${shown.slice(0, 400)}…` : shown), reason },
+      request: { id, tool: tool.name, actionClass: tool.actionClass, input: redact(shown.length > 400 ? `${shown.slice(0, 400)}…` : shown), reason, question },
     })
   })
 
@@ -160,6 +166,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   secrets = SECRET_NAMES.map(n => merged[n]).filter((v): v is string => typeof v === 'string' && v.length >= 8)
   const { config, problems, warnings } = loadConfig(merged, cwd)
   if (!config) return status('setup', problems, warnings)
+  asking = { name: config.owner.name, urdu: config.owner.languages.some(l => /^ur/i.test(l)) }
 
   status('checking', [], warnings)
   const llm = createLlm(config.llm)
@@ -289,11 +296,15 @@ const stream = async (replyId: string, abort: AbortController, chunks: AsyncIter
           onError: message => post({ type: 'speech-error', replyId, message: redact(message) }),
         })
       : null
+  const say = (text: string) => {
+    post({ type: 'chunk', replyId, text })
+    speaker?.push(text)
+  }
+  if (current?.replyId === replyId) current.say = say
   try {
     for await (const chunk of chunks) {
       if (abort.signal.aborted) break
-      post({ type: 'chunk', replyId, text: chunk })
-      speaker?.push(chunk)
+      say(chunk)
     }
     await speaker?.finish()
     post({ type: 'done', replyId, stopped: abort.signal.aborted })
@@ -308,8 +319,36 @@ const stream = async (replyId: string, abort: AbortController, chunks: AsyncIter
 }
 
 /** A spoken message: transcribe it, show what was heard, then reply as if typed. */
+/**
+ * A short yes or no while Atlas is waiting on a question answers it ("chalo kar lo",
+ * "nahi, main khud bata dunga"); the waiting reply carries on. Anything else is a new message.
+ */
+const answerPending = (replyId: string, text: string): boolean => {
+  const pending = [...approvals.values()].pop()
+  const answer = pending ? parseConsent(text) : null
+  if (!pending || !answer) return false
+  pending(answer === 'yes')
+  post({ type: 'chunk', replyId, text: answer === 'yes' ? (asking.urdu ? 'Theek hai.' : 'Okay.') : asking.urdu ? 'Theek hai, nahi karta.' : 'Okay, I won’t.' })
+  post({ type: 'done', replyId, stopped: false })
+  return true
+}
+
 const sendVoice = async (replyId: string, audio: Uint8Array, mime: string) => {
   if (!voice) return post({ type: 'done', replyId, stopped: false, error: 'No voice provider is configured.' })
+  // Atlas is waiting on a yes or no: hear the answer first, without cutting off the waiting reply.
+  if (approvals.size) {
+    let heard = ''
+    try {
+      heard = (await voice.stt.transcribe(new Blob([Uint8Array.from(audio)], { type: mime }), { languageHint: sttLanguage, signal: AbortSignal.timeout(20_000) })).text.trim()
+    } catch {
+      return post({ type: 'done', replyId, stopped: false, error: 'I didn’t catch that. Say haan or nahi, or use the buttons.' })
+    }
+    heard = heard.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim()
+    if (!heard) return post({ type: 'done', replyId, stopped: false, error: 'I didn’t catch that. Say haan or nahi, or use the buttons.' })
+    post({ type: 'heard', replyId, text: heard })
+    if (answerPending(replyId, heard)) return
+    return send(replyId, heard, begin(replyId), true)
+  }
   const abort = begin(replyId)
   let heard: string
   try {
@@ -386,6 +425,7 @@ port.on('message', ({ data }: { data: HostRequest }) => {
       break
     case 'send':
       lastOwnerTurnAt = Date.now()
+      if (answerPending(data.replyId, data.text)) break
       void send(data.replyId, data.text)
       break
     case 'voice':

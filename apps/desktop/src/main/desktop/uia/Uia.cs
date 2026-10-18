@@ -92,6 +92,7 @@ public static class AtlasUia
             {
                 case "ping": result = "pong"; break;
                 case "windows": result = Windows(); break;
+                case "dialogs": result = Dialogs(Long(args, "hwnd")); break;
                 case "snapshot": result = Snapshot(Long(args, "hwnd"), Int(args, "maxNodes", 300), Bool(args, "offscreen", false)); break;
                 case "query": result = Query(Long(args, "hwnd"), Str(args, "role"), Str(args, "name"), Str(args, "match") ?? "contains", Str(args, "within"), Str(args, "notWithin"), Int(args, "limit", 50), Bool(args, "offscreen", false)); break;
                 case "texts": result = Texts(Str(args, "ref"), Int(args, "limit", 200)); break;
@@ -164,6 +165,25 @@ public static class AtlasUia
         return list;
     }
 
+    /// <summary>Visible windows owned by an app's window: its Save, Open and message dialogs.</summary>
+    static List<Dictionary<string, object>> Dialogs(long owner)
+    {
+        uint ownerPid; GetWindowThreadProcessId(new IntPtr(owner), out ownerPid);
+        var family = Family(ownerPid);
+        var list = new List<Dictionary<string, object>>();
+        EnumWindows((h, l) =>
+        {
+            if (!IsWindowVisible(h)) return true;
+            var o = GetWindow(h, GW_OWNER);
+            if (o == IntPtr.Zero) return true;
+            uint pid; GetWindowThreadProcessId(h, out pid);
+            if (o.ToInt64() != owner && !family.Contains(pid)) return true;
+            list.Add(new Dictionary<string, object> { { "hwnd", h.ToInt64() }, { "title", Title(h) }, { "className", Class(h) }, { "pid", pid } });
+            return true;
+        }, IntPtr.Zero);
+        return list;
+    }
+
     static bool Focus(IntPtr h)
     {
         if (IsIconic(h)) ShowWindow(h, SW_RESTORE);
@@ -215,6 +235,8 @@ public static class AtlasUia
     static List<AutomationElement> Roots(IntPtr hwnd)
     {
         var roots = new List<AutomationElement> { AutomationElement.FromHandle(hwnd) };
+        // A Save or Open dialog is native: never mix the app's web content into it.
+        if (Class(hwnd) == "#32770") return roots;
         var hasDocument = roots[0].FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Document)) != null;
         if (hasDocument) return roots;
         uint pid; GetWindowThreadProcessId(hwnd, out pid);

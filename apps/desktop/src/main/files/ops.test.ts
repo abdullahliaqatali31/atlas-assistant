@@ -76,7 +76,8 @@ describe('FileOps', () => {
     expect(await ops.search({ kind: 'search', query: '', ext: ['md'] })).toContain('Docs/plan.md')
     expect(await ops.read('Downloads/notes.txt')).toContain('buy milk')
     writeFileSync(join(downloads, 'bin.dat'), Buffer.from([1, 0, 2, 0]))
-    expect(await ops.read('Downloads/bin.dat')).toMatch(/not a text file/)
+    expect(await ops.read('Downloads/bin.dat')).toMatch(/cannot read \.dat files/)
+    await expect(ops.read(join(downloads, '..', 'outside', 'secret.txt'))).rejects.toThrow(/outside/)
   })
 
   it('moves into a new folder without overwriting, then undoes it all', async () => {

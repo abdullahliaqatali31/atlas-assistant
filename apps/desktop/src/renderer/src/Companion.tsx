@@ -701,14 +701,19 @@ function ApprovalCard({ request }: { request: ApprovalRequest }) {
   }
   return (
     <section role="alertdialog" aria-labelledby={`ap-${request.id}`} className="rise-in mx-3 mb-2 rounded-2xl border border-warm/50 bg-warm/10 p-3 text-sm shadow-[0_0_30px_rgba(251,191,36,0.15)]">
-      <p id={`ap-${request.id}`} className="font-medium">
-        Allow <span className="font-mono">{request.tool}</span>?
+      <p id={`ap-${request.id}`} className="font-medium" dir="auto">
+        {request.question ?? (
+          <>
+            Allow <span className="font-mono">{request.tool}</span>?
+          </>
+        )}
       </p>
       <p className="mt-1 text-xs text-muted">
         {request.actionClass} · {request.reason}
       </p>
       <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg p-2 text-xs">{request.input}</pre>
       <div className="mt-3 flex justify-end gap-2">
+        <span className="mr-auto self-center text-[11px] text-muted">Or just say or type haan / nahi</span>
         <button type="button" disabled={busy} onClick={() => void answer(false)} className="btn">
           Decline
         </button>
