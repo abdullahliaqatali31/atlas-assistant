@@ -448,3 +448,30 @@ input[type='radio']:disabled {
     animation: none;
   }
 }
+
+/* Rail hover cards and the Ask bar's bubble: a quick, small entrance. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+.peek-card {
+  animation: pop-in 140ms ease-out both;
+  transform-origin: right center;
+}
+.ask-pop {
+  animation: pop-in 180ms ease-out both;
+  transform-origin: bottom center;
+}
+
+/* Inputs that sit inside their own styled box (Ask bar, palette) show focus on the box instead. */
+.bare-input:focus-visible {
+  outline: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

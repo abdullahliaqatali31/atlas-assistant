@@ -1,6 +1,12 @@
 import {
   AppWindow,
   Brain,
+  CheckSquare,
+  Feather,
+  MapPin,
+  Palette,
+  RefreshCw,
+  Sparkles,
   FolderKanban,
   FolderOpen,
   Globe2,
@@ -38,6 +44,20 @@ import { LockScreen } from "./LockScreen.tsx";
 import { Setup } from "./Setup.tsx";
 import { useCounts, type CountKey } from "./shell/counts.ts";
 import { Rail, type RailItem } from "./shell/Rail.tsx";
+import { AskBar } from "./shell/AskBar.tsx";
+import {
+  CommandPalette,
+  type Command,
+  type CommandSource,
+} from "./shell/CommandPalette.tsx";
+import { ASK_EVENT, FOCUS_ASK_EVENT } from "./shell/live.ts";
+import { Peek, type PeekKind } from "./shell/Peek.tsx";
+import {
+  changeAppearance,
+  currentAppearance,
+  THEME_LABEL,
+  THEMES,
+} from "./theme.ts";
 
 // Pages load the first time they open: a lighter start.
 const WorldPage = lazy(() =>
@@ -87,6 +107,19 @@ const DRAWER_TITLE: Record<DrawerId, string> = {
   controls: "Connections",
   setup: "Settings",
 };
+
+/** The order "[" and "]" step through. */
+const PANEL_ORDER: DrawerId[] = [
+  "chat",
+  "today",
+  "news",
+  "projects",
+  "files",
+  "apps",
+  "learning",
+  "controls",
+  "setup",
+];
 
 /** Wide enough to keep a pinned drawer beside the stage. */
 const ROOMY = "(min-width: 1100px)";
@@ -151,6 +184,7 @@ export function App() {
   const [identity, setIdentity] = useState<IdentityView | null>(null);
   const [suggestions, setSuggestions] = useState(0);
   const [unread, setUnread] = useState(0);
+  const [palette, setPalette] = useState(false);
   const drawerRef = useRef(drawer);
   drawerRef.current = drawer;
 
@@ -216,23 +250,46 @@ export function App() {
     window.ui.report({ view, chatOpen: drawer === "chat", compact });
   }, [stage, drawer, compact]);
 
-  // Esc puts the drawer away (unless pinned).
+  // Keys: Ctrl+K palette, Esc puts the drawer away (unless pinned), "/" asks,
+  // G H / G W switch the stage, [ and ] step through the panels.
+  const gRef = useRef(0);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (
-        e.key === "Escape" &&
-        drawer &&
-        !pinned &&
-        !(
-          e.target instanceof HTMLInputElement ||
-          e.target instanceof HTMLTextAreaElement
-        )
-      )
-        open(null);
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPalette((p) => !p);
+        return;
+      }
+      const typing =
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target instanceof HTMLElement && e.target.isContentEditable);
+      if (typing || e.ctrlKey || e.metaKey || e.altKey || palette || compact)
+        return;
+      if (e.key === "Escape" && drawer && !pinned) open(null);
+      else if (e.key === "/") {
+        e.preventDefault();
+        if (drawer !== "chat") window.dispatchEvent(new Event(FOCUS_ASK_EVENT));
+      } else if (e.key === "g" || e.key === "G") gRef.current = Date.now();
+      else if (
+        Date.now() - gRef.current < 1200 &&
+        (e.key === "h" || e.key === "w")
+      ) {
+        gRef.current = 0;
+        goStage(e.key === "h" ? "home" : "world");
+        if (drawer && drawer !== "chat" && !pinned) open(null);
+      } else if (e.key === "[" || e.key === "]") {
+        const at = drawer ? PANEL_ORDER.indexOf(drawer) : -1;
+        const step = e.key === "]" ? 1 : -1;
+        open(
+          PANEL_ORDER[(at + step + PANEL_ORDER.length) % PANEL_ORDER.length] ??
+            null,
+        );
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [drawer, pinned]);
+  }, [drawer, pinned, palette, compact]);
 
   const setWindow = async (change: UiChange) => {
     const s = await window.ui.set(change).catch(() => null);
@@ -274,6 +331,9 @@ export function App() {
       onCancel={() => open(null)}
     />
   );
+  const peek = (kind: PeekKind) => (
+    <Peek kind={kind} ctx={{ status, controls }} />
+  );
   const item = (
     id: DrawerId,
     label: string,
@@ -286,6 +346,7 @@ export function App() {
     count: count ? counts[count] : undefined,
     active: drawer === id,
     onClick: () => open(drawer === id ? null : id),
+    peek: peek(id),
   });
   const top: RailItem[] = [
     {
@@ -294,6 +355,7 @@ export function App() {
       icon: <HomeIcon />,
       active: stage === "home" && (!drawer || drawer === "chat"),
       onClick: () => goStage("home"),
+      peek: peek("home"),
     },
     {
       id: "world",
@@ -302,6 +364,7 @@ export function App() {
       count: counts.world,
       active: stage === "world" && (!drawer || drawer === "chat"),
       onClick: () => goStage("world"),
+      peek: peek("world"),
     },
   ];
   const items: RailItem[] = [
@@ -321,8 +384,148 @@ export function App() {
       icon: <Minimize2 />,
       active: false,
       onClick: () => void setWindow({ size: "compact" }),
+      peek: peek("compact"),
     },
     item("setup", "Settings", <Settings2 />),
+  ];
+
+  // The command palette: everything in the rail, plus actions and live things.
+  const RENAME: Record<string, string> = {
+    Talk: "Conversation",
+    Code: "Projects",
+    Links: "Connections",
+  };
+  const ask = (text: string) =>
+    window.dispatchEvent(new CustomEvent(ASK_EVENT, { detail: text }));
+  const look = currentAppearance();
+  const commands: Command[] = [
+    ...[...top, ...items].map((i) => ({
+      id: `go-${i.id}`,
+      group: "Go to",
+      label: RENAME[i.label] ?? i.label,
+      hint: i.count?.value ? i.count.hint : undefined,
+      icon: i.icon,
+      keywords: i.id,
+      run:
+        i.id === "home" || i.id === "world"
+          ? i.onClick
+          : () => open(i.id as DrawerId),
+    })),
+    {
+      id: "go-setup",
+      group: "Go to",
+      label: "Settings",
+      icon: <Settings2 />,
+      keywords: "setup keys voice personality",
+      run: () => open("setup"),
+    },
+    {
+      id: "ask",
+      group: "Do",
+      label: "Ask Atlas",
+      hint: "/",
+      icon: <Sparkles />,
+      run: () =>
+        setTimeout(() => window.dispatchEvent(new Event(FOCUS_ASK_EVENT)), 0),
+    },
+    {
+      id: "compact",
+      group: "Do",
+      label: "Compact mode",
+      icon: <Minimize2 />,
+      keywords: "small window mini",
+      run: () => void setWindow({ size: "compact" }),
+    },
+    {
+      id: "ontop",
+      group: "Do",
+      label: onTop ? "Stop keeping on top" : "Keep on top of other windows",
+      icon: <Pin />,
+      keywords: "pin always",
+      run: () => void setWindow({ pinned: !onTop }),
+    },
+    {
+      id: "refresh-world",
+      group: "Do",
+      label: "Refresh world data",
+      icon: <RefreshCw />,
+      keywords: "weather quakes air",
+      run: () => void window.world.refresh().catch(() => undefined),
+    },
+    {
+      id: "refresh-news",
+      group: "Do",
+      label: "Refresh news",
+      icon: <RefreshCw />,
+      keywords: "headlines",
+      run: () => void window.news.list(true).catch(() => undefined),
+    },
+    {
+      id: "lite",
+      group: "Appearance",
+      label:
+        look.lite === "on" ? "Lite mode: back to automatic" : "Lite mode: on",
+      icon: <Feather />,
+      keywords: "fast light performance effects",
+      run: () => changeAppearance({ lite: look.lite === "on" ? "auto" : "on" }),
+    },
+    ...THEMES.map((t) => ({
+      id: `theme-${t}`,
+      group: "Appearance",
+      label: `Theme: ${THEME_LABEL[t].split(":")[0]}`,
+      hint: look.theme === t ? "current" : undefined,
+      icon: <Palette />,
+      keywords: `theme ${THEME_LABEL[t]} ${t === "daylight" ? "light" : "dark"}`,
+      run: () => changeAppearance({ theme: t }),
+    })),
+  ];
+  const sources: CommandSource[] = [
+    async () =>
+      (await window.world.state()).places.map((p) => ({
+        id: `place-${p.place.id}`,
+        group: "Places",
+        label: p.place.name,
+        hint: p.weather
+          ? `${Math.round(p.weather.temp)}° ${p.weather.summary}`
+          : undefined,
+        icon: <MapPin />,
+        keywords: "place weather world",
+        run: () => goStage("world"),
+      })),
+    async () =>
+      (await window.assistant.listTasks()).map((t) => ({
+        id: `task-${t.id}`,
+        group: "Tasks",
+        label: t.title,
+        hint: t.dueAt
+          ? new Date(t.dueAt).toLocaleDateString([], {
+              day: "numeric",
+              month: "short",
+            })
+          : undefined,
+        icon: <CheckSquare />,
+        keywords: "task todo",
+        run: () => open("today"),
+      })),
+    async () =>
+      (await window.code.state()).projects.map((p) => ({
+        id: `project-${p.id}`,
+        group: "Projects",
+        label: p.name,
+        hint: p.git?.branch,
+        icon: <FolderKanban />,
+        keywords: "project code",
+        run: () => open("projects"),
+      })),
+    async () =>
+      (await window.desktop.state()).apps.map((a) => ({
+        id: `app-${a.id}`,
+        group: "Apps",
+        label: `Open ${a.name}`,
+        icon: <AppWindow />,
+        keywords: "app launch",
+        run: () => ask(`Open ${a.name}`),
+      })),
   ];
 
   const drawerContent = (d: DrawerId): ReactNode => {
@@ -396,10 +599,12 @@ export function App() {
           <div className="relative flex min-h-0 min-w-0 flex-1">
             {!compact && (
               <main
-                className={`glass mx-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl ${phone ? "mb-1" : "mb-2"}`}
+                className={`glass relative mx-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl ${phone ? "mb-1" : "mb-2"}`}
               >
                 {controls && <PausedBanner state={controls} />}
-                <div className="min-h-0 flex-1">
+                <div
+                  className={`min-h-0 flex-1 ${stage === "home" ? "pb-14" : ""}`}
+                >
                   <Suspense fallback={<Loading />}>
                     {stage === "home" ? (
                       <Home
@@ -416,6 +621,11 @@ export function App() {
                     )}
                   </Suspense>
                 </div>
+                <AskBar
+                  status={status}
+                  chatOpen={drawer === "chat"}
+                  onOpenChat={() => open("chat")}
+                />
               </main>
             )}
 
@@ -538,6 +748,12 @@ export function App() {
           <Rail top={top} items={items} bottom={bottom} horizontal />
         )}
       </div>
+      <CommandPalette
+        open={palette}
+        onClose={() => setPalette(false)}
+        commands={commands}
+        sources={sources}
+      />
     </Frame>
   );
 }

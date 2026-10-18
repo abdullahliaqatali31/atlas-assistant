@@ -84,3 +84,16 @@ export const useAppearance = () => {
 
 /** Applied before React renders, so there is no flash of the wrong theme. */
 export const applyStoredAppearance = () => applyAppearance(read())
+
+/** One change from outside Settings (the command palette): merged, applied and remembered. */
+export const changeAppearance = (patch: Partial<Appearance>) => {
+  const next = { ...read(), ...patch }
+  applyAppearance(next)
+  try {
+    localStorage.setItem(KEY, JSON.stringify(next))
+  } catch {
+    // Remembering the look is a convenience only.
+  }
+  return next
+}
+export const currentAppearance = () => read()

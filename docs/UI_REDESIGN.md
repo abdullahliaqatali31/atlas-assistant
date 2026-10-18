@@ -134,10 +134,17 @@ reduced shadows, map at lower pixel ratio. Also follows
 
 1. **Foundation**: theme tokens, theme and accent picker, Lite mode; the new
    shell (stage, right rail with counts, drawer system, inspector slot).
-   Existing pages become drawers unchanged. *(start here)*
+   Existing pages become drawers unchanged. *(done)*
 2. **Ask bar** and conversation drawer (the chat panel becomes a drawer;
-   replies show as a bubble above the bar).
-3. **Command palette** and keyboard shortcuts.
+   replies show as a bubble above the bar). *(done: one thread through the
+   conversation; streaming bubble; Haan / Nahi for waiting questions; mic)*
+3. **Command palette** and keyboard shortcuts. *(done: Ctrl+K with pages,
+   places, tasks, projects, apps, actions, themes and "Ask Atlas"; Esc, /,
+   G H, G W, [ ])*
+   Also done: the **mini rail** (16 px icons, small badges, 48 px wide) with
+   **hover overview cards** (the top few items per module, read only while
+   shown); a click opens the full drawer. Phone width gets a bottom bar that
+   fits without scrolling.
 4. **Home stage** (calm) and **World stage** with the Inspector for map items.
 5. **Alerts timeline** and the corner widget.
 6. Restyle each drawer's content to the new density; responsive and

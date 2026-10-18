@@ -12,6 +12,7 @@ import { chime, toWav, WakeListener } from './wake/listener.ts'
 import type { Presence } from './Jarvis.tsx'
 import { Onboarding } from './Onboarding.tsx'
 import { Markdown } from './ui/Markdown.tsx'
+import { ASK_EVENT, MIC_EVENT, publishLive } from './shell/live.ts'
 
 interface Line {
   id: string
@@ -223,7 +224,11 @@ export function Companion({
 
   const send = async (e?: FormEvent) => {
     e?.preventDefault()
-    const text = draft.trim()
+    await sendText(draft.trim())
+  }
+
+  /** Typed text from this box or the floating Ask bar: one path, one thread. */
+  const sendText = async (text: string) => {
     if (!text || !ready) return
     // Typing ends a voice conversation: the reply stays on screen.
     endConversation()
@@ -274,6 +279,28 @@ export function Companion({
       setError(MIC_HELP)
     }
   }, [ready, voice, onboarding, interrupt, speaking])
+
+  // The floating Ask bar asks through here, so its messages land in this same thread.
+  const askRef = useRef(sendText)
+  askRef.current = sendText
+  const micRef = useRef<() => void>(() => undefined)
+  micRef.current = () => (recordingRef.current ? recordingRef.current.stop(true) : void startListening())
+  useEffect(() => {
+    const onAsk = (e: Event) => void askRef.current(String((e as CustomEvent<string>).detail ?? '').trim())
+    const onMic = () => micRef.current()
+    window.addEventListener(ASK_EVENT, onAsk)
+    window.addEventListener(MIC_EVENT, onMic)
+    return () => {
+      window.removeEventListener(ASK_EVENT, onAsk)
+      window.removeEventListener(MIC_EVENT, onMic)
+    }
+  }, [])
+
+  // The latest reply and what the voice is doing, for the Ask bar's bubble.
+  useEffect(() => {
+    const last = [...lines].reverse().find(l => l.who === 'assistant')
+    publishLive({ replyId: last?.id ?? null, text: last?.text ?? '', replying: replyId !== null, listening, transcribing, speaking, level, error })
+  }, [lines, replyId, listening, transcribing, speaking, level, error])
 
   // ── voice conversation: keeps listening and answering until 30 s of silence ──
   const [conversation, setConversation] = useState(false)
