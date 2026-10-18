@@ -17,7 +17,7 @@ import { HoverCard } from './HoverCard.tsx'
 import type { Selected } from './Inspector.tsx'
 import { LAYERS, OWN_SOURCES, PICKABLE, readLayers, SELECTED_LAYER, type LayerId } from './layers.ts'
 import { pickAt } from './pick.ts'
-import { BASE_URL, carryOverlays, composeStyle, STYLES, type StyleId } from './styles.ts'
+import { BASE_URL, carryOverlays, composeStyle, creditLine, STYLES, type CreditPart, type StyleId } from './styles.ts'
 
 export interface MapPrefs {
   style: StyleId
@@ -110,8 +110,7 @@ export function MapView({
     const m = new maplibregl.Map({ container: box.current, style: BASE_URL.dark, center: [70, 28], zoom: 2.2, attributionControl: false, pixelRatio: isLite() ? 1 : window.devicePixelRatio })
     map.current = m
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
-    // Map credits under the zoom buttons, clear of the Ask bar and the corner widget.
-    m.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-right')
+    // Credits: our own small line at the bottom (MapCredit), not the library's white pill.
     // Style switches drop images added at runtime; draw them again when a layer asks.
     m.on('styleimagemissing', e => {
       const make = ICONS[e.id]
@@ -410,6 +409,7 @@ export function MapView({
       <div ref={box} className="h-full w-full" aria-label="World map" role="region" />
       <HoverCard map={map.current} ready={ready} world={world} now={now} />
       {toolbar(controls)}
+      <MapCredit parts={creditLine(prefs.style, LAYERS.filter(l => layers[l.id]).map(l => l.id))} />
       {styleError && <p className="glass absolute bottom-16 left-2 z-10 rounded-lg bg-solid/85 px-2 py-1 text-[11px] text-warm">{styleError}</p>}
       {open === 'style' && (
         <fieldset className="ask-pop glass absolute left-2 top-12 z-20 w-[min(280px,calc(100%-1rem))] space-y-0.5 rounded-xl bg-solid/90 p-1.5 text-xs shadow-2xl">
@@ -477,5 +477,29 @@ export function MapView({
         </fieldset>
       )}
     </div>
+  )
+}
+
+/**
+ * The map's credit line: small monospace text at the bottom right, no pill,
+ * each source linked where its licence asks. Hover shows it whole.
+ */
+function MapCredit({ parts }: { parts: CreditPart[] }) {
+  const full = parts.map(p => p.text).join(' | ')
+  return (
+    <p className="map-credit pointer-events-auto absolute bottom-1 right-2 z-[4] line-clamp-2 max-w-[min(42%,34rem)] text-right font-mono text-[9.5px] leading-tight" title={full}>
+      {parts.map((p, i) => (
+        <span key={p.text}>
+          {i > 0 && <span aria-hidden> | </span>}
+          {p.href ? (
+            <a href={p.href} target="_blank" rel="noreferrer">
+              {p.text}
+            </a>
+          ) : (
+            p.text
+          )}
+        </span>
+      ))}
+    </p>
   )
 }

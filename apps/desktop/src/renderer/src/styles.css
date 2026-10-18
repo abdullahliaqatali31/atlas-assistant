@@ -465,6 +465,19 @@ input[type='radio']:disabled {
   transform-origin: bottom center;
 }
 
+/* The World map's own credit line: quiet text, readable over imagery. */
+.map-credit {
+  color: color-mix(in srgb, var(--text) 62%, transparent);
+  text-shadow: 0 0 3px rgb(0 0 0 / 0.9);
+  letter-spacing: 0.02em;
+}
+.map-credit a {
+  color: inherit;
+}
+.map-credit a:hover {
+  color: var(--accent);
+}
+
 /* World map hover: the leader line draws out of the item, then the card opens at its end. */
 @keyframes leader-draw {
   from {

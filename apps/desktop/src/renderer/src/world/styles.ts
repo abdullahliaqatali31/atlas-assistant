@@ -128,6 +128,38 @@ export const styleCredit = (id: StyleId) =>
         ? `Relief: Mapzen terrain tiles (AWS Open Data) · ${OSM_CREDIT}`
         : OSM_CREDIT
 
+export interface CreditPart {
+  text: string
+  href?: string
+}
+
+/** Live layers name their source in the credit line only while they are on. */
+const LAYER_CREDIT: Record<string, CreditPart> = {
+  flights: { text: 'Flights adsb.lol', href: 'https://adsb.lol' },
+  ships: { text: 'Ships AISStream', href: 'https://aisstream.io' },
+  satellites: { text: 'CelesTrak', href: 'https://celestrak.org' },
+  quakes: { text: 'USGS' },
+  events: { text: 'NASA EONET' },
+}
+
+/**
+ * The map's own small credit line: imagery, base map (OpenStreetMap's
+ * licence asks for a visible credit with a link), then the live layers on.
+ */
+export const creditLine = (id: StyleId, layersOn: readonly string[]): CreditPart[] => [
+  ...(id === 'satellite'
+    ? [{ text: 'Imagery © EOX Sentinel-2 cloudless 2016', href: 'https://s2maps.eu' }]
+    : id === 'today'
+      ? [{ text: 'Imagery NASA GIBS', href: 'https://www.earthdata.nasa.gov/gibs' }]
+      : id === 'relief'
+        ? [{ text: 'Relief Mapzen/AWS' }]
+        : []),
+  { text: 'OpenFreeMap', href: 'https://openfreemap.org' },
+  { text: '© OpenMapTiles', href: 'https://www.openmaptiles.org' },
+  { text: '© OpenStreetMap contributors', href: 'https://www.openstreetmap.org/copyright' },
+  ...layersOn.flatMap(l => (LAYER_CREDIT[l] ? [LAYER_CREDIT[l]] : [])),
+]
+
 /**
  * Switching styles replaces every source and layer; this carries the map's
  * own data layers (flights, ships, places…) into the new style, on top.

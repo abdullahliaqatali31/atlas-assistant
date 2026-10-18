@@ -2,7 +2,7 @@ import type { StyleSpecification } from 'maplibre-gl'
 import { describe, expect, it } from 'vitest'
 
 import { LAYERS, OWN_SOURCES, PICKABLE } from './layers.ts'
-import { carryOverlays, composeStyle, DEFAULT_STYLE, gibsDay, labelLayers, STYLES, styleCredit } from './styles.ts'
+import { carryOverlays, composeStyle, creditLine, DEFAULT_STYLE, gibsDay, labelLayers, STYLES, styleCredit } from './styles.ts'
 
 const vector = (name: string): StyleSpecification => ({
   version: 8,
@@ -61,6 +61,20 @@ describe('map styles', () => {
   it('credits every style', () => {
     for (const s of STYLES) expect(styleCredit(s.id)).toMatch(/OpenStreetMap/)
     expect(styleCredit('satellite')).toContain('EOX')
+  })
+
+  it('always credits OpenStreetMap with its copyright link, and the live layers that are on', () => {
+    for (const s of STYLES) {
+      const parts = creditLine(s.id, [])
+      expect(parts.find(p => p.text.includes('OpenStreetMap'))?.href).toBe('https://www.openstreetmap.org/copyright')
+    }
+    expect(creditLine('satellite', ['flights', 'places']).map(p => p.text)).toEqual([
+      'Imagery © EOX Sentinel-2 cloudless 2016',
+      'OpenFreeMap',
+      '© OpenMapTiles',
+      '© OpenStreetMap contributors',
+      'Flights adsb.lol',
+    ])
   })
 
   it('carries the map’s own layers on top of a new style', () => {
