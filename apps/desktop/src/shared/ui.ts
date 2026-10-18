@@ -4,12 +4,13 @@
  * uses to change them. The page reports its part; main owns the window.
  */
 
-export const VIEWS = ['home', 'world', 'today', 'news', 'projects', 'files', 'apps', 'learning', 'controls', 'setup'] as const
+export const VIEWS = ['home', 'world', 'alerts', 'today', 'news', 'projects', 'files', 'apps', 'learning', 'controls', 'setup'] as const
 export type View = (typeof VIEWS)[number]
 
 export const VIEW_LABEL: Record<View, string> = {
   home: 'Home',
   world: 'World',
+  alerts: 'Alerts (the last 24 hours)',
   today: 'Today',
   news: 'News',
   projects: 'Projects',

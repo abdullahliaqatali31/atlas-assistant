@@ -1,5 +1,6 @@
 import {
   AppWindow,
+  Bell,
   Brain,
   CheckSquare,
   Feather,
@@ -45,6 +46,9 @@ import { Setup } from "./Setup.tsx";
 import { useCounts, type CountKey } from "./shell/counts.ts";
 import { Rail, type RailItem } from "./shell/Rail.tsx";
 import { AskBar } from "./shell/AskBar.tsx";
+import { useAlerts } from "./shell/alerts.ts";
+import { AlertsTimeline } from "./shell/AlertsTimeline.tsx";
+import { CornerWidget } from "./shell/CornerWidget.tsx";
 import {
   CommandPalette,
   type Command,
@@ -88,6 +92,7 @@ const SetupSections = lazy(() =>
 type Stage = "home" | "world";
 type DrawerId =
   | "chat"
+  | "alerts"
   | "today"
   | "news"
   | "projects"
@@ -98,6 +103,7 @@ type DrawerId =
   | "setup";
 const DRAWER_TITLE: Record<DrawerId, string> = {
   chat: "Conversation",
+  alerts: "Alerts · last 24 hours",
   today: "Today",
   news: "News",
   projects: "Projects",
@@ -111,6 +117,7 @@ const DRAWER_TITLE: Record<DrawerId, string> = {
 /** The order "[" and "]" step through. */
 const PANEL_ORDER: DrawerId[] = [
   "chat",
+  "alerts",
   "today",
   "news",
   "projects",
@@ -311,6 +318,13 @@ export function App() {
     unread,
   });
 
+  const alerts = useAlerts({
+    status,
+    controls,
+    active: status?.phase === "ready" && !locked,
+  });
+  const needYou = alerts.filter((a) => a.open).length;
+
   if (!status) return <div className="aurora" />;
 
   // First run: setup fills the window until the connection works.
@@ -332,7 +346,7 @@ export function App() {
     />
   );
   const peek = (kind: PeekKind) => (
-    <Peek kind={kind} ctx={{ status, controls }} />
+    <Peek kind={kind} ctx={{ status, controls, alerts }} />
   );
   const item = (
     id: DrawerId,
@@ -369,6 +383,16 @@ export function App() {
   ];
   const items: RailItem[] = [
     item("chat", "Talk", <MessageSquare />, "chat"),
+    {
+      ...item("alerts", "Alerts", <Bell />),
+      count: {
+        value: alerts.length ? String(alerts.length) : null,
+        hint: alerts.length
+          ? `${alerts.length} in the last 24 hours${needYou ? `, ${needYou} need you` : ""}`
+          : "Alerts",
+        attention: needYou > 0,
+      },
+    },
     item("today", "Today", <ListTodo />, "today"),
     item("news", "News", <Newspaper />, "news"),
     item("projects", "Code", <FolderKanban />, "projects"),
@@ -530,6 +554,18 @@ export function App() {
 
   const drawerContent = (d: DrawerId): ReactNode => {
     switch (d) {
+      case "alerts":
+        return (
+          <AlertsTimeline
+            items={alerts}
+            onOpen={(t) => {
+              if (t === "world") {
+                goStage("world");
+                open(null);
+              } else open(t);
+            }}
+          />
+        );
       case "today":
         return (
           <div className="h-full space-y-3 overflow-y-auto p-3">
@@ -599,7 +635,7 @@ export function App() {
           <div className="relative flex min-h-0 min-w-0 flex-1">
             {!compact && (
               <main
-                className={`glass relative mx-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl ${phone ? "mb-1" : "mb-2"}`}
+                className={`@container glass relative mx-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl ${phone ? "mb-1" : "mb-2"}`}
               >
                 {controls && <PausedBanner state={controls} />}
                 <div
@@ -619,6 +655,21 @@ export function App() {
                     )}
                   </Suspense>
                 </div>
+                {stage === "world" && (
+                  <div className="pointer-events-none absolute bottom-3 left-3 z-10 hidden @[960px]:block">
+                    <CornerWidget
+                      state={
+                        controls?.paused
+                          ? "paused"
+                          : status.phase !== "ready"
+                            ? "offline"
+                            : presence.state
+                      }
+                      presence={presence}
+                      onHome={() => goStage("home")}
+                    />
+                  </div>
+                )}
                 <AskBar
                   status={status}
                   chatOpen={drawer === "chat"}

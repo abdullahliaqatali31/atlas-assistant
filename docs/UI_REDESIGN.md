@@ -150,6 +150,9 @@ reduced shadows, map at lower pixel ratio. Also follows
    chips, a layers popover and an Inspector (left; bottom sheet when narrow)
    for places, cameras, flights, ships, satellites, quakes and events, with
    Centre and Ask Atlas)*
-5. **Alerts timeline** and the corner widget.
+5. **Alerts timeline** and the corner widget. *(done: Alerts in the rail with a count and hover card; one
+   timeline of world alerts, waiting questions (Haan / Nahi in place), overdue
+   tasks, failures and what Atlas raised, "Needs you" first, filter chips;
+   corner widget on the World stage when it is wide enough)*
 6. Restyle each drawer's content to the new density; responsive and
    performance pass; `ui_control` maps to stages and drawers.

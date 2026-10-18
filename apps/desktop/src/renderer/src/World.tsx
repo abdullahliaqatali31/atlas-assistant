@@ -208,9 +208,11 @@ function WorldMap({
   useEffect(() => {
     if (!box.current) return
     const dark = document.documentElement.dataset.theme !== 'daylight'
-    const m = new maplibregl.Map({ container: box.current, style: dark ? STYLE.dark : STYLE.light, center: [70, 28], zoom: 2.2, attributionControl: { compact: true } })
+    const m = new maplibregl.Map({ container: box.current, style: dark ? STYLE.dark : STYLE.light, center: [70, 28], zoom: 2.2, attributionControl: false })
     map.current = m
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+    // Map credits under the zoom buttons, clear of the Ask bar and the corner widget.
+    m.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-right')
     m.on('load', () => {
       const d = dataRef.current
       const empty: FC = { type: 'FeatureCollection', features: [] }
@@ -306,8 +308,6 @@ function WorldMap({
         m.on('mouseenter', layer, () => (m.getCanvas().style.cursor = 'pointer'))
         m.on('mouseleave', layer, () => (m.getCanvas().style.cursor = ''))
       }
-      // Keep the credits folded to an (i) so they never sit under the Ask bar.
-      box.current?.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show')
       setReady(true)
       // The stage may still be settling its size when the map starts (lazy page, opening drawer): measure again.
       m.resize()

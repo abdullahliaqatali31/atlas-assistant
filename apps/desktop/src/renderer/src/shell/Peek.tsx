@@ -7,13 +7,16 @@ import { useEffect, useState, type ReactNode } from 'react'
 
 import type { ControlState } from '../../../shared/control.ts'
 import type { RuntimeStatus } from '../../../shared/ipc.ts'
+import type { AlertItem } from './alerts.ts'
 import { useLive } from './live.ts'
 
-export type PeekKind = 'home' | 'world' | 'chat' | 'today' | 'news' | 'projects' | 'files' | 'apps' | 'learning' | 'controls' | 'setup' | 'compact'
+export type PeekKind = 'home' | 'world' | 'chat' | 'alerts' | 'today' | 'news' | 'projects' | 'files' | 'apps' | 'learning' | 'controls' | 'setup' | 'compact'
 
 export interface PeekContext {
   status: RuntimeStatus
   controls: ControlState | null
+  /** The alerts timeline, for its card. */
+  alerts?: AlertItem[] | undefined
 }
 
 interface Row {
@@ -119,6 +122,11 @@ export function Peek({ kind, ctx }: { kind: PeekKind; ctx: PeekContext }) {
       const ask = ctx.status.approvals[0]
       if (ask) lead = <p className="text-warm">{ask.question ?? `May I use ${ask.tool}?`}</p>
       fixed = lastReply ? [{ text: lastReply }] : [{ text: 'Nothing said yet. Type in the Ask bar or press the mic.' }]
+      break
+    }
+    case 'alerts': {
+      fixed = (ctx.alerts ?? []).slice(0, 4).map(a => ({ text: a.title, meta: a.open ? 'needs you' : ago(a.at), warn: a.open }))
+      if (!fixed.length) fixed = [{ text: 'Nothing in the last 24 hours.' }]
       break
     }
     case 'controls': {
