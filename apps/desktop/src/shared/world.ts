@@ -119,6 +119,14 @@ export interface Flight {
   /** Degrees. */
   track: number
   military: boolean
+  /** Transponder code; 7500 hijack, 7600 radio failure, 7700 emergency. */
+  squawk: string
+  /** Feet per minute, + climbing. */
+  verticalRate: number | null
+  /** "none" or the declared emergency. */
+  emergency: string
+  /** Seconds since the last position. */
+  seen: number
 }
 
 /** Orbit elements of one satellite (CelesTrak OMM JSON), positions are computed on the page. */
@@ -142,6 +150,10 @@ export const parseFlights = (j: unknown): Flight[] => {
       track: n(a.track) ?? n(a.true_heading) ?? 0,
       // adsb.lol marks military aircraft with bit 1 of dbFlags.
       military: ((n(a.dbFlags) ?? 0) & 1) === 1,
+      squawk: String(a.squawk ?? ''),
+      verticalRate: n(a.baro_rate) ?? n(a.geom_rate),
+      emergency: typeof a.emergency === 'string' ? a.emergency : 'none',
+      seen: n(a.seen_pos) ?? n(a.seen) ?? 0,
     }))
 }
 

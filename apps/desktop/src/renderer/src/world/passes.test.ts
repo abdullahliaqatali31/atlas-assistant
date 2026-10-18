@@ -1,7 +1,7 @@
 import * as satellite from 'satellite.js'
 import { describe, expect, it } from 'vitest'
 
-import { aboveNow, elevationAt, nextPasses } from './passes.ts'
+import { aboveNow, elevationAt, groundTrack, horizonKm, nextPasses, orbitFacts, ring } from './passes.ts'
 
 // The ISS on 2024-01-15 (a real element set); passes are computed near its epoch.
 const ISS = satellite.twoline2satrec(
@@ -41,5 +41,33 @@ describe('satellite passes', () => {
   it('counts what is above the horizon', () => {
     const [p] = nextPasses(ISS, KARACHI, EPOCH)
     expect(aboveNow([{ rec: ISS }], KARACHI, new Date(p!.maxAt))).toBe(1)
+  })
+})
+
+describe('orbit drawing', () => {
+  it('gives the ISS orbit its real shape: ~400 km up, ~7.7 km/s, 51.6°, ~92 min', () => {
+    const f = orbitFacts(ISS, new Date(EPOCH))!
+    expect(f.norad).toBe('25544')
+    expect(f.altKm).toBeGreaterThan(380)
+    expect(f.altKm).toBeLessThan(440)
+    expect(f.speedKms).toBeCloseTo(7.66, 1)
+    expect(f.inclination).toBe(51.6)
+    expect(f.periodMin).toBeGreaterThan(91)
+    expect(f.periodMin).toBeLessThan(94)
+  })
+
+  it('draws one orbit ahead without jumps, staying inside its inclination', () => {
+    const track = groundTrack(ISS, EPOCH, 95)
+    expect(track.length).toBe(96)
+    for (let i = 1; i < track.length; i++) expect(Math.abs(track[i]![0] - track[i - 1]![0])).toBeLessThan(30)
+    expect(Math.max(...track.map(p => Math.abs(p[1])))).toBeLessThan(52)
+  })
+
+  it('sizes the footprint from the height and closes the ring', () => {
+    expect(horizonKm(420)).toBeGreaterThan(2200)
+    expect(horizonKm(420)).toBeLessThan(2400)
+    const r = ring([67, 24.86], 100)
+    expect(r[0]![0]).toBeCloseTo(r.at(-1)![0], 6)
+    expect(r[0]![1]).toBeCloseTo(r.at(-1)![1], 6)
   })
 })

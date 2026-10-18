@@ -12,12 +12,14 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { MAX_PINS, type MapOp, type Pin, type Story } from '../../../shared/map.ts'
 import type { NewsResult } from '../../../shared/news.ts'
-import { CAMERA_COVERAGE, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
+import { CAMERA_COVERAGE, kmBetween, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
 import { cleanError, flightFeatures, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
 import { nearbyItems, type NearbyItem } from './hover.ts'
 import { HoverCard } from './HoverCard.tsx'
 import type { Selected } from './Inspector.tsx'
-import { layerDef, LAYERS, OWN_SOURCES, PICKABLE, readLayers, SELECTED_LAYER, type LayerId } from './layers.ts'
+import { layerDef, LAYERS, OWN_SOURCES, PICKABLE, readLayers, SELECTED_LAYER, TRAIL_LAYER, type LayerId } from './layers.ts'
+import { groundTrack, horizonKm, nextPasses, orbitFacts, ring } from './passes.ts'
+import { Trails } from './trails.ts'
 import { describeFound, describeVisible, findItems, linkFeatures, pinFeatures, storyFeatures, ZOOM_FOR } from './mapops.ts'
 import { LayerRail, RAIL } from './LayerRail.tsx'
 import { NewsCanvas } from './NewsCanvas.tsx'
@@ -66,6 +68,7 @@ export function MapView({
   selected,
   onSelect,
   focus,
+  follow,
   prefs,
   onPrefs,
   toolbar,
@@ -76,6 +79,8 @@ export function MapView({
   selected: Selected | null
   onSelect: (s: Selected | null) => void
   focus: { lngLat: [number, number]; zoom?: number; n: number } | null
+  /** Keep the picked moving item (aircraft, ship, satellite) in the middle as it moves. */
+  follow: boolean
   prefs: MapPrefs
   onPrefs: (p: MapPrefs) => void
   toolbar: (controls: ReactNode) => ReactNode
@@ -92,6 +97,8 @@ export function MapView({
   const [filters, setFilters] = useState(readFilters)
   /** Orbit elements of the tracked satellites, for the rail's "above you" panel. */
   const satsRef = useRef<{ name: string; rec: satellite.SatRec }[]>([])
+  /** Where aircraft and ships have been since the map opened. */
+  const trails = useRef(new Trails())
   const [open, setOpen] = useState<'layers' | 'style' | null>(null)
   const [counts, setCounts] = useState<Partial<Record<LayerId, number>>>({})
   const [flightNote, setFlightNote] = useState('')
@@ -131,8 +138,9 @@ export function MapView({
       const empty: FC = { type: 'FeatureCollection', features: [] }
       const initial: Record<string, FC> = { quakes: d.quakes, events: d.events, places: d.places }
       for (const l of LAYERS) for (const id of [l.source, ...(l.extraSources ?? [])]) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: initial[id] ?? empty, ...(id === l.source ? l.sourceOptions : {}) })
-      if (!m.getSource('selected')) m.addSource('selected', { type: 'geojson', data: empty })
+      for (const id of ['selected', 'trail']) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: empty })
       for (const l of LAYERS) for (const spec of l.draw) if (!m.getLayer(spec.id)) m.addLayer(spec)
+      if (!m.getLayer(TRAIL_LAYER.id)) m.addLayer(TRAIL_LAYER)
       if (!m.getLayer(SELECTED_LAYER.id)) m.addLayer(SELECTED_LAYER)
 
       // One click handler: the top-most item near the pointer, or nothing (closes the Inspector).
@@ -187,6 +195,64 @@ export function MapView({
       stopped = true
     }
   }, [prefs.style, globe])
+
+  // A picked aircraft, ship or satellite stays live: its card and ring move with it, its path is drawn,
+  // and Follow keeps it in the middle. A satellite shows its next orbit and the circle it can see.
+  const selectedNow = useRef(selected)
+  selectedNow.current = selected
+  const followNow = useRef(follow)
+  followNow.current = follow
+  const worldNow = useRef(world)
+  worldNow.current = world
+  const selectedId = selected ? String(selected.props.id ?? '') : ''
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const lines = (items: { coords: [number, number][]; color: string; width?: number }[]) =>
+      (m.getSource('trail') as GeoJSONSource | undefined)?.setData({
+        type: 'FeatureCollection',
+        features: items.filter(i => i.coords.length > 1).map(i => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: i.coords }, properties: { color: i.color, width: i.width ?? 2 } })),
+      })
+    const kind = selectedNow.current?.kind
+    if (!kind || !selectedId || (kind !== 'flights' && kind !== 'ships' && kind !== 'satellites')) {
+      lines([])
+      return
+    }
+    const sat = kind === 'satellites' ? satsRef.current.find(x => `sat:${String(x.rec.satnum).trim()}` === selectedId) : undefined
+    // The next pass over the first watched place, worked out once per pick.
+    const home = worldNow.current.places[0]?.place
+    const pass = sat && home ? nextPasses(sat.rec, { lat: home.lat, lon: home.lon }, Date.now(), { limit: 1 })[0] : undefined
+    const tick = () => {
+      const sel = selectedNow.current
+      if (!sel) return
+      let lngLat = sel.lngLat
+      let props = sel.props
+      const live = latest.current[kind]?.features.find(f => f.properties.id === selectedId)
+      if (live) {
+        lngLat = live.geometry.coordinates as [number, number]
+        props = { ...sel.props, ...live.properties }
+      }
+      if (sat) {
+        const facts = orbitFacts(sat.rec, new Date())
+        if (facts) {
+          lngLat = [facts.lon, facts.lat]
+          props = { ...props, norad: facts.norad, altKm: facts.altKm, speedKms: facts.speedKms, inclination: facts.inclination, periodMin: facts.periodMin, ...(pass && home ? { nextPass: pass.rise, nextPassMax: pass.maxElevation, nextPassMin: Math.max(1, Math.round((pass.set - pass.rise) / 60_000)), passPlace: home.name } : {}) }
+          lines([
+            { coords: groundTrack(sat.rec, Date.now(), Math.round(facts.periodMin)), color: '#c084fc' },
+            { coords: ring(lngLat, horizonKm(facts.altKm)), color: '#c084fc', width: 1 },
+          ])
+        }
+      } else lines([{ coords: trails.current.path(selectedId), color: kind === 'flights' ? '#fbbf24' : '#34d399' }])
+      if (lngLat[0] !== sel.lngLat[0] || lngLat[1] !== sel.lngLat[1] || props !== sel.props) selectRef.current({ kind, lngLat, props })
+      if (followNow.current) m.easeTo({ center: lngLat, duration: isLite() ? 0 : 800 })
+    }
+    tick()
+    const timer = setInterval(tick, kind === 'satellites' ? 2_000 : 4_000)
+    return () => {
+      clearInterval(timer)
+      lines([])
+    }
+  }, [ready, selectedId])
 
   // The ring around the picked item.
   useEffect(() => {
@@ -505,19 +571,18 @@ export function MapView({
     let stopped = false
     const load = async () => {
       if (stopped || document.hidden) return
-      if (m.getZoom() < 4) {
-        setFlightNote('Zoom in to see flights')
-        put('flights', { type: 'FeatureCollection', features: [] })
-        setCounts(c => ({ ...c, flights: 0 }))
-        return
-      }
+      // Zoomed far out: military aircraft worldwide. Zoomed in to a region: everything in view (up to 1000 nm).
       const c = m.getCenter()
+      const corner = m.getBounds().getNorthEast()
+      const nm = kmBetween({ lat: c.lat, lon: c.lng }, { lat: corner.lat, lon: corner.lng }) / 1.852
+      const regional = m.getZoom() >= 3
       try {
-        const flights = await window.world.flights(c.lat, c.lng, 250)
+        const flights = await window.world.flights(c.lat, c.lng, regional ? Math.min(1000, Math.ceil(nm)) : 0)
         if (stopped) return
+        trails.current.add(flights.map(f => ({ id: `f:${f.hex}`, lon: f.lon, lat: f.lat })))
         put('flights', flightFeatures(flights))
         setCounts(x => ({ ...x, flights: flights.length }))
-        setFlightNote('Within 250 nm of the map centre')
+        setFlightNote(regional ? (nm > 1000 ? 'Within 1000 nm of the map centre, plus military aircraft worldwide' : 'Everything on screen, plus military aircraft worldwide') : 'Military aircraft worldwide; zoom in to a region for every flight')
       } catch {
         setFlightNote('Flights unavailable right now')
       }
@@ -551,6 +616,7 @@ export function MapView({
         const r = await window.world.ships({ south: clamp(b.getSouth(), 90), north: clamp(b.getNorth(), 90), west: clamp(b.getWest(), 180), east: clamp(b.getEast(), 180) })
         if (stopped) return
         setShipState({ status: r.status, message: r.message })
+        trails.current.add(r.ships.map(v => ({ id: `s:${v.mmsi}`, lon: v.lon, lat: v.lat })))
         put('ships', shipFeatures(r.ships))
         setCounts(c => ({ ...c, ships: r.ships.length }))
       } catch {

@@ -15,6 +15,9 @@ const TIMEOUT_MS = 60_000
 const FLIGHTS_TTL = 15_000
 const FLIGHTS_GAP = 5_000
 const FLIGHTS_BACKOFF = 60_000
+/** adsb.lol answers for up to 1000 nautical miles around a point. */
+const FLIGHTS_MAX_NM = 1000
+const MILITARY_TTL = 60_000
 const SATELLITES_TTL = 6 * 3_600_000
 
 const getJson = async (url: string) => {
@@ -30,13 +33,14 @@ export class WorldService {
   private lastFlightCall = 0
   private flightsPausedUntil = 0
   private lastFlights: Flight[] = []
+  private militaryCache: { at: number; flights: Flight[] } | null = null
   private satellites: { at: number; list: SatelliteElements[] } | null = null
   private readonly cams = new CameraDirectory((level, message) => this.deps.log?.(level, message))
   readonly ships = new ShipFeed({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
 
   constructor(
     private readonly deps: {
-      handle: <T>(channel: string, fn: (a: unknown, b: unknown) => T | Promise<T>) => void
+      handle: <T>(channel: string, fn: (a: unknown, b: unknown, c?: unknown) => T | Promise<T>) => void
       toRenderer: (channel: string, payload: unknown) => void
       toRuntime: (msg: Extract<HostRequest, { type: 'world-op' }>) => boolean
       requireOwner: () => void
@@ -81,25 +85,50 @@ export class WorldService {
    */
   async flights(lat: unknown, lon: unknown, dist: number): Promise<Flight[]> {
     if (typeof lat !== 'number' || typeof lon !== 'number' || Math.abs(lat) > 90 || Math.abs(lon) > 180) throw new Error('Bad position.')
-    const key = `${Math.round(lat)},${Math.round(lon)}`
+    // Military aircraft come worldwide at any zoom; dist 0 asks for them alone (zoomed far out).
+    const military = await this.military()
+    if (dist <= 0) return military
+    const radius = Math.round(Math.min(FLIGHTS_MAX_NM, Math.max(10, dist)) / 50) * 50 || 50
+    const key = `${Math.round(lat)},${Math.round(lon)},${radius}`
     const hit = this.flightCache.get(key)
     const now = Date.now()
-    if (hit && now - hit.at < FLIGHTS_TTL) return hit.flights
-    if (now < this.flightsPausedUntil || now - this.lastFlightCall < FLIGHTS_GAP) return hit?.flights ?? this.lastFlights
+    const merge = (regional: Flight[]) => {
+      const seen = new Set(regional.map(f => f.hex))
+      return [...regional, ...military.filter(f => !seen.has(f.hex))]
+    }
+    if (hit && now - hit.at < FLIGHTS_TTL) return merge(hit.flights)
+    if (now < this.flightsPausedUntil || now - this.lastFlightCall < FLIGHTS_GAP) return merge(hit?.flights ?? this.lastFlights)
     this.lastFlightCall = now
     let raw: unknown
     try {
-      raw = await getJson(`https://api.adsb.lol/v2/lat/${lat.toFixed(3)}/lon/${lon.toFixed(3)}/dist/${Math.min(250, Math.max(10, dist))}`)
+      raw = await getJson(`https://api.adsb.lol/v2/lat/${lat.toFixed(3)}/lon/${lon.toFixed(3)}/dist/${radius}`)
     } catch (e) {
       if (/HTTP (420|429)/.test(e instanceof Error ? e.message : '')) this.flightsPausedUntil = Date.now() + FLIGHTS_BACKOFF
-      if (hit || this.lastFlights.length) return hit?.flights ?? this.lastFlights
+      if (hit || this.lastFlights.length || military.length) return merge(hit?.flights ?? this.lastFlights)
       throw e
     }
     const flights = parseFlights(raw)
     this.lastFlights = flights
     this.flightCache.set(key, { at: Date.now(), flights })
     if (this.flightCache.size > 50) this.flightCache.delete(this.flightCache.keys().next().value!)
-    return flights
+    return merge(flights)
+  }
+
+  /** Military aircraft worldwide (adsb.lol /v2/mil), at most once a minute; the last list on failure. */
+  private async military(): Promise<Flight[]> {
+    const now = Date.now()
+    if (this.militaryCache && now - this.militaryCache.at < MILITARY_TTL) return this.militaryCache.flights
+    if (now < this.flightsPausedUntil) return this.militaryCache?.flights ?? []
+    try {
+      const flights = parseFlights(await getJson('https://api.adsb.lol/v2/mil')).map(f => ({ ...f, military: true }))
+      this.militaryCache = { at: now, flights }
+      return flights
+    } catch (e) {
+      if (/HTTP (420|429)/.test(e instanceof Error ? e.message : '')) this.flightsPausedUntil = Date.now() + FLIGHTS_BACKOFF
+      // Try again in a minute either way, keeping what we had.
+      this.militaryCache = { at: now, flights: this.militaryCache?.flights ?? [] }
+      return this.militaryCache.flights
+    }
   }
 
   /** Space stations and the brightest satellites from CelesTrak, refreshed every 6 hours. */
@@ -132,7 +161,7 @@ export class WorldService {
     }))
     handle(WLD.refresh, owner(() => this.ask({ kind: 'refresh' })))
     // Live layers for the map: fetched here (the page may only load map tiles), politely cached.
-    handle(WLD.flights, (lat, lon) => this.flights(lat, lon, 250))
+    handle(WLD.flights, (lat, lon, dist) => this.flights(lat, lon, typeof dist === 'number' && Number.isFinite(dist) ? dist : 250))
     handle(WLD.satellites, () => this.satelliteList())
     handle(WLD.ships, raw => {
       const b = raw as { south?: unknown; west?: unknown; north?: unknown; east?: unknown } | null

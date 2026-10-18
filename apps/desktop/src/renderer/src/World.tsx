@@ -22,6 +22,10 @@ export function WorldPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<Selected | null>(null)
+  /** Keep a moving item in the middle; off again whenever something else is picked. */
+  const [follow, setFollow] = useState(false)
+  const selectedId = selected ? `${selected.kind}:${String(selected.props.id ?? selected.props.title ?? '')}` : ''
+  useEffect(() => setFollow(false), [selectedId])
   const [nearby, setNearby] = useState<NearbyItem[]>([])
   const [focus, setFocus] = useState<{ lngLat: [number, number]; zoom?: number; n: number } | null>(null)
   const [info, setInfo] = useState(false)
@@ -112,7 +116,7 @@ export function WorldPage() {
 
   return (
     <div className="@container relative h-full min-h-0">
-      <MapView world={world} selected={selected} onSelect={setSelected} focus={focus} prefs={prefs} onPrefs={changePrefs} toolbar={toolbar} now={now} onNearby={setNearby} />
+      <MapView world={world} selected={selected} onSelect={setSelected} focus={focus} follow={follow} prefs={prefs} onPrefs={changePrefs} toolbar={toolbar} now={now} onNearby={setNearby} />
 
       {error && (
         <p role="alert" className="ask-pop glass absolute left-1/2 top-14 z-20 max-w-[90%] -translate-x-1/2 rounded-lg bg-solid/90 px-3 py-1.5 text-xs text-danger">
@@ -149,6 +153,8 @@ export function WorldPage() {
               setSelected({ kind: n.kind, lngLat: n.lngLat, props: n.props })
               setFocus({ lngLat: n.lngLat, zoom: 8, n: Date.now() })
             }}
+            following={follow}
+            onFollow={() => setFollow(f => !f)}
             onCentre={() => setFocus({ lngLat: selected.lngLat, zoom: selected.kind === 'places' ? 7 : 8, n: Date.now() })}
             onRemovePlace={id => {
               setSelected(null)

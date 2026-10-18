@@ -1,6 +1,7 @@
 /** GeoJSON for the World map's own layers, and the icons they draw with. */
 import * as satellite from 'satellite.js'
 
+import { aircraftName, squawkMeaning } from '../../../shared/aircraft.ts'
 import type { Flight, Ship, WorldSnapshot } from '../../../shared/world.ts'
 
 export const cleanError = (err: unknown) =>
@@ -85,8 +86,14 @@ export const shipFeatures = (ships: Ship[]): FC => ({
     properties: {
       title: `${v.name || `MMSI ${v.mmsi}`} · ${v.category}`,
       detail: `${v.speed.toFixed(1)} kn${v.destination ? ` · to ${v.destination}` : ''}${v.length ? ` · ${v.length} m` : ''}`,
+      id: `s:${v.mmsi}`,
+      mmsi: v.mmsi,
       name: v.name,
       category: v.category,
+      speed: v.speed,
+      course: v.course,
+      destination: v.destination,
+      ...(v.length ? { length: v.length } : {}),
       rotation: v.heading ?? v.course,
       color: SHIP_COLOR[v.category] ?? SHIP_COLOR.Other!,
       time: v.at,
@@ -102,11 +109,22 @@ export const flightFeatures = (flights: Flight[]): FC => ({
     properties: {
       title: `${f.callsign || f.registration || f.hex}${f.type ? ` · ${f.type}` : ''}${f.military ? ' · military' : ''}`,
       detail: `${f.altitude === null ? 'On the ground' : `${Math.round(f.altitude).toLocaleString()} ft`} · ${Math.round(f.speed)} kt${f.registration ? ` · ${f.registration}` : ''}`,
+      id: `f:${f.hex}`,
+      hex: f.hex,
       callsign: f.callsign,
+      registration: f.registration,
+      type: f.type,
+      typeName: aircraftName(f.type),
       military: f.military ? 1 : 0,
       altitude: f.altitude ?? 0,
+      onGround: f.altitude === null ? 1 : 0,
+      speed: f.speed,
       track: f.track,
-      color: f.military ? '#ef4444' : '#fbbf24',
+      squawk: f.squawk,
+      verticalRate: f.verticalRate ?? 0,
+      emergency: f.emergency !== 'none' ? f.emergency : squawkMeaning(f.squawk),
+      seen: f.seen,
+      color: f.emergency !== 'none' || squawkMeaning(f.squawk) ? '#f43f5e' : f.military ? '#ef4444' : '#fbbf24',
     },
   })),
 })
@@ -123,7 +141,7 @@ export const satelliteFeatures = (sats: { name: string; rec: satellite.SatRec }[
     features.push({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [satellite.degreesLong(geo.longitude), satellite.degreesLat(geo.latitude)] },
-      properties: { title: iss ? 'ISS · International Space Station' : s.name, detail: `${Math.round(geo.height)} km up`, label: iss ? 'ISS' : '', size: iss ? 7 : 3.5 },
+      properties: { id: `sat:${String(s.rec.satnum).trim()}`, norad: String(s.rec.satnum).trim(), name: s.name, title: iss ? 'ISS · International Space Station' : s.name, detail: `${Math.round(geo.height)} km up`, label: iss ? 'ISS' : '', size: iss ? 7 : 3.5 },
     })
   }
   return { type: 'FeatureCollection', features }

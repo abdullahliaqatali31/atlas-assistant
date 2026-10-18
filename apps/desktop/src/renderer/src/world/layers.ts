@@ -343,8 +343,17 @@ export const SELECTED_LAYER: LayerSpecification = {
   paint: { 'circle-radius': 13, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff', 'circle-stroke-opacity': 0.9 },
 }
 
+/** The picked item's path: where an aircraft or ship has been, a satellite's next orbit and footprint. */
+export const TRAIL_LAYER: LayerSpecification = {
+  id: 'trail',
+  type: 'line',
+  source: 'trail',
+  layout: { 'line-cap': 'round', 'line-join': 'round' },
+  paint: { 'line-color': ['coalesce', ['get', 'color'], '#22d3ee'], 'line-width': ['coalesce', ['get', 'width'], 2], 'line-opacity': 0.85, 'line-dasharray': [2, 1.5] },
+}
+
 /** Every source the map owns (kept across style switches). */
-export const OWN_SOURCES: ReadonlySet<string> = new Set([...LAYERS.flatMap(l => [l.source, ...(l.extraSources ?? [])]), 'selected'])
+export const OWN_SOURCES: ReadonlySet<string> = new Set([...LAYERS.flatMap(l => [l.source, ...(l.extraSources ?? [])]), 'selected', 'trail'])
 
 /** Layers that can be clicked, top priority first. */
 export const PICKABLE = [...LAYERS].sort((a, b) => a.pickRank - b.pickRank).map(l => ({ layer: l.pickLayer ?? l.draw[0]!.id, kind: l.id }))

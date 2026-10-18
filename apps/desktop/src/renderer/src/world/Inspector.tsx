@@ -1,10 +1,11 @@
 /** The Inspector: what was picked on the map, with what you can do about it. */
-import { Crosshair, ExternalLink, Sparkles, Trash2, Wind, X } from 'lucide-react'
+import { Crosshair, ExternalLink, LocateFixed, Sparkles, Trash2, Wind, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import type { PlaceStatus, WorldSnapshot } from '../../../shared/world.ts'
 import { ago } from '../Jarvis.tsx'
 import { ASK_EVENT } from '../shell/live.ts'
+import { FlightDetail, moreLinks, SatelliteDetail, ShipDetail } from './Details.tsx'
 import { hoverInfo, type NearbyItem } from './hover.ts'
 import { layerDef, type LayerId } from './layers.ts'
 
@@ -132,6 +133,8 @@ export function Inspector({
   now,
   nearby,
   onPick,
+  following,
+  onFollow,
   onClose,
   onCentre,
   onRemovePlace,
@@ -141,6 +144,8 @@ export function Inspector({
   now: number
   nearby: NearbyItem[]
   onPick: (item: NearbyItem) => void
+  following: boolean
+  onFollow: () => void
   onClose: () => void
   onCentre: () => void
   onRemovePlace: (id: string) => void
@@ -179,6 +184,12 @@ export function Inspector({
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 text-sm">
         {place ? (
           <PlaceDetail s={place} now={now} />
+        ) : sel.kind === 'flights' ? (
+          <FlightDetail p={p} />
+        ) : sel.kind === 'ships' ? (
+          <ShipDetail p={p} />
+        ) : sel.kind === 'satellites' ? (
+          <SatelliteDetail p={p} />
         ) : sel.kind === 'cameras' ? (
           <CameraDetail id={String(p.id)} source={String(p.source ?? '')} />
         ) : (
@@ -191,7 +202,6 @@ export function Inspector({
                 <p key={f}>{f}</p>
               ))}
             {p.time && <p className="text-xs text-muted">{ago(Number(p.time), now)} · {new Date(Number(p.time)).toLocaleString()}</p>}
-            {(sel.kind === 'flights' || sel.kind === 'satellites' || sel.kind === 'ships') && <p className="text-[11px] text-muted">Position when you picked it; it keeps moving on the map.</p>}
           </>
         )}
         {nearby.length > 0 && (
@@ -218,6 +228,11 @@ export function Inspector({
         <button type="button" className="btn h-7 gap-1 px-2 text-xs" onClick={onCentre}>
           <Crosshair className="size-3.5" aria-hidden /> Centre
         </button>
+        {(sel.kind === 'flights' || sel.kind === 'ships' || sel.kind === 'satellites') && (
+          <button type="button" className={`btn h-7 gap-1 px-2 text-xs ${following ? 'border-accent text-accent' : ''}`} onClick={onFollow} aria-pressed={following} title="Keep it in the middle of the map as it moves">
+            <LocateFixed className="size-3.5" aria-hidden /> {following ? 'Following' : 'Follow'}
+          </button>
+        )}
         <button type="button" className="btn h-7 gap-1 border-accent/60 px-2 text-xs text-accent" onClick={ask}>
           <Sparkles className="size-3.5" aria-hidden /> Ask Atlas
         </button>
@@ -226,6 +241,11 @@ export function Inspector({
             <ExternalLink className="size-3.5" aria-hidden /> Source
           </a>
         )}
+        {moreLinks(sel.kind, p).map(l => (
+          <a key={l.href} href={l.href} target="_blank" rel="noreferrer" className="btn h-7 gap-1 px-2 text-xs">
+            <ExternalLink className="size-3.5" aria-hidden /> {l.label}
+          </a>
+        ))}
         {place && (
           <button type="button" className="btn ml-auto h-7 gap-1 px-2 text-xs" onClick={() => onRemovePlace(place.place.id)} title="Stop watching this place">
             <Trash2 className="size-3.5" aria-hidden /> Stop watching
