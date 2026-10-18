@@ -230,12 +230,16 @@ export interface Camera {
   /** Who runs it, credited on the card. */
   source: string
   image: string
+  /** Live video: an HLS stream (Caltrans) or a short clip refreshed every few minutes (TfL). */
+  video?: { url: string; kind: 'hls' | 'clip' } | undefined
 }
 
 /** Where official public cameras are available without a key. */
 export const CAMERA_COVERAGE = 'London (TfL), California (Caltrans), Finland (Fintraffic), Hong Kong (Transport Department), Singapore (LTA)'
 
 /** Each agency's own format into one list. Unknown or broken entries are skipped. */
+const httpsVideo = (v: unknown, kind: 'hls' | 'clip') => (typeof v === 'string' && /^https:\/\/[^\s]+\.(m3u8|mp4)$/.test(v) ? { url: v, kind } : undefined)
+
 export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; finland?: unknown; hongKong?: string; singapore?: unknown }): Camera[] => {
   const out: Camera[] = []
   const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN)
@@ -246,15 +250,16 @@ export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; f
     const props = (p.additionalProperties as { key: string; value: string }[] | undefined) ?? []
     const prop = (k: string) => props.find(x => x.key === k)?.value
     if (prop('available') === 'false') continue
-    push({ id: `tfl:${String(p.id)}`, name: String(p.commonName ?? 'London camera'), lat: num(p.lat), lon: num(p.lon), country: 'United Kingdom', source: 'Transport for London (TfL Open Data)', image: prop('imageUrl') ?? '' })
+    push({ id: `tfl:${String(p.id)}`, name: String(p.commonName ?? 'London camera'), lat: num(p.lat), lon: num(p.lon), country: 'United Kingdom', source: 'Transport for London (TfL Open Data)', image: prop('imageUrl') ?? '', video: httpsVideo(prop('videoUrl'), 'clip') })
   }
   for (const d of raw.caltrans ?? []) {
     for (const item of ((d as { data?: { cctv?: Record<string, unknown> }[] })?.data ?? [])) {
       const c = item.cctv
       if (!c || c.inService === 'false') continue
       const loc = (c.location as Record<string, unknown> | undefined) ?? {}
-      const img = ((c.imageData as Record<string, unknown> | undefined)?.static as Record<string, unknown> | undefined)?.currentImageURL
-      push({ id: `ct:${String(loc.district)}-${String(c.index)}`, name: String(loc.locationName ?? 'California camera'), lat: num(loc.latitude), lon: num(loc.longitude), country: 'United States', source: 'Caltrans', image: typeof img === 'string' ? img : '' })
+      const data = (c.imageData as Record<string, unknown> | undefined) ?? {}
+      const img = (data.static as Record<string, unknown> | undefined)?.currentImageURL
+      push({ id: `ct:${String(loc.district)}-${String(c.index)}`, name: String(loc.locationName ?? 'California camera'), lat: num(loc.latitude), lon: num(loc.longitude), country: 'United States', source: 'Caltrans', image: typeof img === 'string' ? img : '', video: httpsVideo(data.streamingVideoURL, 'hls') })
     }
   }
   for (const f of ((raw.finland as { features?: Record<string, unknown>[] })?.features ?? [])) {

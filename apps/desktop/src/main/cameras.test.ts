@@ -27,6 +27,48 @@ describe('public cameras', () => {
     expect(cams.find(c => c.id === 'ct:7-1')).toMatchObject({ lat: 34.0837, lon: -118.2215, source: 'Caltrans' })
   })
 
+  it('keeps live video links: Caltrans streams and TfL clips, https only', () => {
+    const cams = parseCameraSources({
+      tfl: [
+        {
+          id: 'JamCams_00002.00865',
+          commonName: 'Westway',
+          lat: 51.52,
+          lon: -0.2,
+          additionalProperties: [
+            { key: 'imageUrl', value: 'https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00002.00865.jpg' },
+            { key: 'videoUrl', value: 'https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00002.00865.mp4' },
+          ],
+        },
+      ],
+      caltrans: [
+        {
+          data: [
+            {
+              cctv: {
+                index: '1',
+                inService: 'true',
+                location: { district: '7', locationName: 'I-110 Avenue 26', latitude: '34.08', longitude: '-118.22' },
+                imageData: { streamingVideoURL: 'https://wzmedia.dot.ca.gov/D7/CCTV-196.stream/playlist.m3u8', static: { currentImageURL: 'https://cwwp2.dot.ca.gov/x.jpg' } },
+              },
+            },
+            {
+              cctv: {
+                index: '2',
+                inService: 'true',
+                location: { district: '7', locationName: 'No stream', latitude: '34.1', longitude: '-118.3' },
+                imageData: { streamingVideoURL: 'http://insecure.example/x.m3u8', static: { currentImageURL: 'https://cwwp2.dot.ca.gov/y.jpg' } },
+              },
+            },
+          ],
+        },
+      ],
+    })
+    expect(cams.find(c => c.name === 'Westway')?.video).toEqual({ url: 'https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00002.00865.mp4', kind: 'clip' })
+    expect(cams.find(c => c.name === 'I-110 Avenue 26')?.video).toEqual({ url: 'https://wzmedia.dot.ca.gov/D7/CCTV-196.stream/playlist.m3u8', kind: 'hls' })
+    expect(cams.find(c => c.name === 'No stream')?.video).toBeUndefined()
+  })
+
   it('only fetches images of cameras on the list, and only images', async () => {
     const dir = new CameraDirectory()
     // A list with one camera, without touching the network.

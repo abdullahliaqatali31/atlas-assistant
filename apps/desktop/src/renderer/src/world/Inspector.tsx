@@ -1,6 +1,6 @@
 /** The Inspector: what was picked on the map, with what you can do about it. */
 import { Crosshair, ExternalLink, LocateFixed, Sparkles, Trash2, Wind, X } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { PlaceStatus, WorldSnapshot } from '../../../shared/world.ts'
 import { ago } from '../Jarvis.tsx'
@@ -90,10 +90,46 @@ function PlaceDetail({ s, now }: { s: PlaceStatus; now: number }) {
   )
 }
 
-/** A public camera's latest frame, fetched by Atlas (the page itself loads only map tiles). */
-function CameraDetail({ id, source }: { id: string; source: string }) {
+/**
+ * Live video from the camera's own agency: an HLS stream (Caltrans) through
+ * hls.js, or the short clip TfL refreshes every few minutes, looped. Muted;
+ * any failure falls back to the still frame.
+ */
+function LiveVideo({ url, kind, poster, onFail }: { url: string; kind: string; poster?: string | undefined; onFail: () => void }) {
+  const ref = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    const v = ref.current
+    if (!v) return
+    let destroy = () => {}
+    if (kind === 'hls' && !v.canPlayType('application/vnd.apple.mpegurl')) {
+      let stopped = false
+      void import('hls.js').then(({ default: Hls }) => {
+        if (stopped || !Hls.isSupported()) return stopped || onFail()
+        const hls = new Hls({ lowLatencyMode: true, maxBufferLength: 10 })
+        hls.on(Hls.Events.ERROR, (_e, d) => d.fatal && onFail())
+        hls.loadSource(url)
+        hls.attachMedia(v)
+        destroy = () => hls.destroy()
+      }, onFail)
+      return () => {
+        stopped = true
+        destroy()
+      }
+    }
+    v.src = url
+    return () => {
+      v.removeAttribute('src')
+      v.load()
+    }
+  }, [url, kind])
+  return <video ref={ref} className="h-full w-full object-cover" poster={poster} autoPlay muted playsInline loop={kind === 'clip'} onError={onFail} aria-label="Live camera video" />
+}
+
+/** A public camera: live video where the agency offers it, else its latest frame (fetched by Atlas, refreshed every 30 s). */
+function CameraDetail({ id, source, video, videoKind }: { id: string; source: string; video?: string | undefined; videoKind?: string | undefined }) {
   const [frame, setFrame] = useState<{ src: string; at: number } | null>(null)
   const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
+  const [mode, setMode] = useState<'video' | 'still'>(video ? 'video' : 'still')
   const load = useCallback(() => {
     setState('loading')
     void window.world.cameraImage(id).then(
@@ -106,21 +142,42 @@ function CameraDetail({ id, source }: { id: string; source: string }) {
   }, [id])
   useEffect(() => {
     setFrame(null)
+    setMode(video ? 'video' : 'still')
     load()
-  }, [load])
+    const timer = setInterval(load, 30_000)
+    return () => clearInterval(timer)
+  }, [load, video])
   return (
     <div className="space-y-1.5">
-      <div className="grid aspect-video place-items-center overflow-hidden rounded-lg bg-surface">
-        {frame ? <img src={frame.src} alt="Latest camera frame" className="h-full w-full object-cover" /> : <span className="text-xs text-muted">{state === 'error' ? 'Image unavailable right now' : 'Loading the latest frame…'}</span>}
+      <div className="relative grid aspect-video place-items-center overflow-hidden rounded-lg bg-surface">
+        {mode === 'video' && video ? (
+          <LiveVideo url={video} kind={videoKind ?? 'clip'} poster={frame?.src} onFail={() => setMode('still')} />
+        ) : frame ? (
+          <img src={frame.src} alt="Latest camera frame" className="h-full w-full object-cover" />
+        ) : (
+          <span className="text-xs text-muted">{state === 'error' ? 'Image unavailable right now' : 'Loading the latest frame…'}</span>
+        )}
+        {mode === 'video' && video && (
+          <span className="absolute left-2 top-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white">
+            <span className="size-1.5 animate-pulse rounded-full bg-red-500" aria-hidden /> {videoKind === 'hls' ? 'LIVE' : 'RECENT CLIP'}
+          </span>
+        )}
       </div>
       <p className="flex items-center gap-2 text-[11px] text-muted">
         <span className="flex-1">
           {source}
-          {frame ? ` · ${new Date(frame.at).toLocaleTimeString()}` : ''}
+          {mode === 'still' && frame ? ` · ${new Date(frame.at).toLocaleTimeString()}` : ''}
         </span>
-        <button type="button" className="text-accent hover:underline" onClick={load} disabled={state === 'loading'}>
-          Refresh
-        </button>
+        {video && (
+          <button type="button" className="text-accent hover:underline" onClick={() => setMode(m => (m === 'video' ? 'still' : 'video'))}>
+            {mode === 'video' ? 'Still' : 'Video'}
+          </button>
+        )}
+        {mode === 'still' && (
+          <button type="button" className="text-accent hover:underline" onClick={load} disabled={state === 'loading'}>
+            Refresh
+          </button>
+        )}
       </p>
     </div>
   )
@@ -191,7 +248,7 @@ export function Inspector({
         ) : sel.kind === 'satellites' ? (
           <SatelliteDetail p={p} />
         ) : sel.kind === 'cameras' ? (
-          <CameraDetail id={String(p.id)} source={String(p.source ?? '')} />
+          <CameraDetail id={String(p.id)} source={String(p.source ?? '')} video={typeof p.video === 'string' ? p.video : undefined} videoKind={typeof p.videoKind === 'string' ? p.videoKind : undefined} />
         ) : (
           <>
             {typeof p.image === 'string' && p.image.startsWith('assistant-news://') && <img src={p.image} alt="" className="aspect-video w-full rounded-lg object-cover" />}

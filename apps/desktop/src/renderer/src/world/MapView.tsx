@@ -679,7 +679,7 @@ export function MapView({
       if (stopped) return
       put('cameras', {
         type: 'FeatureCollection',
-        features: list.map(c => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lon, c.lat] }, properties: { id: c.id, title: c.name, source: c.source } })),
+        features: list.map(c => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lon, c.lat] }, properties: { id: c.id, title: c.name, source: c.source, ...(c.video ? { video: c.video.url, videoKind: c.video.kind } : {}) } })),
       })
       setCounts(x => ({ ...x, cameras: list.length }))
     }, () => undefined)
