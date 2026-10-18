@@ -18,6 +18,12 @@ export interface ChatTurn {
   content: string | ContentPart[]
   /** Provider-native assistant content, replayed verbatim inside a tool loop. */
   raw?: unknown
+  /**
+   * Everything up to and including this turn stays the same on the next
+   * call (the end of the conversation history): providers with explicit
+   * prompt caching put a cache marker here.
+   */
+  cacheBreak?: boolean
 }
 
 export interface ToolSpec {
@@ -53,6 +59,8 @@ export interface LlmUsage {
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
+  /** Input tokens written to the prompt cache this call (billed a little above normal input). */
+  cacheWriteTokens?: number
 }
 
 export interface LlmProvider {

@@ -49,13 +49,13 @@ describe('cost meter', () => {
     await drain(meterLlm(fake('claude-opus-5-5'), { ...opts, purpose: 'chat' }))
     await drain(meterLlm(fake('claude-haiku-5-5'), { ...opts, purpose: 'background' }))
     const s = usageSummary(memory, clock.now(), 300)
-    // Opus 5.5: 1M in × $4 + 0.1M out × $20 + 2M cached × $0.20 = $6.40; Haiku: $0.10 + $0.05 + 2M cached at input price $0.20 = $0.35.
+    // Opus 5.5: 1M in × $4 + 0.1M out × $20 + 2M cached × $0.20 = $6.40; Haiku: $0.10 + $0.05 + 2M cached × $0.01 = $0.17.
     expect(s.byModel.map(m => [m.model, m.purpose, m.usd])).toEqual([
       ['claude-opus-5-5', 'chat', 6.4],
-      ['claude-haiku-5-5', 'background', expect.closeTo(0.35, 6)],
+      ['claude-haiku-5-5', 'background', expect.closeTo(0.17, 6)],
     ])
     expect(s.today).toMatchObject({ calls: 2, tokens: 6_200_000 })
-    expect(s.month.usd).toBeCloseTo(6.75, 6)
+    expect(s.month.usd).toBeCloseTo(6.57, 6)
   })
 
   it('shows tokens without dollars for models with no known price, until the owner sets one', async () => {
@@ -99,5 +99,43 @@ describe('provider config', () => {
 
   it('can store every provider’s key in the OS credential store', () => {
     for (const k of LLM_KEY_NAMES) expect(SECRET_NAMES as readonly string[]).toContain(k)
+  })
+})
+
+describe('per-call breakdown', () => {
+  it('records each call with cache writes, its cost, and what the request was made of', async () => {
+    const { memory, clock } = setup()
+    const llm = meterLlm(fake('claude-opus-5-5', { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 9000, cacheWriteTokens: 500 } as never), { purpose: 'chat', memory, clock, utcOffsetMin: 0 })
+    const req: LlmRequest = {
+      system: ['x'.repeat(4000), 'y'.repeat(400)],
+      tools: [{ name: 't', description: 'd'.repeat(200), inputSchema: {} }],
+      turns: [
+        { role: 'user', content: 'h'.repeat(800) },
+        { role: 'assistant', content: 'i'.repeat(400), cacheBreak: true },
+        { role: 'user', content: [{ type: 'text', text: 'now' }, { type: 'text', text: 'c'.repeat(1200) }] },
+        { role: 'assistant', content: [{ type: 'tool_use', id: '1', name: 'news', input: {} }] },
+        { role: 'user', content: [{ type: 'tool_result', toolUseId: '1', content: 'r'.repeat(8000) }] },
+      ],
+    }
+    for await (const _ of llm.stream(req)) void _
+    const s = usageSummary(memory, clock.now(), 0)
+    expect(s.recent).toHaveLength(1)
+    const c = s.recent[0]!
+    expect(c).toMatchObject({ model: 'claude-opus-5-5', purpose: 'chat', input: 1000, cached: 9000, cacheWrite: 500, output: 200 })
+    // $4/M fresh, $0.20/M cached, $5/M written, $20/M out.
+    expect(c.usd).toBeCloseTo((1000 * 4 + 9000 * 0.2 + 500 * 5 + 200 * 20) / 1_000_000, 9)
+    expect(c.parts).toMatchObject({ instructions: 1100, history: 300, toolResults: 2000 })
+    expect(c.parts.turn).toBeGreaterThan(300)
+    // 9000 of 10500 input came from the cache today.
+    expect(s.cacheShare).toBeCloseTo(9000 / 10500, 6)
+    expect(s.byModel[0]).toMatchObject({ cacheWrite: 500 })
+  })
+
+  it('keeps only the newest thousand calls', () => {
+    const { memory } = setup()
+    for (let i = 0; i < 1005; i++) memory.addCall({ at: i, model: 'm', purpose: 'chat', input: 1, output: 1, cached: 0, cacheWrite: 0, parts: {} })
+    const recent = memory.recentCalls(2000)
+    expect(recent).toHaveLength(1000)
+    expect(recent[0]!.at).toBe(1004)
   })
 })

@@ -102,7 +102,27 @@ const MIGRATIONS: string[] = [
      day TEXT NOT NULL, model TEXT NOT NULL, purpose TEXT NOT NULL,
      input INTEGER NOT NULL DEFAULT 0, output INTEGER NOT NULL DEFAULT 0, cached INTEGER NOT NULL DEFAULT 0, calls INTEGER NOT NULL DEFAULT 0,
      PRIMARY KEY (day, model, purpose));`,
+  // Prompt-cache writes in the daily totals, and the last calls one by one with what each request was made of.
+  `ALTER TABLE llm_usage ADD COLUMN cache_write INTEGER NOT NULL DEFAULT 0;
+   CREATE TABLE llm_call (
+     id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, model TEXT NOT NULL, purpose TEXT NOT NULL,
+     input INTEGER NOT NULL, output INTEGER NOT NULL, cached INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+     parts TEXT NOT NULL);
+   CREATE INDEX llm_call_at ON llm_call(at);`,
 ]
+
+/** One LLM call: tokens as billed, and an estimate of what the request was made of (tokens per part). */
+export interface CallRow {
+  id: number
+  at: number
+  model: string
+  purpose: string
+  input: number
+  output: number
+  cached: number
+  cacheWrite: number
+  parts: Record<string, number>
+}
 
 export interface UsageRow {
   day: string
@@ -111,6 +131,8 @@ export interface UsageRow {
   input: number
   output: number
   cached: number
+  /** Tokens written to the prompt cache. */
+  cache_write: number
   calls: number
 }
 
@@ -838,13 +860,37 @@ export class MemoryStore {
 
   // ── LLM usage ─────────────────────────────────────────────
 
-  addUsage(day: string, model: string, purpose: string, u: { input: number; output: number; cached: number }) {
+  addUsage(day: string, model: string, purpose: string, u: { input: number; output: number; cached: number; cacheWrite?: number }) {
     this.db
       .prepare(
-        `INSERT INTO llm_usage (day, model, purpose, input, output, cached, calls) VALUES (?, ?, ?, ?, ?, ?, 1)
-         ON CONFLICT(day, model, purpose) DO UPDATE SET input = input + excluded.input, output = output + excluded.output, cached = cached + excluded.cached, calls = calls + 1`,
+        `INSERT INTO llm_usage (day, model, purpose, input, output, cached, cache_write, calls) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+         ON CONFLICT(day, model, purpose) DO UPDATE SET input = input + excluded.input, output = output + excluded.output, cached = cached + excluded.cached, cache_write = cache_write + excluded.cache_write, calls = calls + 1`,
       )
-      .run(day, model, purpose, u.input, u.output, u.cached)
+      .run(day, model, purpose, u.input, u.output, u.cached, u.cacheWrite ?? 0)
+  }
+
+  /** One call with what its request was made of; the newest 1000 are kept. */
+  addCall(c: Omit<CallRow, 'id'>) {
+    this.db
+      .prepare('INSERT INTO llm_call (at, model, purpose, input, output, cached, cache_write, parts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(c.at, c.model, c.purpose, c.input, c.output, c.cached, c.cacheWrite, JSON.stringify(c.parts))
+    this.db.prepare('DELETE FROM llm_call WHERE id <= (SELECT MAX(id) - 1000 FROM llm_call)').run()
+  }
+
+  /** The newest calls first. */
+  recentCalls(limit = 20): CallRow[] {
+    const rows = this.db.prepare('SELECT * FROM llm_call ORDER BY id DESC LIMIT ?').all(limit) as Record<string, unknown>[]
+    return rows.map(r => ({
+      id: Number(r.id),
+      at: Number(r.at),
+      model: String(r.model),
+      purpose: String(r.purpose),
+      input: Number(r.input),
+      output: Number(r.output),
+      cached: Number(r.cached),
+      cacheWrite: Number(r.cache_write),
+      parts: JSON.parse(String(r.parts)) as Record<string, number>,
+    }))
   }
 
   /** Usage rows from `fromDay` ("2026-10-01") on. */

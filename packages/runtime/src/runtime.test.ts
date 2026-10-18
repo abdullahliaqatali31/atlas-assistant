@@ -115,6 +115,27 @@ describe('Assistant', () => {
     memory.close()
   })
 
+  it('marks the end of the conversation history so it can be cached, and only there', async () => {
+    const { assistant, llm, memory } = setup()
+    await drain(assistant.reply('salam'))
+    await drain(assistant.reply('kya haal hai'))
+    const turns = llm.requests[1]!.turns
+    expect(turns.map(t => t.cacheBreak === true)).toEqual([false, true, false])
+    // The stored history itself is not changed.
+    expect(assistant.session.history.some(t => t.cacheBreak)).toBe(false)
+    memory.close()
+  })
+
+  it('cuts a huge tool result before it reaches the model, saying so', async () => {
+    const big: RuntimeTool = { name: 'dump', description: 'd', inputSchema: { type: 'object' }, actionClass: 'observe', isUntrusted: false, run: async () => 'x'.repeat(50_000) }
+    const { assistant, llm, memory } = setup((_, n) => (n === 0 ? use('d1', 'dump', {}) : say('ok')), { rules: () => [...DEFAULT_RULES, { id: 'dump', tool: 'dump', actionClass: 'observe', effect: 'allow' }] }, [big])
+    await drain(assistant.reply('dump it'))
+    const [part] = llm.requests[1]?.turns.at(-1)?.content as { content: string }[]
+    expect(part!.content.length).toBeLessThan(16_200)
+    expect(part!.content).toContain('…(cut: 34000 more characters')
+    memory.close()
+  })
+
   it('keeps the system prompt identical across turns so it caches', async () => {
     const { assistant, llm, memory } = setup()
     await drain(assistant.reply('salam'))
@@ -123,7 +144,7 @@ describe('Assistant', () => {
     // Only text crosses owner turns; per-turn context is not replayed.
     expect(llm.requests[1]?.turns.slice(0, 2)).toEqual([
       { role: 'user', content: 'salam' },
-      { role: 'assistant', content: 'Theek hai.' },
+      { role: 'assistant', content: 'Theek hai.', cacheBreak: true },
     ])
     memory.close()
   })

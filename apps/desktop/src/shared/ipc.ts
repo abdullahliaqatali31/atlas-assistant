@@ -118,7 +118,11 @@ export interface StartupView {
 export interface UsageView {
   today: { tokens: number; usd: number; calls: number }
   month: { tokens: number; usd: number; calls: number }
-  byModel: { model: string; purpose: string; input: number; output: number; cached: number; calls: number; usd: number | null }[]
+  byModel: { model: string; purpose: string; input: number; output: number; cached: number; cacheWrite: number; calls: number; usd: number | null }[]
+  /** Today: the share of input served from the prompt cache (0-1). */
+  cacheShare: number
+  /** The newest calls, newest first: tokens as billed, cost, and what the request was made of (estimated tokens per part). */
+  recent: { id: number; at: number; model: string; purpose: string; input: number; output: number; cached: number; cacheWrite: number; usd: number | null; parts: Record<string, number> }[]
   unpriced: string[]
   budgetUsd: number
   overBudget: boolean

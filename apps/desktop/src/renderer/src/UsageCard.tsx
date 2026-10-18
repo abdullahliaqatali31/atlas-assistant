@@ -44,6 +44,64 @@ export function StartupToggle() {
   )
 }
 
+/** What each request was made of, in a fixed order and colour. */
+const PARTS: { key: string; label: string; color: string }[] = [
+  { key: 'instructions', label: 'Instructions', color: '#a78bfa' },
+  { key: 'tools', label: 'Tool list', color: '#60a5fa' },
+  { key: 'history', label: 'Conversation so far', color: '#34d399' },
+  { key: 'turn', label: 'This message and context', color: '#fbbf24' },
+  { key: 'toolResults', label: 'Tool results', color: '#f87171' },
+]
+
+/**
+ * The last calls one by one: when, which model, what it cost, how much came
+ * from the prompt cache, and a bar of what the request was made of.
+ */
+function RecentCalls({ u }: { u: UsageView }) {
+  return (
+    <section className="space-y-1.5">
+      <p className="flex items-center justify-between text-[11px] text-muted">
+        <span className="hud-label">Last calls</span>
+        <span>Today {Math.round(u.cacheShare * 100)}% of input came from the cache, at a fraction of the price</span>
+      </p>
+      <ul className="space-y-1">
+        {u.recent.map(c => {
+          const total = PARTS.reduce((n, p) => n + (c.parts[p.key] ?? 0), 0) || 1
+          const input = c.input + c.cached + c.cacheWrite
+          return (
+            <li key={c.id} className="text-[11px]">
+              <div className="flex items-center gap-2">
+                <span className="w-10 shrink-0 font-mono text-muted">{new Date(c.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="min-w-0 flex-1 truncate font-mono" title={c.model}>
+                  {c.model.replace(/^claude-/, '')}
+                  {c.purpose !== 'chat' && <span className="text-muted"> · background</span>}
+                </span>
+                <span className="shrink-0 text-muted" title={`${input} input (${c.cached} from cache, ${c.cacheWrite} written to cache) · ${c.output} output`}>
+                  {tokens(input)} in · {input ? Math.round((c.cached / input) * 100) : 0}% cached · {tokens(c.output)} out
+                </span>
+                <span className="w-12 shrink-0 text-right">{c.usd === null ? '—' : usd(c.usd)}</span>
+              </div>
+              <div className="ml-12 mt-0.5 flex h-1 overflow-hidden rounded-full bg-surface">
+                {PARTS.map(p =>
+                  c.parts[p.key] ? <span key={p.key} style={{ width: `${((c.parts[p.key] ?? 0) / total) * 100}%`, background: p.color }} title={`${p.label}: about ${tokens(c.parts[p.key] ?? 0)} tokens`} /> : null,
+                )}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+      <p className="flex flex-wrap gap-x-3 text-[10px] text-muted">
+        {PARTS.map(p => (
+          <span key={p.key}>
+            <span className="mr-1 inline-block size-1.5 rounded-full" style={{ background: p.color }} />
+            {p.label}
+          </span>
+        ))}
+      </p>
+    </section>
+  )
+}
+
 export function UsageCard() {
   const [u, setU] = useState<UsageView | null>(null)
   const [budget, setBudget] = useState('')
@@ -120,7 +178,7 @@ export function UsageCard() {
               <tr key={`${m.model}|${m.purpose}`} className="border-t border-border">
                 <td className="py-1 font-mono">{m.model}</td>
                 <td>{m.purpose === 'chat' ? 'talking to you' : 'background'}</td>
-                <td className="text-right">{tokens(m.input + m.output + m.cached)}</td>
+                <td className="text-right">{tokens(m.input + m.output + m.cached + m.cacheWrite)}</td>
                 <td className="text-right">
                   {m.usd === null ? (
                     <button type="button" className="text-accent underline" onClick={() => setPrice({ model: m.model, input: '', output: '' })}>
@@ -135,6 +193,7 @@ export function UsageCard() {
           </tbody>
         </table>
       )}
+      {u.recent.length > 0 && <RecentCalls u={u} />}
       {price && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="font-mono">{price.model}</span>

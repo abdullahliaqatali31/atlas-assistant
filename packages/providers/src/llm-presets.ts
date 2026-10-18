@@ -67,12 +67,17 @@ export const KNOWN_PRICES: Record<string, Price> = {
   'claude-fable-5-1': { input: 10, output: 50, cacheRead: 0.25 },
   'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2 },
   'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.2 },
-  'claude-haiku-5-5': { input: 0.1, output: 0.5 },
+  'claude-haiku-5-5': { input: 0.1, output: 0.5, cacheRead: 0.01 },
 }
 
+/** Writing to the prompt cache (5-minute entries) costs this much more than plain input. */
+export const CACHE_WRITE_FACTOR = 1.25
+
 /** Dollars for some usage at a price, or null when the price is unknown. */
-export const costOf = (u: { input: number; output: number; cached: number }, price: Price | undefined): number | null =>
-  price ? (u.input * price.input + u.output * price.output + u.cached * (price.cacheRead ?? price.input)) / 1_000_000 : null
+export const costOf = (u: { input: number; output: number; cached: number; cacheWrite?: number; cache_write?: number }, price: Price | undefined): number | null =>
+  price
+    ? (u.input * price.input + u.output * price.output + u.cached * (price.cacheRead ?? price.input) + (u.cacheWrite ?? u.cache_write ?? 0) * price.input * CACHE_WRITE_FACTOR) / 1_000_000
+    : null
 
 export const LLM_KEY_NAMES =[...new Set(Object.values(LLM_PROVIDERS).map(p => p.keyName).filter((k): k is NonNullable<typeof k> => k !== null))]
 

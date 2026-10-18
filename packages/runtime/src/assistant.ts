@@ -16,6 +16,16 @@ import { validateInput, type RuntimeTool } from './tools.ts'
 
 /** Today's newest turns kept word for word; older ones become a digest in the context packet. */
 const MAX_HISTORY_TURNS = 40
+/**
+ * Longest tool output passed to the model, in characters (~4k tokens): every
+ * later step of the loop pays for it again. Longer output is cut with a note.
+ */
+export const MAX_TOOL_OUTPUT = 16_000
+
+export const capToolOutput = (out: string) =>
+  out.length <= MAX_TOOL_OUTPUT ? out : `${out.slice(0, MAX_TOOL_OUTPUT)}
+…(cut: ${out.length - MAX_TOOL_OUTPUT} more characters. Ask the tool for something narrower if you need the rest.)`
+
 /** Enough for a taught task in the browser (open, find, read, act, check); the loop stops as soon as the model is done. */
 const MAX_TOOL_STEPS = 20
 
@@ -211,8 +221,10 @@ export class Assistant {
     if (startOfLocalDay(this.deps.clock.now(), this.deps.prefs.utcOffsetMin) !== this.day) this.loadDay()
     const system = this.systemPrompt()
     this.session.profileVersion = this.deps.memory.personality().version
+    // The history is the same on the next call: mark its end so the provider can cache it.
+    const history = this.session.history.map((t, i, all) => (i === all.length - 1 ? { ...t, cacheBreak: true } : t))
     const working: ChatTurn[] = [
-      ...this.session.history,
+      ...history,
       { role: 'user', content: [{ type: 'text', text: userText }, { type: 'text', text: context }] },
     ]
     let spoken = ''
@@ -303,7 +315,7 @@ export class Assistant {
     }
     onAction?.({ tool: tool.name, status: 'running', detail: summary })
     try {
-      const out = await tool.run(input, signal)
+      const out = capToolOutput(await tool.run(input, signal))
       log('done', out.slice(0, 500))
       return result(tool.isUntrusted ? wrapUntrusted(tool.name, out) : out)
     } catch (error) {

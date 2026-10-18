@@ -50,11 +50,17 @@ export class AnthropicProvider implements LlmProvider {
       eager_input_streaming: true,
     }))
 
+    // Cache markers (at most 4): one per system block (above), one at the end of the conversation
+    // history, and the API's automatic marker on the newest block for the tool loop's growing tail.
+    const messages = req.turns.map(toMessage)
+    const markers = applyCacheMarkers(req.turns, messages, system.length)
+
     const params: BetaMessageStreamParams = {
       model: this.model,
       max_tokens: req.maxTokens ?? 8192,
       system,
-      messages: req.turns.map(toMessage),
+      messages,
+      ...(markers < MAX_CACHE_MARKERS ? { cache_control: { type: 'ephemeral' } } : {}),
       ...(tools && tools.length > 0 ? { tools, tool_choice: { type: 'auto' } } : {}),
       // Server-side refusal fallback and thinking-binding controls exist only on the larger models; Haiku gets plain adaptive thinking.
       ...(WITH_FALLBACK.test(this.model)
@@ -89,6 +95,7 @@ export class AnthropicProvider implements LlmProvider {
         inputTokens: final.usage.input_tokens,
         outputTokens: final.usage.output_tokens,
         cacheReadTokens: final.usage.cache_read_input_tokens ?? 0,
+        cacheWriteTokens: final.usage.cache_creation_input_tokens ?? 0,
       },
       raw: final.content,
     }
@@ -107,7 +114,39 @@ export class AnthropicProvider implements LlmProvider {
   }
 }
 
-const toMessage = (turn: ChatTurn): BetaMessageParam => {
+const MAX_CACHE_MARKERS = 4
+/** Blocks that can carry a cache marker (thinking blocks cannot). */
+const CACHEABLE = new Set(['text', 'image', 'tool_use', 'tool_result', 'document'])
+
+/** Puts a cache marker on a message's last markable block, copying rather than touching replayed content. */
+const markLast = (m: BetaMessageParam): boolean => {
+  if (typeof m.content === 'string') {
+    m.content = [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }]
+    return true
+  }
+  const blocks = [...m.content]
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i] as { type: string }
+    if (!CACHEABLE.has(b.type)) continue
+    blocks[i] = { ...(b as object), cache_control: { type: 'ephemeral' } } as BetaContentBlockParam
+    m.content = blocks
+    return true
+  }
+  return false
+}
+
+/**
+ * Marks the turns flagged cacheBreak (the end of the history), within the
+ * 4-marker limit after the system blocks. Returns how many markers are used,
+ * so the caller knows whether the automatic marker still fits.
+ */
+export const applyCacheMarkers = (turns: readonly ChatTurn[], messages: BetaMessageParam[], systemMarkers: number): number => {
+  let markers = systemMarkers
+  for (let i = 0; i < turns.length && markers < MAX_CACHE_MARKERS; i++) if (turns[i]!.cacheBreak && markLast(messages[i]!)) markers++
+  return markers
+}
+
+export const toMessage = (turn: ChatTurn): BetaMessageParam => {
   if (turn.role === 'assistant' && turn.raw !== undefined) {
     return { role: 'assistant', content: turn.raw as BetaContentBlockParam[] }
   }
