@@ -73,6 +73,13 @@ export const gatherEvidence = async (
 
 const attr = (s: string) => s.replace(/["<>&]/g, '')
 
+/** Defuses wrapper tags inside untrusted text, so "</untrusted>" in a page or email cannot close the wrapper early. */
+export const defuseTags = (s: string) => s.replace(/<(\/?\s*(?:untrusted|observation|context)\b)/gi, '&lt;$1')
+
+/** Untrusted content for the model, with any wrapper tags inside it defused. */
+export const wrapUntrusted = (source: string, text: string, attrs = '') =>
+  `<untrusted source="${attr(source)}"${attrs}>\n${defuseTags(text)}\n</untrusted>`
+
 /** The context-packet section for the briefing. Empty when no source is connected. */
 export const formatEvidence = (blocks: readonly EvidenceBlock[]): string => {
   if (!blocks.length) return ''
@@ -81,8 +88,8 @@ export const formatEvidence = (blocks: readonly EvidenceBlock[]): string => {
     if (b.unavailable) return `- ${b.label} (${b.kind}): unavailable right now (${b.unavailable}). Say so if it matters; do not guess its contents.`
     const body = b.text || '(nothing returned)'
     return b.untrusted
-      ? `<untrusted source="${attr(b.label)}" kind="${b.kind}" retrieved="${when}Z">\n${body}\n</untrusted>`
-      : `<observation source="${attr(b.label)}" kind="${b.kind}" retrieved="${when}Z">\n${body}\n</observation>`
+      ? wrapUntrusted(b.label, body, ` kind="${b.kind}" retrieved="${when}Z"`)
+      : `<observation source="${attr(b.label)}" kind="${b.kind}" retrieved="${when}Z">\n${defuseTags(body)}\n</observation>`
   })
   return `Connected sources (cite each item by its source name, e.g. "per Google Calendar"; a preview or a list is not the whole conversation):\n${parts.join('\n')}`
 }

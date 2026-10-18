@@ -32,6 +32,8 @@ import { FileService } from './files/service.ts'
 import { UiService } from './ui.ts'
 import { WorldService } from './world.ts'
 import { IdentityGate } from './identity.ts'
+import { gateIpc } from './ipc-gate.ts'
+import { mainWebPreferences } from './window-prefs.ts'
 import { registerBackupIpc } from './backup.ts'
 import { CodeService } from './code/service.ts'
 import { registerStartupIpc, startedHidden } from './startup.ts'
@@ -247,17 +249,10 @@ const createWindow = ({ inactive = false } = {}) => {
     titleBarStyle: 'hidden',
     titleBarOverlay: titleBarOverlay(),
     autoHideMenuBar: true,
-    webPreferences: {
-      preload: join(import.meta.dirname, '../preload/index.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-      spellcheck: false,
-      // Spoken replies arrive after the click that asked for them.
-      autoplayPolicy: 'no-user-gesture-required',
-    },
+    webPreferences: mainWebPreferences(join(import.meta.dirname, '../preload/index.cjs'), isDev),
   })
+  // Belt and braces: should tools open anyway in the installed app, close them at once.
+  if (!isDev) win.webContents.on('devtools-opened', () => win?.webContents.closeDevTools())
   win.once('ready-to-show', () => (inactive ? win?.showInactive() : win?.show()))
   ui.watch(win)
   win.on('focus', () => win?.flashFrame(false))
@@ -352,10 +347,7 @@ const fromOurWindow = (e: IpcMainInvokeEvent) => {
 }
 
 const handle = <T>(channel: string, fn: (arg: unknown, arg2: unknown, arg3?: unknown) => T | Promise<T>) =>
-  ipcMain.handle(channel, (e, arg: unknown, arg2: unknown, arg3: unknown) => {
-    if (!fromOurWindow(e)) throw new Error('Rejected IPC from an unknown frame.')
-    return fn(arg, arg2, arg3)
-  })
+  ipcMain.handle(channel, gateIpc(channel, fn, { fromOurWindow, requireOwner: () => requireOwner() }))
 
 handle(CH.status, () => status)
 const news = new NewsService({
