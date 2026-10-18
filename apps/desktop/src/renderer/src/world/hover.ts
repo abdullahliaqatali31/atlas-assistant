@@ -58,6 +58,8 @@ export const hoverInfo = (kind: LayerId, props: Props, world: WorldSnapshot, now
     }
     case 'cameras':
       return { ...base, title, facts: [str(props.source)].filter(Boolean), cameraId: str(props.id) || undefined }
+    case 'news':
+      return { ...base, kind: `NEWS · ${str(props.source).toUpperCase()}`, title, facts: [[str(props.place), time && `${time} ago`].filter(Boolean).join(' · '), str(props.summary)].filter(Boolean) }
     case 'disasters':
       return { ...base, kind: `${str(props.alert).toUpperCase()} ALERT · ${str(props.kind).toUpperCase()}`, title, facts: [str(props.country), str(props.severity), time && `Updated ${time} ago`].filter(Boolean) }
     case 'story':

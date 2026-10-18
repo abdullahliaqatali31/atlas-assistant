@@ -6,11 +6,12 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 import { ArrowLeft, Globe2, Layers, Map as MapIcon } from 'lucide-react'
-import maplibregl, { type GeoJSONSource, type Map as MapLibre, type StyleSpecification } from 'maplibre-gl'
+import maplibregl, { type FilterSpecification, type GeoJSONSource, type Map as MapLibre, type StyleSpecification } from 'maplibre-gl'
 import * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { MAX_PINS, type MapOp, type Pin, type Story } from '../../../shared/map.ts'
+import type { NewsResult } from '../../../shared/news.ts'
 import { CAMERA_COVERAGE, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
 import { cleanError, flightFeatures, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
 import { nearbyItems, type NearbyItem } from './hover.ts'
@@ -20,6 +21,7 @@ import { layerDef, LAYERS, OWN_SOURCES, PICKABLE, readLayers, SELECTED_LAYER, ty
 import { describeFound, describeVisible, findItems, linkFeatures, pinFeatures, storyFeatures, ZOOM_FOR } from './mapops.ts'
 import { LayerRail, RAIL } from './LayerRail.tsx'
 import { NewsCanvas } from './NewsCanvas.tsx'
+import { newsFeatures } from './newsmap.ts'
 import { layerFilter, readFilters, saveFilters } from './panels.ts'
 import { pickAt } from './pick.ts'
 import { BASE_URL, carryOverlays, composeStyle, creditLine, STYLES, type CreditPart, type StyleId } from './styles.ts'
@@ -128,7 +130,8 @@ export function MapView({
       const d = dataRef.current
       const empty: FC = { type: 'FeatureCollection', features: [] }
       const initial: Record<string, FC> = { quakes: d.quakes, events: d.events, places: d.places }
-      for (const id of OWN_SOURCES) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: initial[id] ?? empty })
+      for (const l of LAYERS) for (const id of [l.source, ...(l.extraSources ?? [])]) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: initial[id] ?? empty, ...(id === l.source ? l.sourceOptions : {}) })
+      if (!m.getSource('selected')) m.addSource('selected', { type: 'geojson', data: empty })
       for (const l of LAYERS) for (const spec of l.draw) if (!m.getLayer(spec.id)) m.addLayer(spec)
       if (!m.getLayer(SELECTED_LAYER.id)) m.addLayer(SELECTED_LAYER)
 
@@ -137,6 +140,17 @@ export function MapView({
         const hit = pickAt(m, e.point)
         selectRef.current(hit ? { kind: hit.kind, lngLat: hit.lngLat, props: hit.props } : null)
       })
+      // A news bubble opens up: zoom in until its headlines separate.
+      m.on('click', 'news-clusters', e => {
+        const f = e.features?.[0]
+        const id = f?.properties?.cluster_id
+        if (!f || typeof id !== 'number') return
+        void (m.getSource('news') as GeoJSONSource).getClusterExpansionZoom(id).then(zoom =>
+          m.easeTo({ center: (f.geometry as unknown as { coordinates: [number, number] }).coordinates, zoom: Math.min(zoom + 0.5, 12), duration: isLite() ? 0 : 600 }),
+        )
+      })
+      m.on('mouseenter', 'news-clusters', () => (m.getCanvas().style.cursor = 'pointer'))
+      m.on('mouseleave', 'news-clusters', () => (m.getCanvas().style.cursor = ''))
       for (const { layer } of PICKABLE) {
         m.on('mouseenter', layer, () => (m.getCanvas().style.cursor = 'pointer'))
         m.on('mouseleave', layer, () => (m.getCanvas().style.cursor = ''))
@@ -433,7 +447,14 @@ export function MapView({
     const m = map.current
     if (!m || !ready) return
     const apply = () => {
-      for (const l of LAYERS) for (const spec of l.draw) if (m.getLayer(spec.id) && spec.type !== 'line') m.setFilter(spec.id, layerFilter(l.id, filters))
+      for (const l of LAYERS)
+        for (const spec of l.draw) {
+          if (!m.getLayer(spec.id) || spec.type === 'line' || spec.type === 'background' || spec.type === 'raster' || spec.type === 'hillshade') continue
+          // A layer's own filter (clusters, labels for big alerts only) stays; the owner's filter is added to it.
+          const own = 'filter' in spec ? spec.filter : undefined
+          const theirs = layerFilter(l.id, filters)
+          m.setFilter(spec.id, own && theirs ? (['all', own, theirs] as FilterSpecification) : (theirs ?? own ?? null))
+        }
     }
     apply()
     m.on('style.load', apply)
@@ -562,6 +583,26 @@ export function MapView({
       setShipKeyError(cleanError(err) || 'Could not save the key.')
     }
   }
+
+  // News from the owner's feeds, placed where it happens; redrawn whenever the feeds refresh.
+  useEffect(() => {
+    if (!ready || !layers.news) return
+    let stopped = false
+    const show = (r: NewsResult) => {
+      if (stopped) return
+      const types = filters.newsTypes
+      const fc = newsFeatures(types.length ? r.headlines.filter(h => types.includes(h.category)) : r.headlines)
+      put('news', fc)
+      setCounts(c => ({ ...c, news: fc.features.length }))
+    }
+    // Locked: the feeds are the owner's, so the layer stays empty until they confirm it is them.
+    void window.news.list().then(show, () => undefined)
+    const off = window.news.onChanged(show)
+    return () => {
+      stopped = true
+      off()
+    }
+  }, [ready, layers.news, filters.newsTypes.join('|')])
 
   // Public cameras: the list once (only where official open feeds exist).
   useEffect(() => {

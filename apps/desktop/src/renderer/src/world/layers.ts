@@ -3,9 +3,9 @@
  * switches, the map's own sources and layers, picking and the Inspector's
  * labels all read from here, so a new layer is one entry (plan §6).
  */
-import type { LayerSpecification } from 'maplibre-gl'
+import type { GeoJSONSourceSpecification, LayerSpecification } from 'maplibre-gl'
 
-export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras' | 'pins' | 'story' | 'disasters'
+export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras' | 'pins' | 'story' | 'disasters' | 'news'
 
 export interface LayerDef {
   id: LayerId
@@ -25,6 +25,8 @@ export interface LayerDef {
   pickLayer?: string
   /** More sources this layer draws from (e.g. the lines between story items). */
   extraSources?: string[]
+  /** Extra options for this layer's GeoJSON source, e.g. clustering. */
+  sourceOptions?: Partial<GeoJSONSourceSpecification>
 }
 
 const HALO = '#0b1020'
@@ -107,6 +109,61 @@ export const LAYERS: LayerDef[] = [
         filter: ['>=', ['get', 'rank'], 1],
         layout: { 'text-field': ['get', 'title'], 'text-offset': [0, 1.3], 'text-size': 10, 'text-anchor': 'top', 'text-max-width': 12 },
         paint: { 'text-color': '#fed7aa', 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+      },
+    ],
+  },
+  {
+    id: 'news',
+    label: 'News (from your feeds)',
+    kind: 'News',
+    dot: '#fbbf24',
+    source: 'news',
+    pickRank: 0.5,
+    pickLayer: 'news',
+    // Many headlines name the same capital: they group into numbered bubbles until zoomed in.
+    sourceOptions: { cluster: true, clusterRadius: 38, clusterMaxZoom: 9 },
+    draw: [
+      {
+        id: 'news-clusters',
+        type: 'circle',
+        source: 'news',
+        filter: ['has', 'point_count'],
+        paint: {
+          'circle-radius': ['step', ['get', 'point_count'], 11, 5, 14, 15, 18, 40, 23],
+          'circle-color': '#fbbf24',
+          'circle-opacity': 0.82,
+          'circle-stroke-width': 2,
+          'circle-stroke-color': 'rgba(251,191,36,0.35)',
+        },
+      },
+      {
+        id: 'news-cluster-count',
+        type: 'symbol',
+        source: 'news',
+        filter: ['has', 'point_count'],
+        layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 11, 'text-allow-overlap': true },
+        paint: { 'text-color': '#0b1020' },
+      },
+      {
+        id: 'news',
+        type: 'circle',
+        source: 'news',
+        filter: ['!', ['has', 'point_count']],
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['get', 'severity'], 0, 4.5, 10, 9],
+          'circle-color': ['get', 'color'],
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': '#0b1020',
+        },
+      },
+      {
+        id: 'news-labels',
+        type: 'symbol',
+        source: 'news',
+        filter: ['!', ['has', 'point_count']],
+        minzoom: 6,
+        layout: { 'text-field': ['get', 'title'], 'text-offset': [0, 1.1], 'text-size': 10, 'text-anchor': 'top', 'text-max-width': 16 },
+        paint: { 'text-color': '#fde68a', 'text-halo-color': HALO, 'text-halo-width': 1.5 },
       },
     ],
   },

@@ -5,12 +5,14 @@
  * "Now" (what is happening in that layer) and "Filters". A pin keeps the
  * panel open. Hidden on narrow windows, where the Layers button remains.
  */
-import { Activity, Flame, TriangleAlert, MapPin, Newspaper, Pin, PinOff, Plane, Satellite, Ship, Video, type LucideIcon } from 'lucide-react'
+import { Activity, BookOpen, Flame, TriangleAlert, MapPin, Newspaper, Pin, PinOff, Plane, Satellite, Ship, Video, type LucideIcon } from 'lucide-react'
 import type * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { CAMERA_COVERAGE, kmBetween, type WorldSnapshot } from '../../../shared/world.ts'
+import { CATEGORIES } from '../../../shared/news.ts'
 import { ago } from '../Jarvis.tsx'
+import { ASK_EVENT } from '../shell/live.ts'
 import { ALERT_COLOR, SHIP_COLOR, type FC } from './geo.ts'
 import { layerDef, type LayerId } from './layers.ts'
 import { CHOKEPOINTS, mixBy, passes as passesFilter, topBy, type MapFilters } from './panels.ts'
@@ -20,7 +22,8 @@ type Feature = FC['features'][number]
 
 /** Rail order, icons and keys. Keys avoid the app's own: g, h, w, /, [ and ]. */
 export const RAIL: { id: LayerId; icon: LucideIcon; key: string }[] = [
-  { id: 'story', icon: Newspaper, key: 'n' },
+  { id: 'news', icon: Newspaper, key: 'n' },
+  { id: 'story', icon: BookOpen, key: 'a' },
   { id: 'places', icon: MapPin, key: 'p' },
   { id: 'flights', icon: Plane, key: 'f' },
   { id: 'ships', icon: Ship, key: 'b' },
@@ -78,6 +81,28 @@ function NowTab({ id, ctx }: { id: LayerId; ctx: RailContext }) {
   const nearest = (n: number) =>
     [...all].sort((a, b) => kmBetween({ lat: cLat, lon: cLon }, { lat: a.geometry.coordinates[1]!, lon: a.geometry.coordinates[0]! }) - kmBetween({ lat: cLat, lon: cLon }, { lat: b.geometry.coordinates[1]!, lon: b.geometry.coordinates[0]! })).slice(0, n)
   switch (id) {
+    case 'news': {
+      const mix = mixBy(fc, 'category')
+      return all.length ? (
+        <>
+          <p className="flex flex-wrap gap-x-2 px-1.5 text-[11px] text-muted">
+            {mix.map(m => (
+              <span key={m.value}>
+                {m.value} <span className="font-mono text-text">{m.count}</span>
+              </span>
+            ))}
+          </p>
+          <Label>Heaviest first</Label>
+          <ul>{[...all].sort((a, b) => Number(b.properties.severity) - Number(a.properties.severity) || Number(b.properties.time ?? 0) - Number(a.properties.time ?? 0)).slice(0, 12).map(f => <Row key={String(f.properties.id)} f={f} kind={id} right={String(f.properties.place ?? '')} onFocus={ctx.onFocus} />)}</ul>
+          <button type="button" className="mx-1.5 mt-2 w-[calc(100%-0.75rem)] rounded-lg border border-accent/50 px-2 py-1.5 text-left text-xs text-accent hover:bg-surface" onClick={() => window.dispatchEvent(new CustomEvent(ASK_EVENT, { detail: 'Aaj ki important news map pe dikhao, connected stories ke saath.' }))}>
+            Ask Atlas to pick the important ones and connect them
+          </button>
+          <p className="mt-1 px-1.5 text-[10px] text-muted">Headlines from your news feeds, placed by the places they name. Turn feeds on or off on the News page.</p>
+        </>
+      ) : (
+        <Empty>No headlines yet. The feeds refresh in the background; turn more on in News.</Empty>
+      )
+    }
     case 'story':
       return all.length ? (
         <>
@@ -302,6 +327,17 @@ function FiltersTab({ id, ctx }: { id: LayerId; ctx: RailContext }) {
         <Empty>No events to filter right now.</Empty>
       )
     }
+    case 'news':
+      return (
+        <fieldset className="px-1.5 text-xs">
+          <legend className="hud-label mb-1">Show (none ticked shows all)</legend>
+          {CATEGORIES.map(k => (
+            <label key={k} className="flex items-center gap-1.5 py-0.5 capitalize">
+              <input type="checkbox" checked={f.newsTypes.includes(k)} onChange={() => ctx.onFilters({ ...f, newsTypes: toggleIn(f.newsTypes, k) })} /> {k}
+            </label>
+          ))}
+        </fieldset>
+      )
     case 'disasters':
       return (
         <div className="px-1.5 text-xs">

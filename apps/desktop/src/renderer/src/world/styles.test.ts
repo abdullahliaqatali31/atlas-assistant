@@ -106,6 +106,6 @@ describe('layer registry', () => {
   })
 
   it('picks Atlas’s story and pins and your places first, then cameras, flights and ships', () => {
-    expect(PICKABLE.slice(0, 6).map(p => p.kind)).toEqual(['story', 'pins', 'places', 'cameras', 'flights', 'ships'])
+    expect(PICKABLE.slice(0, 7).map(p => p.kind)).toEqual(['story', 'pins', 'places', 'news', 'cameras', 'flights', 'ships'])
   })
 })

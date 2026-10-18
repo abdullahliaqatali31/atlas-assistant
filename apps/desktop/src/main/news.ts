@@ -29,6 +29,11 @@ export const FEEDS: Feed[] = [
   { id: 'tribune', source: 'Express Tribune', url: 'https://tribune.com.pk/feed/home', category: 'pakistan', enabled: true },
   { id: 'geo', source: 'Geo News', url: 'https://www.geo.tv/rss/1/1', category: 'pakistan', enabled: false },
   { id: 'bbc-world', source: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'world', enabled: true },
+  { id: 'guardian-world', source: 'The Guardian World', url: 'https://www.theguardian.com/world/rss', category: 'world', enabled: true },
+  { id: 'dw-world', source: 'DW World', url: 'https://rss.dw.com/rdf/rss-en-world', category: 'world', enabled: true },
+  { id: 'un-news', source: 'UN News', url: 'https://news.un.org/feed/subscribe/en/news/all/rss.xml', category: 'world', enabled: true },
+  { id: 'france24', source: 'France 24', url: 'https://www.france24.com/en/rss', category: 'world', enabled: false },
+  { id: 'npr-world', source: 'NPR World', url: 'https://feeds.npr.org/1004/rss.xml', category: 'world', enabled: false },
   { id: 'dawn-business', source: 'Dawn Business', url: 'https://www.dawn.com/feeds/business', category: 'business', enabled: true },
   { id: 'verge', source: 'The Verge', url: 'https://www.theverge.com/rss/index.xml', category: 'tech', enabled: true },
   { id: 'bbc-tech', source: 'BBC Technology', url: 'https://feeds.bbci.co.uk/news/technology/rss.xml', category: 'tech', enabled: false },
@@ -101,7 +106,7 @@ export const parseFeed = (xml: string, feed: Pick<Feed, 'source' | 'category'>, 
     const title = text(tag(block, 'title') ?? '').slice(0, MAX_TITLE)
     const link = text(tag(block, 'link') ?? '') || (/<link[^>]*href="([^"]+)"/i.exec(block)?.[1] ?? '')
     if (!title || !link.startsWith('https://')) continue
-    const date = tag(block, 'pubDate') ?? tag(block, 'updated') ?? tag(block, 'published')
+    const date = tag(block, 'pubDate') ?? tag(block, 'updated') ?? tag(block, 'published') ?? tag(block, 'dc:date')
     const t = date ? Date.parse(text(date)) : Number.NaN
     const raw = text(tag(block, 'description') ?? tag(block, 'summary') ?? tag(block, 'content') ?? '')
     const summary = raw && raw !== title ? (raw.length > MAX_SUMMARY ? `${raw.slice(0, MAX_SUMMARY).replace(/\s+\S*$/, '')}…` : raw) : ''

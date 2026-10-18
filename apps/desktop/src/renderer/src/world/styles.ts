@@ -141,6 +141,7 @@ const LAYER_CREDIT: Record<string, CreditPart> = {
   quakes: { text: 'USGS' },
   events: { text: 'NASA EONET' },
   disasters: { text: 'GDACS', href: 'https://www.gdacs.org' },
+  news: { text: 'Places GeoNames', href: 'https://www.geonames.org' },
 }
 
 /**

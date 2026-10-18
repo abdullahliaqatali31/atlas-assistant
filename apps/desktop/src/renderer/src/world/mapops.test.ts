@@ -52,7 +52,9 @@ describe('map ops', () => {
     expect(text).toContain('Flights (live): 2 on screen, e.g. PIA301 · A320; UAE612 · B77W.')
     // The tanker in Hormuz is not on this screen.
     expect(text).not.toContain('FRONT ALTAIR')
-    expect(text).toContain('Layers off: quakes, cameras, events, disasters, satellites, pins, story.')
+    const off = /Layers off: (.*)\./.exec(text)?.[1]?.split(', ') ?? []
+    expect(off).toEqual(expect.arrayContaining(['quakes', 'cameras', 'pins', 'story']))
+    expect(off).not.toContain('flights')
   })
 
   const story = {

@@ -183,8 +183,10 @@ export function Inspector({
           <CameraDetail id={String(p.id)} source={String(p.source ?? '')} />
         ) : (
           <>
+            {typeof p.image === 'string' && p.image.startsWith('assistant-news://') && <img src={p.image} alt="" className="aspect-video w-full rounded-lg object-cover" />}
             {info.facts
-              .filter(f => !f.endsWith(' ago'))
+              // A bare age line is shown below with the full date.
+              .filter(f => !/^((Reported|Seen|Updated) )?(\d+ (min|h|d)|now) ago$/.test(f))
               .map(f => (
                 <p key={f}>{f}</p>
               ))}

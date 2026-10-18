@@ -45,9 +45,11 @@ export interface MapFilters {
   eventTypes: string[]
   /** 0 all, 1 orange and red, 2 red only. */
   disasterMinAlert: number
+  /** News categories to show; empty shows all. */
+  newsTypes: string[]
 }
 
-export const DEFAULT_FILTERS: MapFilters = { militaryOnly: false, shipTypes: [], quakeMinMag: 4, eventTypes: [], disasterMinAlert: 0 }
+export const DEFAULT_FILTERS: MapFilters = { militaryOnly: false, shipTypes: [], quakeMinMag: 4, eventTypes: [], disasterMinAlert: 0, newsTypes: [] }
 
 export const readFilters = (): MapFilters => {
   try {
@@ -58,6 +60,7 @@ export const readFilters = (): MapFilters => {
       quakeMinMag: typeof raw.quakeMinMag === 'number' && raw.quakeMinMag >= 4 && raw.quakeMinMag <= 8 ? raw.quakeMinMag : 4,
       eventTypes: Array.isArray(raw.eventTypes) ? raw.eventTypes.filter((v): v is string => typeof v === 'string') : [],
       disasterMinAlert: raw.disasterMinAlert === 1 || raw.disasterMinAlert === 2 ? raw.disasterMinAlert : 0,
+      newsTypes: Array.isArray(raw.newsTypes) ? raw.newsTypes.filter((v): v is string => typeof v === 'string') : [],
     }
   } catch {
     return DEFAULT_FILTERS

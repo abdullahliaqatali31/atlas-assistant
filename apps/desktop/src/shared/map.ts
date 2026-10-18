@@ -7,7 +7,7 @@
  */
 
 /** Mirrors the renderer's layer registry (a test keeps them equal). */
-export const MAP_LAYERS = ['places', 'quakes', 'events', 'flights', 'ships', 'satellites', 'cameras', 'pins', 'story', 'disasters'] as const
+export const MAP_LAYERS = ['places', 'quakes', 'events', 'flights', 'ships', 'satellites', 'cameras', 'pins', 'story', 'disasters', 'news'] as const
 export type MapLayer = (typeof MAP_LAYERS)[number]
 
 export const MAP_STYLES = ['satellite', 'today', 'relief', 'dark', 'light'] as const
