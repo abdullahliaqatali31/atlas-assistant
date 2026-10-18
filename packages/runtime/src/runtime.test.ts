@@ -141,6 +141,63 @@ describe('Assistant', () => {
     memory.close()
   })
 
+  it('starts a new conversation after a long pause, and only sends the current one', async () => {
+    const { assistant, llm, memory, clock } = setup()
+    await drain(assistant.reply('salam'))
+    const first = assistant.conversationId
+    clock.advance(46 * 60_000)
+    await drain(assistant.reply('phir se salam'))
+    expect(assistant.conversationId).not.toBe(first)
+    // The earlier chat is not in the request; it stays in the list.
+    expect(llm.requests[1]!.turns).toHaveLength(1)
+    expect(memory.conversations().map(c => c.id)).toEqual([assistant.conversationId, first])
+    memory.close()
+  })
+
+  it('continues the conversation after a restart moments later', async () => {
+    const { assistant, memory, clock, llm } = setup()
+    await drain(assistant.reply('salam'))
+    clock.advance(5 * 60_000)
+    const again = new Assistant({ llm, memory, clock, owner: { name: 'Abdullah' }, prefs: { ...DEFAULT_PREFS, utcOffsetMin: 300 } })
+    expect(again.conversationId).toBe(assistant.conversationId)
+    expect(again.session.history.map(t => t.content)).toEqual(['salam', 'Theek hai.'])
+    memory.close()
+  })
+
+  it('starts fresh when asked, keeping the old chat, and can go back to it', async () => {
+    const { assistant, memory } = setup()
+    await drain(assistant.reply('salam'))
+    const first = assistant.conversationId
+    assistant.requestNewConversation()
+    await drain(assistant.reply('naya chat shuru karo'))
+    expect(assistant.conversationId).not.toBe(first)
+    expect(assistant.session.history).toEqual([])
+    assistant.resumeConversation(first)
+    expect(assistant.session.history.map(t => t.content)).toEqual(['salam', 'Theek hai.', 'naya chat shuru karo', 'Theek hai.'])
+    memory.close()
+  })
+
+  it('folds the older part of a long conversation into a summary the next turn carries', async () => {
+    const summaries: number[] = []
+    const { assistant, llm, memory } = setup(undefined, {
+      summarize: async ({ messages }) => {
+        summaries.push(messages.length)
+        return { summary: 'The owner asked about the visa twice.', title: 'Visa questions' }
+      },
+    })
+    for (let i = 0; i < 14; i++) await drain(assistant.reply(`message ${i}`))
+    // The 13th reply makes 26 turns (over 24): cut back to the last 12, so 14 older messages went to the summarizer.
+    await new Promise(r => setTimeout(r, 0))
+    expect(summaries[0]).toBe(14)
+    expect(memory.conversation(assistant.conversationId)?.title).toBe('Visa questions')
+    await drain(assistant.reply('aur?'))
+    const req = llm.requests.at(-1)!
+    // 12 kept + the 14th exchange (2) + this message: it grows again until the next cut, so the cached part stays the same.
+    expect(req.turns.length).toBe(15)
+    expect(lastUserText(req)).toContain('Earlier in this conversation (your summary):\nThe owner asked about the visa twice.')
+    memory.close()
+  })
+
   it('cuts a huge tool result before it reaches the model, saying so', async () => {
     const big: RuntimeTool = { name: 'dump', description: 'd', inputSchema: { type: 'object' }, actionClass: 'observe', isUntrusted: false, run: async () => 'x'.repeat(50_000) }
     const { assistant, llm, memory } = setup((_, n) => (n === 0 ? use('d1', 'dump', {}) : say('ok')), { rules: () => [...DEFAULT_RULES, { id: 'dump', tool: 'dump', actionClass: 'observe', effect: 'allow' }] }, [big])

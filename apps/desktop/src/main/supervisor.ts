@@ -20,6 +20,7 @@ import type {
   SessionChange,
   SetupProblem,
   TaskView,
+  ChatsOp,
   DayLine,
   UiMode,
   VoiceProviderChoice,
@@ -81,6 +82,7 @@ export class RuntimeSupervisor {
   private activeReply: string | null = null
   private readonly taskRequests = new Map<string, (t: TaskView[]) => void>()
   private readonly todayRequests = new Map<string, (l: DayLine[]) => void>()
+  private readonly chatRequests = new Map<string, (r: { result?: unknown; error?: string | undefined }) => void>()
   private readonly secretRequests = new Map<string, (error?: string) => void>()
   private readonly actionRequests = new Map<string, (entries: ActivityEntry[]) => void>()
   private readonly backupRequests = new Map<string, (error?: string) => void>()
@@ -189,6 +191,24 @@ export class RuntimeSupervisor {
         resolve(lines)
       })
       this.post({ type: 'list-today', requestId })
+    })
+  }
+
+  /** The chat list and its actions, answered by the runtime (which owns the conversations). */
+  chats(op: ChatsOp): Promise<unknown> {
+    if (!this.child) return Promise.reject(new Error('The assistant is not running.'))
+    const requestId = randomUUID()
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.chatRequests.delete(requestId)
+        reject(new Error('The assistant did not answer in time.'))
+      }, 10_000)
+      this.chatRequests.set(requestId, r => {
+        clearTimeout(timer)
+        if (r.error) reject(new Error(r.error))
+        else resolve(r.result)
+      })
+      this.post({ type: 'chats', requestId, op })
     })
   }
 
@@ -367,6 +387,10 @@ export class RuntimeSupervisor {
       case 'today':
         this.todayRequests.get(e.requestId)?.(e.lines)
         this.todayRequests.delete(e.requestId)
+        break
+      case 'chats-result':
+        this.chatRequests.get(e.requestId)?.({ result: e.result, error: e.error })
+        this.chatRequests.delete(e.requestId)
         break
       case 'usage':
         this.deps.onUsage?.(e.summary)

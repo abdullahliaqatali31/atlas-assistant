@@ -32,3 +32,12 @@ describe('modelFor quick', () => {
     expect(modelFor({ provider: 'openai', apiKey: 'k', model: 'gpt-x' }, 'quick')).toBe('gpt-x')
   })
 })
+
+describe('parseSummary', () => {
+  it('reads the JSON answer, or takes plain text as the summary', async () => {
+    const { parseSummary } = await import('./summary.ts')
+    expect(parseSummary('Here: {"title": "Visa", "summary": "Monday 10:00."}')).toEqual({ title: 'Visa', summary: 'Monday 10:00.' })
+    expect(parseSummary('Owner asked about the visa.')).toEqual({ summary: 'Owner asked about the visa.' })
+    expect(parseSummary('  ')).toBeNull()
+  })
+})

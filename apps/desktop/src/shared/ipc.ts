@@ -175,6 +175,28 @@ export interface DayLine {
   at: number
 }
 
+/** One past or current conversation in the chat list. */
+export interface ChatSummary {
+  id: string
+  title: string
+  startedAt: number
+  lastAt: number
+  messages: number
+  /** The conversation new messages go to. */
+  current: boolean
+}
+
+/** The chat list's requests: list, read one, start a new one, continue an earlier one. */
+export type ChatsOp = { kind: 'list' } | { kind: 'read'; id: string } | { kind: 'new' } | { kind: 'resume'; id: string }
+
+export const parseChatsOp = (v: unknown): ChatsOp | null => {
+  const o = v as { kind?: unknown; id?: unknown } | null
+  if (!o || typeof o !== 'object') return null
+  if (o.kind === 'list' || o.kind === 'new') return { kind: o.kind }
+  if ((o.kind === 'read' || o.kind === 'resume') && typeof o.id === 'string' && /^[\w-]{1,64}$/.test(o.id)) return { kind: o.kind, id: o.id }
+  return null
+}
+
 export interface TaskView {
   id: string
   title: string
@@ -202,6 +224,7 @@ export const CH = {
   setMode: 'assistant:set-mode',
   listTasks: 'assistant:list-tasks',
   listToday: 'assistant:list-today',
+  chats: 'assistant:chats',
   saveSetup: 'setup:save',
   answerApproval: 'assistant:answer-approval',
   sendVoice: 'assistant:send-voice',
@@ -240,6 +263,13 @@ export interface AssistantBridge {
   listTasks(): Promise<TaskView[]>
   /** Today's conversation so far (across restarts), oldest first. */
   listToday(): Promise<DayLine[]>
+  /** The chat list: earlier conversations, newest first. */
+  listChats(): Promise<ChatSummary[]>
+  readChat(id: string): Promise<DayLine[]>
+  /** Starts a new conversation; the current one stays in the list. */
+  newChat(): Promise<{ id: string }>
+  /** Continues an earlier conversation; returns its messages. */
+  resumeChat(id: string): Promise<DayLine[]>
   saveSetup(input: SetupInput): Promise<RuntimeStatus>
   /** Models the chosen provider offers; uses the typed key, or the stored one when blank. */
   listModels(provider: LlmProviderId, apiKey: string, baseUrl: string): Promise<string[]>
@@ -339,6 +369,7 @@ export type HostRequest =
   /** Encrypted backups: a consistent database snapshot written to `path`. */
   | { type: 'backup-db'; requestId: string; path: string }
   | { type: 'list-today'; requestId: string }
+  | { type: 'chats'; requestId: string; op: ChatsOp }
   | { type: 'store-secrets'; requestId: string; llmKey: string; llmProvider: LlmProviderId; voiceKey: string; voiceProvider: VoiceProviderChoice }
   /** Setup: the models a provider offers this key (a typed key, else the stored one). */
   | { type: 'list-models'; requestId: string; provider: LlmProviderId; apiKey: string; baseUrl: string }
@@ -376,6 +407,7 @@ export type HostEvent =
   | { type: 'tasks'; requestId: string; tasks: TaskView[] }
   | { type: 'backup-db'; requestId: string; error?: string }
   | { type: 'today'; requestId: string; lines: DayLine[] }
+  | { type: 'chats-result'; requestId: string; result?: ChatSummary[] | DayLine[] | { id: string } | undefined; error?: string | undefined }
   | { type: 'secrets-stored'; requestId: string; error?: string | undefined }
   | { type: 'models'; requestId: string; models?: string[] | undefined; error?: string | undefined }
   /** The cost meter's totals, after LLM calls and on start. */

@@ -9,14 +9,21 @@ import { evaluate, type Decision, type Rule } from '@assistant/policy'
 import type { ChatTurn, ContentPart, LlmProvider } from '@assistant/providers'
 import { DAY, newId, type Clock, type ConversationMode, type InitiativeEvent } from '@assistant/shared'
 
-import { dayContext, startOfLocalDay } from './day.ts'
+import { sessionContext, startOfLocalDay, type DayMessage } from './day.ts'
 import { defuseTags, formatEvidence, gatherEvidence, wrapUntrusted, type EvidenceBlock, type EvidenceSource } from './evidence.ts'
 import { addressee, briefingInstruction, systemPrompt, welcomeInstruction } from './persona.ts'
 import { routeMessage, type Route } from './routing.ts'
+import type { Summarizer } from './summary.ts'
 import { validateInput, type RuntimeTool } from './tools.ts'
 
-/** Today's newest turns kept word for word; older ones become a digest in the context packet. */
-const MAX_HISTORY_TURNS = 40
+/** The conversation's newest turns kept word for word; older ones become a summary in the context packet. */
+const MAX_HISTORY_TURNS = 24
+/** When the history passes MAX_HISTORY_TURNS it is cut back to this many; the rest goes to the summary. */
+const KEEP_HISTORY_TURNS = 12
+/** A pause this long ends a conversation: the next message starts a new one. */
+export const IDLE_GAP_MS = 45 * 60_000
+/** Messages that left the verbatim window before they are folded into the summary. */
+const SUMMARY_AFTER = 6
 /**
  * Longest tool output passed to the model, in characters (~4k tokens): every
  * later step of the loop pays for it again. Longer output is cut with a note.
@@ -69,6 +76,8 @@ export interface AssistantDeps {
   quickLlm?: LlmProvider
   /** 'main' sends every message to the main model even when a quick one is set. */
   routing?: 'auto' | 'main'
+  /** Writes the rolling summary of a conversation's older part (a cheap background model); without it a digest is used. */
+  summarize?: Summarizer
 }
 
 export class Assistant {
@@ -81,25 +90,98 @@ export class Assistant {
   }
 
   private tools: Map<string, RuntimeTool>
-  /** Start of the local day the history belongs to, and a digest of its older part. */
+  /** Start of the local day the conversation began on: a new day starts a new one. */
   private day = 0
-  private dayDigest = ''
+  /** The conversation's older part: the stored summary, and a digest of what it does not cover yet. */
+  private summary = ''
+  private olderDigest = ''
+  private unsummarized: DayMessage[] = []
+  private summarizing = false
+  /** Set by the conversation_new tool: the next reply finishes this conversation, then a new one starts. */
+  private pendingNew = false
 
   constructor(private readonly deps: AssistantDeps) {
     this.tools = new Map((deps.tools ?? []).map(t => [t.name, t]))
-    this.loadDay()
+    // Continue the last conversation if it was moments ago (a restart, a new voice session); else start fresh.
+    const { memory, clock, prefs } = deps
+    const last = memory.conversations(1)[0]
+    const now = clock.now()
+    if (last && now - last.lastAt < IDLE_GAP_MS && startOfLocalDay(last.lastAt, prefs.utcOffsetMin) === startOfLocalDay(now, prefs.utcOffsetMin)) this.session.conversationId = last.id
+    this.loadConversation()
   }
 
-  /**
-   * The whole of today's conversation, from the database, so a restart or a
-   * new voice session continues where the owner left off.
-   */
-  private loadDay() {
+  /** The current conversation from the database: the recent part verbatim, the older part summarised. */
+  private loadConversation() {
     const { memory, clock, prefs } = this.deps
-    this.day = startOfLocalDay(clock.now(), prefs.utcOffsetMin)
-    const { history, digest } = dayContext(memory.messagesSince(this.day), MAX_HISTORY_TURNS)
-    this.session.history = history
-    this.dayDigest = digest
+    const conv = memory.conversation(this.session.conversationId)
+    this.day = startOfLocalDay(conv?.startedAt ?? clock.now(), prefs.utcOffsetMin)
+    const c = sessionContext(memory.conversationMessages(this.session.conversationId), { max: MAX_HISTORY_TURNS, keep: KEEP_HISTORY_TURNS, summarizedThrough: conv?.summarizedThrough ?? 0 })
+    this.session.history = c.history
+    this.summary = conv?.summary ?? ''
+    this.olderDigest = c.digest
+    this.unsummarized = c.unsummarized
+  }
+
+  /** Starts a new conversation: an empty history; earlier ones stay in the database and the chat list. */
+  newConversation() {
+    this.session.conversationId = newId()
+    this.session.isTerse = false
+    this.pendingNew = false
+    this.loadConversation()
+  }
+
+  /** The conversation the next message belongs to. */
+  get conversationId() {
+    return this.session.conversationId
+  }
+
+  /** Continues an earlier conversation from the chat list. */
+  resumeConversation(id: string) {
+    if (!this.deps.memory.conversation(id)) throw new Error('No such conversation.')
+    this.session.conversationId = id
+    this.pendingNew = false
+    this.loadConversation()
+  }
+
+  /** Asks for a new conversation once this reply is done (the conversation_new tool). */
+  requestNewConversation() {
+    this.pendingNew = true
+  }
+
+  /** A long pause or a new day ends the conversation; the next message starts a new one. */
+  private ensureSession() {
+    const { memory, clock, prefs } = this.deps
+    const now = clock.now()
+    const conv = memory.conversation(this.session.conversationId)
+    const stale = conv && (now - conv.lastAt > IDLE_GAP_MS || startOfLocalDay(now, prefs.utcOffsetMin) !== startOfLocalDay(conv.lastAt, prefs.utcOffsetMin))
+    if (stale) this.newConversation()
+  }
+
+  /** Folds messages that left the verbatim window into the rolling summary, in the background. */
+  private maybeSummarize() {
+    const { summarize, memory } = this.deps
+    if (!summarize || this.summarizing || this.unsummarized.length < SUMMARY_AFTER) return
+    const id = this.session.conversationId
+    const batch = [...this.unsummarized]
+    const conv = memory.conversation(id)
+    this.summarizing = true
+    void summarize({ previous: this.summary, title: conv?.title ?? '', messages: batch })
+      .then(r => {
+        memory.setConversationSummary(id, r.summary, batch.at(-1)!.at, r.title)
+        if (this.session.conversationId === id) {
+          this.summary = r.summary
+          // Only what came after the batch still needs the digest.
+          this.unsummarized = this.unsummarized.filter(m => m.at > batch.at(-1)!.at)
+          this.olderDigest = this.olderDigest
+            .split('\n')
+            .slice(batch.length)
+            .join('\n')
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.summarizing = false
+      })
   }
 
   /** Swap the tool set (e.g. after MCP servers change); takes effect from the next turn. */
@@ -113,6 +195,7 @@ export class Assistant {
 
   /** Owner typed or said something. Yields reply text as it streams. */
   async *reply(text: string, signal?: AbortSignal): AsyncIterable<string> {
+    this.ensureSession()
     if (TOO_CHATTY.test(text)) this.session.isTerse = true
     this.deps.memory.addMessage(this.session.conversationId, 'owner', text)
     // Style feedback ("hamesha chhote jawab") updates the profile before this reply is written.
@@ -165,6 +248,7 @@ export class Assistant {
 
   /** Say something about an event the policy already allowed, or one the owner asked to hear from the queue. */
   async *speakUp(event: InitiativeEvent, signal?: AbortSignal): AsyncIterable<string> {
+    this.ensureSession()
     if (event.type !== 'session.first-of-day') {
       // A message preview is someone else's text, so the whole turn counts as untrusted.
       yield* this.turn(`[system event] ${describeEvent(event)}`, this.contextPacket(''), signal, event.type === 'message.arrived')
@@ -194,6 +278,7 @@ export class Assistant {
 
   /** The first greeting after onboarding, in the language and tone the owner just chose. */
   async *welcome(signal?: AbortSignal): AsyncIterable<string> {
+    this.ensureSession()
     yield* this.turn(`[system event] ${welcomeInstruction(this.addressee())}`, this.contextPacket(''), signal)
   }
 
@@ -227,7 +312,7 @@ export class Assistant {
     const tools = [...this.tools.values()].map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))
     // Fixed for the whole tool loop, so one turn never mixes two profiles.
     // A new day starts a fresh conversation (yesterday stays in long-term memory).
-    if (startOfLocalDay(this.deps.clock.now(), this.deps.prefs.utcOffsetMin) !== this.day) this.loadDay()
+    // A long pause or a new day already started a new conversation (ensureSession) before this turn.
     const system = this.systemPrompt()
     this.session.profileVersion = this.deps.memory.personality().version
     // The history is the same on the next call: mark its end so the provider can cache it.
@@ -356,8 +441,10 @@ export class Assistant {
     h.push({ role: 'user', content: userText })
     h.push({ role: 'assistant', content: spoken || '(no reply)' })
     if (spoken) this.deps.memory.addMessage(this.session.conversationId, 'assistant', spoken)
-    // Over the window: rebuild from the database so the oldest turns move into the digest, not out of mind.
-    if (h.length > MAX_HISTORY_TURNS) this.loadDay()
+    if (this.pendingNew) return this.newConversation()
+    // Over the window: rebuild from the database so the oldest turns move into the summary, not out of mind.
+    if (h.length > MAX_HISTORY_TURNS) this.loadConversation()
+    this.maybeSummarize()
   }
 
   /** Small, evidence-backed packet: never the whole database. */
@@ -377,8 +464,8 @@ export class Assistant {
         ? 'The owner changed your personality settings in Setup since your last reply. Follow the current owner profile from now on; earlier replies used the old settings, which was not a mistake, so do not apologise for them.'
         : '',
       ...(this.deps.learning?.contextLines() ?? []),
-      this.dayDigest ? `Earlier today (older part of today's conversation, oldest first):
-${this.dayDigest}` : '',
+      this.summary ? `Earlier in this conversation (your summary):\n${this.summary}` : '',
+      this.olderDigest ? `Earlier in this conversation (after the summary, oldest first):\n${this.olderDigest}` : '',
       overdue.length ? `Overdue:\n${overdue.map(fmt).join('\n')}` : 'Overdue: none',
       open.length ? `Open tasks:\n${open.map(fmt).join('\n')}` : 'Open tasks: none recorded',
       recalled.length

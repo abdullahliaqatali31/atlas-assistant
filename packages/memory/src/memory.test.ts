@@ -140,3 +140,29 @@ describe('MemoryStore', () => {
     store.close()
   })
 })
+
+describe('conversations', () => {
+  it('keeps a conversation per id with its first owner words as title, newest used first', () => {
+    const { store, clock } = open()
+    store.addMessage('c1', 'assistant', 'Subah bakhair!')
+    store.addMessage('c1', 'owner', 'Ahmed ke quote ka kya hua?\nbatao')
+    clock.advance(60_000)
+    store.addMessage('c2', 'owner', 'salam')
+    const list = store.conversations()
+    expect(list.map(c => c.id)).toEqual(['c2', 'c1'])
+    expect(list[1]).toMatchObject({ title: 'Ahmed ke quote ka kya hua? batao', messages: 2, summary: '', summarizedThrough: 0 })
+    expect(store.conversationMessages('c1').map(m => m.speaker)).toEqual(['assistant', 'owner'])
+    store.close()
+  })
+
+  it('stores the rolling summary and a better title, and finds old messages by words', () => {
+    const { store } = open()
+    store.addMessage('c1', 'owner', 'Visa appointment is on Monday at 10')
+    store.addMessage('c2', 'owner', 'remind me about the dentist')
+    store.setConversationSummary('c1', 'Owner has a visa appointment Monday 10:00.', 123, 'Visa appointment')
+    expect(store.conversation('c1')).toMatchObject({ summary: 'Owner has a visa appointment Monday 10:00.', summarizedThrough: 123, title: 'Visa appointment' })
+    expect(store.searchMessages('VISA monday').map(h => [h.conversationId, h.title])).toEqual([['c1', 'Visa appointment']])
+    expect(store.searchMessages('nothing like this')).toEqual([])
+    store.close()
+  })
+})

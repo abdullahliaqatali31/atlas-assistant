@@ -15,7 +15,10 @@ import {
   isVoiceProvider,
   loadConfig,
   buildAgenda,
+  conversationTools,
+  CONVERSATION_RULES,
   learningTools,
+  llmSummarizer,
   meterLlm,
   setBudget,
   setPrice,
@@ -91,7 +94,7 @@ const controls = new HostControls({
   log: (level, message) => log(level, message),
   now: () => systemClock.now(),
   extensionToken: () => store.get('PLAYWRIGHT_MCP_EXTENSION_TOKEN'),
-  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...IMPROVEMENT_RULES, ...WORLD_RULES],
+  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...IMPROVEMENT_RULES, ...WORLD_RULES, ...CONVERSATION_RULES],
 })
 let voice: VoiceProvider | null = null
 let speechEnabled = true
@@ -224,6 +227,8 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
       ? { quickLlm: meterLlm(createLlm(config.llm, 'quick'), { purpose: 'chat', memory, clock: systemClock, utcOffsetMin: offset, onRecord: () => schedulePush() }) }
       : {}),
     routing: config.llm.routing ?? 'auto',
+    // Older parts of a long conversation become a short summary, written by the cheap background model.
+    summarize: llmSummarizer(meterLlm(createLlm(config.llm, 'background'), { purpose: 'background', memory, clock: systemClock, utcOffsetMin: offset, onRecord: () => schedulePush() })),
     memory,
     // What Atlas learned and taught tasks, plus one line on its own window.
     learning: { observeOwner: text => learning?.observeOwner(text), contextLines: () => [...(learning?.contextLines() ?? []), ...ui.contextLines()] },
@@ -240,7 +245,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   })
   // Local tools now; MCP servers start in the background and join when ready.
   // Answers to its own questions (project status, learning suggestions) go through these.
-  void controls.attach(assistant, [...localTools(memory, systemClock), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
+  void controls.attach(assistant, [...localTools(memory, systemClock), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
   const agendaMemory = memory
   const wrapUpMinute = parseClock(merged.ASSISTANT_WRAP_UP) ?? 18 * 60
   initiative = new InitiativeService(
@@ -505,9 +510,33 @@ port.on('message', ({ data }: { data: HostRequest }) => {
       void initiative?.act(data.id, data.action)
       break
     case 'list-today': {
-      const since = startOfLocalDay(Date.now(), dayOffsetMin)
-      const lines = (memory?.messagesSince(since) ?? []).map(m => ({ who: m.speaker, text: m.content, at: m.at }))
+      // The current conversation, so the window continues it instead of starting blank.
+      const lines = memory && assistant ? memory.conversationMessages(assistant.conversationId).map(m => ({ who: m.speaker, text: m.content, at: m.at })) : []
       post({ type: 'today', requestId: data.requestId, lines })
+      break
+    }
+    case 'chats': {
+      const { requestId, op } = data
+      if (!memory || !assistant) {
+        post({ type: 'chats-result', requestId, error: 'The assistant is not ready yet.' })
+        break
+      }
+      const lines = (id: string) => memory!.conversationMessages(id).map(m => ({ who: m.speaker, text: m.content, at: m.at }))
+      try {
+        if (op.kind === 'list') {
+          const current = assistant.conversationId
+          post({ type: 'chats-result', requestId, result: memory.conversations(80).map(c => ({ id: c.id, title: c.title, startedAt: c.startedAt, lastAt: c.lastAt, messages: c.messages, current: c.id === current })) })
+        } else if (op.kind === 'read') post({ type: 'chats-result', requestId, result: lines(op.id) })
+        else if (op.kind === 'new') {
+          assistant.newConversation()
+          post({ type: 'chats-result', requestId, result: { id: assistant.conversationId } })
+        } else {
+          assistant.resumeConversation(op.id)
+          post({ type: 'chats-result', requestId, result: lines(op.id) })
+        }
+      } catch (e) {
+        post({ type: 'chats-result', requestId, error: e instanceof Error ? e.message : String(e) })
+      }
       break
     }
     case 'backup-db': {

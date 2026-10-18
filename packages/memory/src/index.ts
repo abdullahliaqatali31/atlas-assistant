@@ -109,7 +109,40 @@ const MIGRATIONS: string[] = [
      input INTEGER NOT NULL, output INTEGER NOT NULL, cached INTEGER NOT NULL, cache_write INTEGER NOT NULL,
      parts TEXT NOT NULL);
    CREATE INDEX llm_call_at ON llm_call(at);`,
+  // Conversations as sessions: a title, a rolling summary of the older part, and when it was last used.
+  `CREATE TABLE conversation (
+     id TEXT PRIMARY KEY, started_at INTEGER NOT NULL, last_at INTEGER NOT NULL,
+     title TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', summarized_through INTEGER NOT NULL DEFAULT 0);
+   CREATE INDEX conversation_last ON conversation(last_at);
+   CREATE INDEX message_conversation ON message(conversation_id, created_at);
+   INSERT INTO conversation (id, started_at, last_at, title)
+     SELECT m.conversation_id, MIN(m.created_at), MAX(m.created_at),
+       COALESCE((SELECT substr(o.content, 1, 60) FROM message o WHERE o.conversation_id = m.conversation_id AND o.speaker = 'owner' ORDER BY o.created_at LIMIT 1), '')
+     FROM message m GROUP BY m.conversation_id;`,
 ]
+
+/** A conversation (session): a run of messages without a long pause. */
+export interface Conversation {
+  id: Id
+  startedAt: number
+  lastAt: number
+  title: string
+  /** A short summary of the part older than the verbatim window, if one was written. */
+  summary: string
+  /** The time of the last message the summary covers (0: none). */
+  summarizedThrough: number
+  messages: number
+}
+
+const toConversation = (r: Record<string, unknown>): Conversation => ({
+  id: String(r.id),
+  startedAt: Number(r.started_at),
+  lastAt: Number(r.last_at),
+  title: String(r.title ?? ''),
+  summary: String(r.summary ?? ''),
+  summarizedThrough: Number(r.summarized_through ?? 0),
+  messages: Number(r.n ?? 0),
+})
 
 /** One LLM call: tokens as billed, and an estimate of what the request was made of (tokens per part). */
 export interface CallRow {
@@ -719,9 +752,51 @@ export class MemoryStore {
   // ── conversation + logs ───────────────────────────────────
 
   addMessage(conversationId: Id, speaker: 'owner' | 'assistant', content: string) {
+    const now = this.clock.now()
     this.db
       .prepare('INSERT INTO message (id, conversation_id, speaker, content, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(newId(), conversationId, speaker, content, this.clock.now())
+      .run(newId(), conversationId, speaker, content, now)
+    // The conversation's first owner words become its title until a better one is written.
+    const title = speaker === 'owner' ? content.replace(/\s+/g, ' ').trim().slice(0, 60) : ''
+    this.db
+      .prepare(
+        `INSERT INTO conversation (id, started_at, last_at, title) VALUES (?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET last_at = excluded.last_at, title = CASE WHEN conversation.title = '' THEN excluded.title ELSE conversation.title END`,
+      )
+      .run(conversationId, now, now, title)
+  }
+
+  conversation(id: Id): Conversation | null {
+    const r = this.db.prepare('SELECT c.*, (SELECT COUNT(*) FROM message m WHERE m.conversation_id = c.id) n FROM conversation c WHERE id = ?').get(id) as Record<string, unknown> | undefined
+    return r ? toConversation(r) : null
+  }
+
+  /** Conversations, the most recently used first. */
+  conversations(limit = 50, offset = 0): Conversation[] {
+    return (this.db.prepare('SELECT c.*, (SELECT COUNT(*) FROM message m WHERE m.conversation_id = c.id) n FROM conversation c ORDER BY last_at DESC LIMIT ? OFFSET ?').all(limit, offset) as Record<string, unknown>[]).map(toConversation)
+  }
+
+  /** One conversation's messages, oldest first. */
+  conversationMessages(id: Id): { speaker: 'owner' | 'assistant'; content: string; at: number }[] {
+    return (
+      this.db.prepare('SELECT speaker, content, created_at FROM message WHERE conversation_id = ? ORDER BY created_at, rowid').all(id) as { speaker: 'owner' | 'assistant'; content: string; created_at: number }[]
+    ).map(r => ({ speaker: r.speaker, content: r.content, at: r.created_at }))
+  }
+
+  /** The rolling summary of a conversation's older part: what it says, up to which message time, and a better title. */
+  setConversationSummary(id: Id, summary: string, through: number, title?: string) {
+    this.db.prepare('UPDATE conversation SET summary = ?, summarized_through = ?, title = COALESCE(?, title) WHERE id = ?').run(summary, through, title?.trim() || null, id)
+  }
+
+  /** Past messages containing every word of the query, newest first, with their conversation. */
+  searchMessages(query: string, limit = 12): { conversationId: Id; title: string; speaker: 'owner' | 'assistant'; content: string; at: number }[] {
+    const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 1).slice(0, 6)
+    if (!words.length) return []
+    const where = words.map(() => 'lower(m.content) LIKE ?').join(' AND ')
+    const rows = this.db
+      .prepare(`SELECT m.conversation_id, c.title, m.speaker, m.content, m.created_at FROM message m LEFT JOIN conversation c ON c.id = m.conversation_id WHERE ${where} ORDER BY m.created_at DESC LIMIT ?`)
+      .all(...words.map(w => `%${w.replace(/[%_]/g, '')}%`), limit) as { conversation_id: string; title: string | null; speaker: 'owner' | 'assistant'; content: string; created_at: number }[]
+    return rows.map(r => ({ conversationId: r.conversation_id, title: r.title ?? '', speaker: r.speaker, content: r.content, at: r.created_at }))
   }
 
   /** Everything said since `since` (epoch ms), oldest first: the day's conversation across restarts. */

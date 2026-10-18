@@ -52,3 +52,42 @@ export const dayContext = (messages: readonly DayMessage[], maxTurns: number): {
     .join('\n')
   return { history: all.slice(cut), digest }
 }
+
+export interface SessionContext {
+  /** The recent part, verbatim, as alternating turns. */
+  history: ChatTurn[]
+  /** A short line-per-message digest of older messages the summary does not cover yet. */
+  digest: string
+  /** Older messages the summary does not cover yet (for the next summary). */
+  unsummarized: DayMessage[]
+}
+
+/**
+ * Splits one conversation for the model. All of it goes verbatim while it
+ * is short; once it passes `max` turns it is cut back to the last `keep`,
+ * so the verbatim part (which the provider caches) changes only every few
+ * turns instead of sliding every message. Older messages are covered by the
+ * stored summary up to `summarizedThrough`, and by a digest after that.
+ */
+export const sessionContext = (messages: readonly DayMessage[], opts: { max: number; keep: number; summarizedThrough: number }): SessionContext => {
+  const all = toTurns(messages)
+  if (all.length <= opts.max) return { history: all, digest: '', unsummarized: [] }
+  // The message index each turn starts at (consecutive messages from one speaker merge into one turn).
+  const starts: number[] = []
+  for (let i = 0; i < messages.length; i++) if (i === 0 || messages[i]!.speaker !== messages[i - 1]!.speaker) starts.push(i)
+  // toTurns may put a marker turn first when the assistant spoke first; line the indices up with it.
+  const offset = all.length - starts.length
+  let cut = all.length - opts.keep
+  if (all[cut]?.role === 'assistant') cut++
+  const older = messages.slice(0, starts[cut - offset] ?? messages.length)
+  const unsummarized = older.filter(m => m.at > opts.summarizedThrough)
+  const digest = unsummarized
+    .map(m => {
+      const text = m.content.replace(/\s+/g, ' ').trim()
+      return text ? `- ${m.speaker === 'owner' ? 'Owner' : 'You'}: ${text.length > 160 ? `${text.slice(0, 157)}…` : text}` : ''
+    })
+    .filter(Boolean)
+    .slice(-20)
+    .join('\n')
+  return { history: all.slice(cut), digest, unsummarized }
+}

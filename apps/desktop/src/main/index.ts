@@ -12,6 +12,7 @@ import {
   CH,
   isMode,
   parseApproval,
+  parseChatsOp,
   parseInitiativeAction,
   parseMessage,
   parseSetup,
@@ -434,6 +435,11 @@ handle(CH.setMode, arg => {
 handle(CH.listTasks, () => {
   requireOwner()
   return supervisor.listTasks()
+})
+handle(CH.chats, op => {
+  const parsed = parseChatsOp(op)
+  if (!parsed) throw new Error('Unknown chat request.')
+  return supervisor.chats(parsed)
 })
 handle(CH.listToday, () => {
   requireOwner()

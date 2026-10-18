@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { dayContext, startOfLocalDay, toTurns, type DayMessage } from './day.ts'
+import { dayContext, sessionContext, startOfLocalDay, toTurns, type DayMessage } from './day.ts'
 
 const m = (speaker: DayMessage['speaker'], content: string, at = 0): DayMessage => ({ speaker, content, at })
 
@@ -34,5 +34,28 @@ describe('dayContext', () => {
     expect(history.at(-1)?.content).toBe('message 29')
     expect(digest).toContain('Owner: message 0')
     expect(digest).not.toContain('message 29')
+  })
+})
+
+describe('sessionContext', () => {
+  const msgs = (n: number) => Array.from({ length: n }, (_, i) => ({ speaker: (i % 2 === 0 ? 'owner' : 'assistant') as 'owner' | 'assistant', content: `m${i}`, at: 1000 + i }))
+
+  it('keeps a short conversation whole', () => {
+    const c = sessionContext(msgs(10), { max: 24, keep: 12, summarizedThrough: 0 })
+    expect(c.history).toHaveLength(10)
+    expect(c.unsummarized).toEqual([])
+  })
+
+  it('cuts a long one back to the last turns, and lists what fell out', () => {
+    const c = sessionContext(msgs(30), { max: 24, keep: 12, summarizedThrough: 0 })
+    expect(c.history).toHaveLength(12)
+    expect(c.history[0]).toEqual({ role: 'user', content: 'm18' })
+    expect(c.unsummarized.map(m => m.content)).toEqual(Array.from({ length: 18 }, (_, i) => `m${i}`))
+    expect(c.digest.split('\n')[0]).toBe('- Owner: m0')
+  })
+
+  it('leaves out of the digest what the summary already covers', () => {
+    const c = sessionContext(msgs(30), { max: 24, keep: 12, summarizedThrough: 1009 })
+    expect(c.unsummarized.map(m => m.content)).toEqual(['m10', 'm11', 'm12', 'm13', 'm14', 'm15', 'm16', 'm17'])
   })
 })

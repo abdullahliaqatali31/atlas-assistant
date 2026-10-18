@@ -14,6 +14,8 @@ import { PJ } from '../shared/projects.ts'
 export const OWNER_ONLY: ReadonlySet<string> = new Set([
   // Provider, key and server address: a swap would send conversations elsewhere.
   CH.saveSetup,
+  // Past conversations are the owner's.
+  CH.chats,
   CH.listModels,
   CH.answerApproval,
   CH.initiativeAction,

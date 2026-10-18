@@ -1,5 +1,5 @@
 import * as ToggleGroup from '@radix-ui/react-toggle-group'
-import { Ear, Mic, Settings2, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react'
+import { Ear, History, Mic, Settings2, SlidersHorizontal, SquarePen, Volume2, VolumeX } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 
 import { MODES, type ActionNotice, type ApprovalRequest, type InitiativeItem, type RuntimeStatus, type TaskView, type UiMode } from '../../shared/ipc.ts'
@@ -10,6 +10,7 @@ import { InitiativeControls, LaterList } from './Initiative.tsx'
 import { VoiceMode, type VoicePhase } from './VoiceMode.tsx'
 import { chime, toWav, WakeListener } from './wake/listener.ts'
 import type { Presence } from './Jarvis.tsx'
+import { ChatList } from './ChatList.tsx'
 import { Onboarding } from './Onboarding.tsx'
 import { Markdown } from './ui/Markdown.tsx'
 import { ASK_EVENT, MIC_EVENT, publishLive } from './shell/live.ts'
@@ -59,6 +60,9 @@ export function Companion({
   onPresence?: (p: Presence) => void
 }) {
   const [lines, setLines] = useState<Line[]>([])
+  /** The chat list over the conversation, and starting a fresh chat. */
+  const [chatsOpen, setChatsOpen] = useState(false)
+  const startNewChat = () => void window.assistant.newChat().then(() => setLines([]), () => undefined)
   const [draft, setDraft] = useState('')
   const [replyId, setReplyId] = useState<string | null>(null)
   const [tasks, setTasks] = useState<TaskView[] | null>(null)
@@ -496,7 +500,13 @@ export function Companion({
 
   return (
     // A container: the header adapts to the panel width (side panel, drawer or compact window), not the screen.
-    <div className="@container flex min-h-0 flex-1 flex-col">
+    <div className="@container relative flex min-h-0 flex-1 flex-col">
+      {chatsOpen && (
+        <ChatList
+          onClose={() => setChatsOpen(false)}
+          onResumed={day => setLines(day.map((d, i): Line => ({ id: 'chat-' + i + '-' + d.at, who: d.who, text: d.text, earlier: true })))}
+        />
+      )}
       <header className="flex items-center gap-2 border-b border-border px-3 py-2 @[420px]:px-4 @[420px]:py-2.5">
         <span
           className={`size-2 rounded-full ${listening ? 'bg-danger' : ready ? 'bg-accent' : 'bg-muted'} ${replyId || speaking || listening ? 'thinking-dot' : ''}`}
@@ -561,6 +571,12 @@ export function Companion({
             <SlidersIcon />
           </button>
         )}
+        <button type="button" onClick={() => setChatsOpen(true)} className="icon-btn" aria-label="Earlier chats" title="Earlier chats" disabled={ownerLocked}>
+          <History className="size-4" aria-hidden />
+        </button>
+        <button type="button" onClick={startNewChat} className="icon-btn" aria-label="New chat" title="New chat: start fresh (this one stays in Earlier chats)" disabled={ownerLocked || replyId !== null}>
+          <SquarePen className="size-4" aria-hidden />
+        </button>
         <button type="button" onClick={onOpenSetup} className="icon-btn" aria-label="Open setup" title="Setup">
           <Settings2 className="size-4" aria-hidden />
         </button>
