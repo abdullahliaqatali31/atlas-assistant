@@ -612,9 +612,7 @@ export function App() {
                         controls={controls}
                         presence={presence}
                         ownerName={status.setup.ownerName}
-                        go={(v) =>
-                          v === "news" ? open("news") : open("projects")
-                        }
+                        open={(t) => (t === "world" ? goStage("world") : open(t))}
                       />
                     ) : (
                       <WorldPage />

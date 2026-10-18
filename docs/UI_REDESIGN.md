@@ -145,7 +145,11 @@ reduced shadows, map at lower pixel ratio. Also follows
    **hover overview cards** (the top few items per module, read only while
    shown); a click opens the full drawer. Phone width gets a bottom bar that
    fits without scrolling.
-4. **Home stage** (calm) and **World stage** with the Inspector for map items.
+4. **Home stage** (calm) and **World stage** with the Inspector for map items. *(done: Home is the orb, time, one line on what matters and up to
+   three now cards; World is a full-bleed map with a floating toolbar, place
+   chips, a layers popover and an Inspector (left; bottom sheet when narrow)
+   for places, cameras, flights, ships, satellites, quakes and events, with
+   Centre and Ask Atlas)*
 5. **Alerts timeline** and the corner widget.
 6. Restyle each drawer's content to the new density; responsive and
    performance pass; `ui_control` maps to stages and drawers.

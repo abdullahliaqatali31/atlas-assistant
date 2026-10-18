@@ -1,95 +1,135 @@
-import { Code2, Play } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock3, Cloud, Code2, Play, ShieldQuestion, type LucideIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { CodeState } from '../../shared/code.ts'
 import type { ControlState } from '../../shared/control.ts'
-import type { RuntimeStatus } from '../../shared/ipc.ts'
-import { ActivityCard, ago, ConnectionsCard, Empty, NowCard, Panel, PresenceCard, TodayCard, useNow, type Presence } from './Jarvis.tsx'
-import { HomeNews } from './News.tsx'
+import type { RuntimeStatus, TaskView } from '../../shared/ipc.ts'
+import type { WorldSnapshot } from '../../shared/world.ts'
+import { ago, greetingFor, STATE_LABEL, useNow, type Presence } from './Jarvis.tsx'
+import { Orb, type OrbState } from './ui/Orb.tsx'
 
-/** Coding projects: what is running and what you touched most recently. */
-function CodeCard({ onOpen }: { onOpen: () => void }) {
-  const now = useNow(60_000)
+export type HomeTarget = 'today' | 'projects' | 'world' | 'chat'
+
+interface NowItem {
+  id: string
+  icon: LucideIcon
+  label: string
+  title: string
+  meta?: string | undefined
+  tone?: 'warm' | 'ok' | undefined
+  open: HomeTarget
+}
+
+/** Reads what Home needs, kept current by the same events the drawers use. */
+const useHomeData = (ready: boolean) => {
+  const [tasks, setTasks] = useState<TaskView[] | null>(null)
   const [code, setCode] = useState<CodeState | null>(null)
+  const [world, setWorld] = useState<WorldSnapshot | null>(null)
   useEffect(() => {
+    if (!ready) return
+    const loadTasks = () => void window.assistant.listTasks().then(setTasks, () => undefined)
+    loadTasks()
+    const timer = setInterval(loadTasks, 60_000)
     void window.code.state().then(setCode, () => undefined)
-    return window.code.onChanged(setCode)
-  }, [])
-  if (!code) return null
-  const running = code.running.filter(r => !r.endedAt)
-  const recent = code.projects.slice(0, 4)
-  return (
-    <Panel
-      title="Code"
-      icon={<Code2 className="size-3.5" />}
-      aside={
-        <button type="button" className="text-[11px] text-accent hover:underline" onClick={onOpen}>
-          Projects →
-        </button>
-      }
-    >
-      {code.projects.length === 0 && <Empty>Follow your project folders in Projects › Code to see what you worked on.</Empty>}
-      {running.map(r => (
-        <div key={r.id} className="flex items-center gap-2 text-sm">
-          <Play className="size-3.5 text-ok" aria-hidden />
-          <span className="min-w-0 flex-1 truncate">
-            {r.projectName} · {r.profile}
-          </span>
-          {r.url && (
-            <button type="button" className="font-mono text-[11px] text-accent hover:underline" onClick={() => void window.code.openUrl(r.id)}>
-              {r.url.replace(/^https?:\/\//, '')}
-            </button>
-          )}
-        </div>
-      ))}
-      {recent.map(p => (
-        <div key={p.id} className="flex items-center gap-2 text-xs">
-          <span className="min-w-0 flex-1 truncate text-sm">{p.name}</span>
-          <span className="text-muted">
-            {p.today.commits ? `${p.today.commits} commits · ` : ''}
-            {p.today.files ? `${p.today.files} files · ` : ''}
-            {p.lastActivityAt ? ago(p.lastActivityAt, now) : 'quiet'}
-          </span>
-        </div>
-      ))}
-    </Panel>
-  )
+    const offCode = window.code.onChanged(setCode)
+    void window.world.state().then(setWorld, () => undefined)
+    const offWorld = window.world.onChanged(setWorld)
+    return () => {
+      clearInterval(timer)
+      offCode()
+      offWorld()
+    }
+  }, [ready])
+  return { tasks, code, world }
+}
+
+const when = (t: number, now: number) => {
+  const d = new Date(t)
+  const sameDay = d.toDateString() === new Date(now).toDateString()
+  return sameDay ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
 /**
- * Home: the broad canvas. Presence on the left, then today, the news with
- * pictures, your code, connections and recent actions. The conversation
- * lives in the side panel.
+ * Home, calm: the orb, the time, a greeting and one line on what matters now,
+ * then at most three "now" cards (a question waiting, the next task, what is
+ * running or a nearby alert). Everything else lives in the drawers.
  */
-export function Home({
-  status,
-  controls,
-  presence,
-  ownerName,
-  go,
-}: {
-  status: RuntimeStatus
-  controls: ControlState | null
-  presence: Presence
-  ownerName: string
-  go: (view: 'news' | 'projects') => void
-}) {
+export function Home({ status, controls, presence, ownerName, open }: { status: RuntimeStatus; controls: ControlState | null; presence: Presence; ownerName: string; open: (t: HomeTarget) => void }) {
+  const now = useNow(1000)
+  const ready = status.phase === 'ready'
+  const { tasks, code, world } = useHomeData(ready)
+  const orbState: OrbState = controls?.paused ? 'paused' : !ready ? 'offline' : presence.state
+  const date = new Date(now)
+
+  const overdue = (tasks ?? []).filter(t => t.dueAt !== null && t.dueAt < now)
+  const next = (tasks ?? []).filter(t => t.dueAt !== null && t.dueAt >= now).sort((a, b) => a.dueAt! - b.dueAt!)[0] ?? (tasks ?? []).find(t => t.dueAt === null)
+  const running = (code?.running ?? []).filter(r => !r.endedAt)
+  const alert = world?.places.flatMap(p => p.nearby.map(n => ({ ...n, place: p.place.name }))).sort((a, b) => b.time - a.time)[0]
+  const worstAir = world?.places.filter(p => p.air && p.air.aqi > 100).sort((a, b) => b.air!.aqi - a.air!.aqi)[0]
+  const firstPlace = world?.places.find(p => p.weather)
+  const ask = status.approvals[0]
+
+  // One line: the few things that matter, in order.
+  const line = [
+    ask && 'a question is waiting for your yes or no',
+    overdue.length ? `${overdue.length} overdue` : next?.dueAt ? `${next.title.split(/[(:—-]/)[0]!.trim()} at ${when(next.dueAt, now)}` : null,
+    worstAir && `${worstAir.place.name} AQI ${worstAir.air!.aqi}`,
+    alert && `${alert.title.split(' · ')[0]} near ${alert.place}`,
+    running.length ? `${running.length} server${running.length > 1 ? 's' : ''} running` : null,
+  ].filter(Boolean) as string[]
+
+  const cards: NowItem[] = []
+  if (ask) cards.push({ id: 'ask', icon: ShieldQuestion, label: 'Waiting for you', title: ask.question ?? `May I use ${ask.tool}?`, tone: 'warm', open: 'chat' })
+  if (overdue[0]) cards.push({ id: 'overdue', icon: Clock3, label: overdue.length > 1 ? `${overdue.length} overdue` : 'Overdue', title: overdue[0].title, meta: overdue[0].dueAt ? ago(overdue[0].dueAt, now) : undefined, tone: 'warm', open: 'today' })
+  else if (next) cards.push({ id: 'next', icon: CheckCircle2, label: 'Next', title: next.title, meta: next.dueAt ? when(next.dueAt, now) : 'no time set', open: 'today' })
+  if (alert) cards.push({ id: 'alert', icon: AlertTriangle, label: `Near ${alert.place}`, title: alert.title, meta: `${alert.km} km · ${ago(alert.time, now)}`, tone: 'warm', open: 'world' })
+  if (running[0]) cards.push({ id: 'run', icon: Play, label: running.length > 1 ? `${running.length} running` : 'Running', title: `${running[0].projectName} · ${running[0].profile}`, meta: running[0].url?.replace(/^https?:\/\//, '') ?? undefined, tone: 'ok', open: 'projects' })
+  else {
+    const recent = code?.projects.slice().sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))[0]
+    if (recent?.lastActivityAt) cards.push({ id: 'code', icon: Code2, label: 'Last worked on', title: recent.name, meta: ago(recent.lastActivityAt, now), open: 'projects' })
+  }
+  if (!alert && firstPlace?.weather) {
+    const w = firstPlace.weather
+    cards.push({ id: 'weather', icon: Cloud, label: firstPlace.place.name, title: `${Math.round(w.temp)}° ${w.summary}`, meta: firstPlace.air ? `AQI ${firstPlace.air.aqi}` : undefined, tone: (firstPlace.air?.aqi ?? 0) > 150 ? 'warm' : undefined, open: 'world' })
+  }
+
   return (
-    <div className="h-full min-h-0 overflow-y-auto p-3">
-      <div className="grid gap-3 lg:grid-cols-[minmax(260px,320px)_1fr] xl:grid-cols-[minmax(280px,340px)_1fr_1fr]">
-        <div className="space-y-3 lg:row-span-3">
-          <PresenceCard status={status} controls={controls} presence={presence} ownerName={ownerName} size={190} />
-          <NowCard status={status} controls={controls} />
-          <ConnectionsCard controls={controls} />
-        </div>
-        <TodayCard status={status} />
-        <CodeCard onOpen={() => go('projects')} />
-        <div className="lg:col-span-1 xl:col-span-2">
-          <HomeNews onOpen={() => go('news')} />
-        </div>
-        <div className="lg:col-span-1 xl:col-span-2">
-          <ActivityCard controls={controls} presence={presence} />
-        </div>
+    <div className="@container flex h-full min-h-0 flex-col items-center justify-center overflow-y-auto px-4 py-6">
+      <div className="flex w-full max-w-2xl flex-col items-center text-center">
+        <Orb state={orbState} level={presence.level} size={150} />
+        <p className="mt-1 font-mono text-4xl font-extralight tracking-wider tabular-nums @[480px]:text-5xl">
+          {date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+          <span className="text-lg text-muted">:{String(date.getSeconds()).padStart(2, '0')}</span>
+        </p>
+        <p className="mt-1 text-sm text-muted">
+          {date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} · {greetingFor(date.getHours())}
+          {ownerName ? `, ${ownerName}` : ''}
+        </p>
+        <p className="mt-3 max-w-xl text-[15px] leading-relaxed">
+          <span className={`mr-1.5 inline-block size-1.5 rounded-full align-middle ${orbState === 'listening' ? 'bg-warm' : orbState === 'paused' ? 'bg-danger' : 'bg-accent'}`} aria-hidden />
+          <span className="text-muted">{STATE_LABEL[orbState]} · </span>
+          {!ready ? 'Connect a provider in Settings to begin.' : line.length ? line.join(' · ') : 'All quiet. Nothing needs you right now.'}
+        </p>
+
+        {cards.length > 0 && (
+          <ul className="mt-6 grid w-full gap-2 @[560px]:grid-cols-3">
+            {cards.slice(0, 3).map(c => (
+              <li key={c.id}>
+                <button type="button" onClick={() => open(c.open)} className="tile group flex h-full w-full flex-col gap-1 p-3 text-left transition-colors hover:border-accent/50">
+                  <span className={`flex items-center gap-1.5 text-[11px] ${c.tone === 'warm' ? 'text-warm' : c.tone === 'ok' ? 'text-ok' : 'text-muted'}`}>
+                    <c.icon className="size-3.5" aria-hidden />
+                    <span className="truncate">{c.label}</span>
+                  </span>
+                  <span className="line-clamp-2 text-sm">{c.title}</span>
+                  {c.meta && <span className="mt-auto truncate font-mono text-[10px] text-muted">{c.meta}</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-5 hidden text-[11px] text-muted @[480px]:block">
+          Hover the icons on the right for a quick look · <kbd className="font-mono">Ctrl K</kbd> to go anywhere · <kbd className="font-mono">/</kbd> to ask
+        </p>
       </div>
     </div>
   )

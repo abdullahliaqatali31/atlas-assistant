@@ -18,7 +18,7 @@ export interface Presence {
   level: number
 }
 
-const STATE_LABEL: Record<OrbState, string> = {
+export const STATE_LABEL: Record<OrbState, string> = {
   offline: 'Offline',
   paused: 'Automation stopped',
   idle: 'Standing by',
@@ -27,7 +27,7 @@ const STATE_LABEL: Record<OrbState, string> = {
   speaking: 'Speaking',
 }
 
-const greetingFor = (hour: number) => (hour < 5 ? 'Up late' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : hour < 21 ? 'Good evening' : 'Good night')
+export const greetingFor = (hour: number) => (hour < 5 ? 'Up late' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : hour < 21 ? 'Good evening' : 'Good night')
 
 export const ago = (t: number, now: number) => {
   const m = Math.round((now - t) / 60_000)
