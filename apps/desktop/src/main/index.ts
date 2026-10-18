@@ -27,6 +27,7 @@ import { CHALLENGE, IC, isAskWhen } from '../shared/identity.ts'
 import { NC } from '../shared/news.ts'
 import { AudioGate } from './bargein.ts'
 import { Controls } from './controls.ts'
+import { FileService } from './files/service.ts'
 import { IdentityGate } from './identity.ts'
 import { registerBackupIpc } from './backup.ts'
 import { CodeService } from './code/service.ts'
@@ -181,6 +182,13 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
   onUsage: u => {
     usage = u
     toRenderer(CH.usageChanged, u)
+  },
+  onFiles: e => {
+    // The model's file tools, answered by request id; failures go back as text the model can relay.
+    void files.handleOp(e.op).then(
+      result => supervisor.files({ type: 'files-result', requestId: e.requestId, result }),
+      error => supervisor.files({ type: 'files-result', requestId: e.requestId, error: error instanceof Error ? error.message : String(error) }),
+    )
   },
   onCode: e => {
     if (e.type === 'code-minutes') return code.setMinutes(e.minutes)
@@ -352,6 +360,9 @@ const code = new CodeService({
   log: (level, message) => log(level, message),
 })
 code.register()
+/** Files: chosen folders, organising with undo, Recycle Bin instead of delete. */
+const files = new FileService({ handle, toRenderer, window: () => win, requireOwner: () => requireOwner(), log: (level, message) => log(level, message) })
+files.register()
 handle(CH.send, arg => {
   const text = parseMessage(arg)
   if (text === null) throw new Error('Message must be non-empty text under 8000 characters.')

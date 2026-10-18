@@ -38,6 +38,7 @@ import type { HostEvent, HostRequest, InitiativeItem, RuntimePhase, SetupProblem
 import type { ActivitySettings } from '../shared/activity.ts'
 import { HostActivity } from './activity.ts'
 import { CODE_RULES, HostCode } from './code.ts'
+import { FILE_RULES, HostFiles } from './files.ts'
 import { HostNews, NEWS_RULES } from './news.ts'
 import { HostControls } from './controls.ts'
 import { InitiativeService, parseQuietHours } from './initiative.ts'
@@ -76,13 +77,14 @@ let dayOffsetMin = 0
 /** Owner rules, pause, MCP servers and the open-app tool; rules arrive from main and are never written here. */
 /** Code projects: snapshots from main, tools that ask main to act. */
 const code = new HostCode({ post: e => post(e), now: () => systemClock.now() })
+const files = new HostFiles({ post: e => post(e) })
 const news = new HostNews()
 const controls = new HostControls({
   post: e => post(e),
   log: (level, message) => log(level, message),
   now: () => systemClock.now(),
   extensionToken: () => store.get('PLAYWRIGHT_MCP_EXTENSION_TOKEN'),
-  extraRules: [...CODE_RULES, ...NEWS_RULES],
+  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES],
 })
 let voice: VoiceProvider | null = null
 let speechEnabled = true
@@ -211,7 +213,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   })
   // Local tools now; MCP servers start in the background and join when ready.
   // Answers to its own questions (project status, learning suggestions) go through these.
-  void controls.attach(assistant, [...localTools(memory, systemClock), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
+  void controls.attach(assistant, [...localTools(memory, systemClock), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
   const agendaMemory = memory
   const wrapUpMinute = parseClock(merged.ASSISTANT_WRAP_UP) ?? 18 * 60
   initiative = new InitiativeService(
@@ -479,6 +481,9 @@ port.on('message', ({ data }: { data: HostRequest }) => {
       break
     case 'code-result':
       code.onResult(data.requestId, data.result, data.error)
+      break
+    case 'files-result':
+      files.onResult(data.requestId, data.result, data.error)
       break
     case 'open-app-result':
       controls.onOpenResult(data.requestId, data.error)

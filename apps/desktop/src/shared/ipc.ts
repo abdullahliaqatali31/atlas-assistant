@@ -8,6 +8,7 @@ import { isLlmProvider, type LlmProviderId } from '@assistant/providers/llm-pres
 
 import type { ActivityHostEvent, ActivityHostRequest } from './activity.ts'
 import type { CodeOp, CodeProjectView, RunView } from './code.ts'
+import type { FileOp } from './files.ts'
 import type { ControlHostEvent, ControlHostRequest } from './control.ts'
 import type { PersonalityHostEvent, PersonalityHostRequest } from './personality.ts'
 import type { LearningHostEvent, LearningHostRequest } from './learning.ts'
@@ -335,6 +336,8 @@ export type HostRequest =
   /** Code projects: the latest scan and running servers, pushed by main after every change. */
   | { type: 'code-snapshot'; projects: CodeProjectView[]; running: RunView[] }
   | { type: 'code-result'; requestId: string; result?: string | undefined; error?: string | undefined }
+  /** Answer to a file tool's request. */
+  | { type: 'files-result'; requestId: string; result?: string | undefined; error?: string | undefined }
   | ControlHostRequest
   | PersonalityHostRequest
   | ActivityHostRequest
@@ -361,6 +364,8 @@ export type HostEvent =
   | { type: 'code'; requestId: string; op: CodeOp }
   /** VS Code minutes per project today, from window tracking. */
   | { type: 'code-minutes'; minutes: Record<string, number> }
+  /** A file tool asks main to list, search, read, move, organise, recycle or undo inside the chosen folders. */
+  | { type: 'files'; requestId: string; op: FileOp }
   | ControlHostEvent
   | PersonalityHostEvent
   | ActivityHostEvent

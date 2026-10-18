@@ -11,6 +11,7 @@ import { IC, type IdentityBridge, type IdentityView } from '../shared/identity.t
 import { LC, type LearningBridge, type LearningView } from '../shared/learning.ts'
 import { BC, type BackupBridge } from '../shared/backup.ts'
 import { KC, type CodeBridge, type CodeState } from '../shared/code.ts'
+import { FC, type FilesBridge, type FilesState } from '../shared/files.ts'
 import { NC, type NewsBridge, type NewsResult } from '../shared/news.ts'
 import { WC, type WakeBridge, type WakeView } from '../shared/wake.ts'
 import { PC, type PersonalityBridge, type PersonalityView } from '../shared/personality.ts'
@@ -207,3 +208,14 @@ const code: CodeBridge = {
 }
 
 contextBridge.exposeInMainWorld('code', code)
+
+const files: FilesBridge = {
+  state: () => ipcRenderer.invoke(FC.state),
+  pick: () => ipcRenderer.invoke(FC.pick),
+  remove: id => ipcRenderer.invoke(FC.remove, id),
+  setAccess: (id, access) => ipcRenderer.invoke(FC.setAccess, id, access),
+  undo: batchId => ipcRenderer.invoke(FC.undo, batchId),
+  reveal: path => ipcRenderer.invoke(FC.reveal, path),
+  onChanged: cb => subscribe<FilesState>(FC.changed, cb),
+}
+contextBridge.exposeInMainWorld('files', files)

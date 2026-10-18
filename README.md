@@ -34,6 +34,7 @@ pnpm learning:demo                  # learning and curiosity on a throwaway data
 pnpm eval:workflows --full          # 20 browser + 10 file tasks, outcomes checked by code (a few cents of API use)
 pnpm trial:skills                   # teach a task in conversation, then run it on request and on schedule (real key, throwaway data)
 pnpm trial:provider ollama <model>  # try any LLM provider: a reply and a tool call, on throwaway data
+pnpm trial:files                    # list, organise, undo, recycle and a taught file task, on throwaway folders
 pnpm dist                           # license inventory + unsigned Windows installer in apps/desktop/release
 ```
 
@@ -46,6 +47,8 @@ Talk normally in the console ("Ahmed ko kal quote bhejna hai, yaad rakhna"). The
 The window has a rail on the left, the conversation as a side panel next to it, and a broad canvas on the right (Home, News, Projects, Learning, Controls, Setup). The panel can be hidden from the rail, and it opens by itself when Atlas speaks up. Home shows presence, today's tasks, your code projects, the news with pictures and recent actions.
 
 News comes from public RSS feeds, refreshed every 30 minutes, with each story's own picture where the feed provides one. Pictures are fetched by the app and cached, so pages never load remote content. You can choose sources (News › Sources) and save stories for later (News › Saved). Sources on by default: Dawn, Express Tribune, BBC World, Dawn Business and The Verge. Optional: Geo News, BBC Technology and TechCrunch. Atlas can read the headlines to you ("aaj ki khabrein?").
+
+Files: Atlas looks after only the folders you add in Files, read-only until you allow organising. It can list, search and read text files, move, rename and copy, make folders, tidy loose files by type, month or year (plan first), and remove to the Recycle Bin (always asks). Nothing is overwritten or permanently deleted, and every change has Undo in Files. File routines are taught like any task ("every Friday tidy Downloads").
 
 ## Layout
 
