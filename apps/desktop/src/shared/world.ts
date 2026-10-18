@@ -72,10 +72,33 @@ export interface PlaceStatus {
   nearby: { kind: 'quake' | 'event'; id: string; title: string; km: number; time: number }[]
 }
 
+/** A GDACS disaster alert (UN/EC Global Disaster Alert and Coordination System). */
+export interface Disaster {
+  id: string
+  /** GDACS code: TC cyclone, FL flood, VO volcano, DR drought, WF wildfire, EQ earthquake. */
+  type: string
+  /** "Tropical cyclone", "Flood"… */
+  kind: string
+  name: string
+  alert: 'Green' | 'Orange' | 'Red'
+  country: string
+  /** e.g. "maximum wind speed of 194 km/h". */
+  severity: string
+  from: number
+  to: number
+  lat: number
+  lon: number
+  url: string
+}
+
+export const DISASTER_KIND: Record<string, string> = { TC: 'Tropical cyclone', FL: 'Flood', VO: 'Volcano', DR: 'Drought', WF: 'Wildfire', EQ: 'Earthquake' }
+
 export interface WorldSnapshot {
   places: PlaceStatus[]
   quakes: Quake[]
   events: NaturalEvent[]
+  /** Current GDACS alerts, red first. */
+  disasters: Disaster[]
   updatedAt: number | null
   /** Sources that failed on the last refresh, in plain words. */
   problems: string[]
@@ -277,10 +300,10 @@ export interface WorldBridge {
   onChanged(cb: (s: WorldSnapshot) => void): () => void
 }
 
-export const EMPTY_WORLD: WorldSnapshot = { places: [], quakes: [], events: [], updatedAt: null, problems: [] }
+export const EMPTY_WORLD: WorldSnapshot = { places: [], quakes: [], events: [], disasters: [], updatedAt: null, problems: [] }
 
 export const ATTRIBUTION =
-  'Weather and air quality: Open-Meteo.com (CC BY 4.0) · Earthquakes: USGS · Natural events: NASA EONET · News: GDELT Project · Flights: adsb.lol (ODbL) · Ships: AISStream · Cameras: TfL, Caltrans, Fintraffic, HK Transport Department, LTA Singapore · Satellites: CelesTrak · Map: OpenFreeMap, © OpenMapTiles, © OpenStreetMap contributors'
+  'Weather and air quality: Open-Meteo.com (CC BY 4.0) · Earthquakes: USGS · Natural events: NASA EONET · Disasters: GDACS (EC/UN) · News: GDELT Project · Flights: adsb.lol (ODbL) · Ships: AISStream · Cameras: TfL, Caltrans, Fintraffic, HK Transport Department, LTA Singapore · Satellites: CelesTrak · Map: OpenFreeMap, © OpenMapTiles, © OpenStreetMap contributors'
 
 /** Great-circle distance in km. */
 export const kmBetween = (a: { lat: number; lon: number }, b: { lat: number; lon: number }): number => {

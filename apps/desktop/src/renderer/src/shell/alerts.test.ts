@@ -37,6 +37,7 @@ describe('alerts timeline', () => {
         ],
         quakes: [],
         events: [],
+        disasters: [],
         updatedAt: now - 1000,
         problems: [],
       },

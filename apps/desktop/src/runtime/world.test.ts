@@ -33,6 +33,34 @@ const EVENTS = {
     { id: 'EONET_2', title: 'Tropical Cyclone 01P', link: 'https://eonet.gsfc.nasa.gov/2', categories: [{ id: 'severeStorms', title: 'Severe Storms' }], geometry: [{ date: '2026-10-16T06:00:00Z', type: 'Point', coordinates: [-163.3, -10.8] }] },
   ],
 }
+// GDACS EVENTS4APP, trimmed: a red flood 150 km from Lahore, a green fire nearby, an orange cyclone far away, a red quake (USGS covers quakes), an old one.
+const gd = (type: string, id: number, alert: string, lon: number, lat: number, name: string, current = 'true') => ({
+  type: 'Feature',
+  geometry: { type: 'Point', coordinates: [lon, lat] },
+  properties: {
+    eventtype: type,
+    eventid: id,
+    name,
+    alertlevel: alert,
+    iscurrent: current,
+    country: 'Pakistan',
+    fromdate: '2026-10-16T00:00:00',
+    todate: '2026-10-18T06:00:00',
+    url: { report: `https://www.gdacs.org/report.aspx?eventid=${id}` },
+    severitydata: { severitytext: type === 'TC' ? 'Hurricane/Typhoon > 74 mph (maximum wind speed of 194 km/h)' : 'Major flooding' },
+  },
+})
+const GDACS = {
+  type: 'FeatureCollection',
+  features: [
+    gd('WF', 1, 'Green', 74.2, 31.4, 'Forest fires in Pakistan'),
+    gd('FL', 2, 'Red', 73.0, 32.2, 'Flood in Punjab'),
+    gd('TC', 3, 'Orange', 142.3, 13.1, 'Tropical Cyclone CHAMPI-26'),
+    gd('EQ', 4, 'Red', 74.3, 31.5, 'Earthquake in Pakistan'),
+    gd('FL', 5, 'Red', 74.3, 31.5, 'Old flood', 'false'),
+    { type: 'Feature', geometry: { type: 'Polygon', coordinates: [] }, properties: { eventtype: 'FL', iscurrent: 'true' } },
+  ],
+}
 const NEWS = {
   articles: [
     { url: 'https://dawn.com/a', title: 'Smog returns to Lahore', seendate: '20261018T070000Z', domain: 'dawn.com', language: 'English' },
@@ -48,7 +76,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
-const setup = (overrides: Partial<Record<'geo' | 'weather' | 'air' | 'quakes' | 'events' | 'news', unknown>> = {}) => {
+const setup = (overrides: Partial<Record<'geo' | 'weather' | 'air' | 'quakes' | 'events' | 'news' | 'gdacs', unknown>> = {}) => {
   const dir = mkdtempSync(join(tmpdir(), 'atlas-world-'))
   dirs.push(dir)
   const clock = fixedClock(NOW)
@@ -62,6 +90,7 @@ const setup = (overrides: Partial<Record<'geo' | 'weather' | 'air' | 'quakes' | 
     if (url.includes('api.open-meteo.com')) return overrides.weather ?? WEATHER
     if (url.includes('earthquake.usgs.gov')) return overrides.quakes ?? QUAKES
     if (url.includes('eonet')) return overrides.events ?? EVENTS
+    if (url.includes('gdacs.org')) return overrides.gdacs ?? GDACS
     if (url.includes('gdeltproject')) return overrides.news ?? NEWS
     throw new Error(`unexpected ${url}`)
   }
@@ -184,6 +213,19 @@ describe('WorldWatch', () => {
     expect(items.filter(i => i.title.startsWith('Earthquake'))).toHaveLength(1)
     expect(items.find(i => i.title === 'Extreme weather in Lahore')!.instruction).toContain('up to 44°C')
     expect(watch.agenda(clock.now() + MINUTE)).toHaveLength(0)
+  })
+
+  it('raises an orange or red GDACS alert near a place once; not green, far, earthquake or old ones', async () => {
+    const { watch, clock } = setup()
+    await watch.addPlace('Lahore')
+    await watch.refresh()
+    const disasters = watch.agenda(clock.now()).filter(i => i.key.startsWith('world:disaster:'))
+    expect(disasters.map(i => i.title)).toEqual(['Flood near Lahore'])
+    expect(disasters[0]!.instruction).toContain('red alert for Flood in Punjab')
+    expect(disasters[0]!.priority).toBe(80)
+    // On the map: current points only, red first.
+    expect(watch.snapshot().disasters.map(d => d.name)).toEqual(['Flood in Punjab', 'Earthquake in Pakistan', 'Tropical Cyclone CHAMPI-26', 'Forest fires in Pakistan'])
+    expect(watch.snapshot().places[0]!.nearby.some(n => n.title === 'GDACS red alert: Flood in Punjab')).toBe(true)
   })
 
   it('answers the assistant in plain words, and watching places needs no confirmation', async () => {

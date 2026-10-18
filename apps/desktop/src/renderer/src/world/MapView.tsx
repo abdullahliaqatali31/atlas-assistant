@@ -417,8 +417,9 @@ export function MapView({
     if (!m || !ready) return
     put('quakes', data.quakes)
     put('events', data.events)
+    put('disasters', data.disasters)
     put('places', data.places)
-    setCounts(c => ({ ...c, places: data.places.features.length, quakes: data.quakes.features.length, events: data.events.features.length }))
+    setCounts(c => ({ ...c, places: data.places.features.length, quakes: data.quakes.features.length, events: data.events.features.length, disasters: data.disasters.features.length }))
     if (!fitted.current && data.places.features.length) {
       fitted.current = true
       const b = new maplibregl.LngLatBounds()

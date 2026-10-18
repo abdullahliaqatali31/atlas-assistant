@@ -5,7 +5,7 @@
  */
 import type { LayerSpecification } from 'maplibre-gl'
 
-export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras' | 'pins' | 'story'
+export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras' | 'pins' | 'story' | 'disasters'
 
 export interface LayerDef {
   id: LayerId
@@ -77,6 +77,38 @@ export const LAYERS: LayerDef[] = [
     source: 'events',
     pickRank: 5,
     draw: [{ id: 'events', type: 'circle', source: 'events', paint: { 'circle-radius': 5, 'circle-color': ['get', 'color'], 'circle-opacity': 0.85, 'circle-stroke-width': 1, 'circle-stroke-color': HALO } }],
+  },
+  {
+    id: 'disasters',
+    label: 'Disaster alerts (GDACS)',
+    kind: 'Disaster alert',
+    dot: '#f97316',
+    source: 'disasters',
+    pickRank: 4.5,
+    draw: [
+      {
+        id: 'disasters',
+        type: 'circle',
+        source: 'disasters',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['get', 'rank'], 0, 5, 2, 11],
+          'circle-color': ['get', 'color'],
+          'circle-opacity': 0.85,
+          'circle-stroke-width': ['interpolate', ['linear'], ['get', 'rank'], 0, 1, 2, 3],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-opacity': 0.8,
+        },
+      },
+      {
+        id: 'disaster-labels',
+        type: 'symbol',
+        source: 'disasters',
+        minzoom: 3,
+        filter: ['>=', ['get', 'rank'], 1],
+        layout: { 'text-field': ['get', 'title'], 'text-offset': [0, 1.3], 'text-size': 10, 'text-anchor': 'top', 'text-max-width': 12 },
+        paint: { 'text-color': '#fed7aa', 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+      },
+    ],
   },
   {
     id: 'satellites',

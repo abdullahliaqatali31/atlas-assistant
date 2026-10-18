@@ -43,9 +43,11 @@ export interface MapFilters {
   quakeMinMag: number
   /** Event categories to show; empty shows all. */
   eventTypes: string[]
+  /** 0 all, 1 orange and red, 2 red only. */
+  disasterMinAlert: number
 }
 
-export const DEFAULT_FILTERS: MapFilters = { militaryOnly: false, shipTypes: [], quakeMinMag: 4, eventTypes: [] }
+export const DEFAULT_FILTERS: MapFilters = { militaryOnly: false, shipTypes: [], quakeMinMag: 4, eventTypes: [], disasterMinAlert: 0 }
 
 export const readFilters = (): MapFilters => {
   try {
@@ -55,6 +57,7 @@ export const readFilters = (): MapFilters => {
       shipTypes: Array.isArray(raw.shipTypes) ? raw.shipTypes.filter((v): v is string => typeof v === 'string') : [],
       quakeMinMag: typeof raw.quakeMinMag === 'number' && raw.quakeMinMag >= 4 && raw.quakeMinMag <= 8 ? raw.quakeMinMag : 4,
       eventTypes: Array.isArray(raw.eventTypes) ? raw.eventTypes.filter((v): v is string => typeof v === 'string') : [],
+      disasterMinAlert: raw.disasterMinAlert === 1 || raw.disasterMinAlert === 2 ? raw.disasterMinAlert : 0,
     }
   } catch {
     return DEFAULT_FILTERS
@@ -80,6 +83,8 @@ export const layerFilter = (id: LayerId, f: MapFilters): FilterSpecification | n
       return f.quakeMinMag > 4 ? ['>=', ['get', 'mag'], f.quakeMinMag] : null
     case 'events':
       return f.eventTypes.length ? ['in', ['get', 'category'], ['literal', f.eventTypes]] : null
+    case 'disasters':
+      return f.disasterMinAlert ? ['>=', ['get', 'rank'], f.disasterMinAlert] : null
     default:
       return null
   }
@@ -96,6 +101,8 @@ export const passes = (id: LayerId, props: Record<string, string | number>, f: M
       return Number(props.mag ?? 0) >= f.quakeMinMag
     case 'events':
       return !f.eventTypes.length || f.eventTypes.includes(String(props.category))
+    case 'disasters':
+      return Number(props.rank ?? 0) >= f.disasterMinAlert
     default:
       return true
   }

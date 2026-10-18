@@ -5,13 +5,13 @@
  * "Now" (what is happening in that layer) and "Filters". A pin keeps the
  * panel open. Hidden on narrow windows, where the Layers button remains.
  */
-import { Activity, Flame, MapPin, Newspaper, Pin, PinOff, Plane, Satellite, Ship, Video, type LucideIcon } from 'lucide-react'
+import { Activity, Flame, TriangleAlert, MapPin, Newspaper, Pin, PinOff, Plane, Satellite, Ship, Video, type LucideIcon } from 'lucide-react'
 import type * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { CAMERA_COVERAGE, kmBetween, type WorldSnapshot } from '../../../shared/world.ts'
 import { ago } from '../Jarvis.tsx'
-import { SHIP_COLOR, type FC } from './geo.ts'
+import { ALERT_COLOR, SHIP_COLOR, type FC } from './geo.ts'
 import { layerDef, type LayerId } from './layers.ts'
 import { CHOKEPOINTS, mixBy, passes as passesFilter, topBy, type MapFilters } from './panels.ts'
 import { aboveNow, nextPasses, type Observer } from './passes.ts'
@@ -28,6 +28,7 @@ export const RAIL: { id: LayerId; icon: LucideIcon; key: string }[] = [
   { id: 'cameras', icon: Video, key: 'c' },
   { id: 'quakes', icon: Activity, key: 'q' },
   { id: 'events', icon: Flame, key: 'e' },
+  { id: 'disasters', icon: TriangleAlert, key: 'd' },
   { id: 'pins', icon: Pin, key: 'm' },
 ]
 
@@ -188,6 +189,26 @@ function NowTab({ id, ctx }: { id: LayerId; ctx: RailContext }) {
         <Empty>No open natural events right now.</Empty>
       )
     }
+    case 'disasters': {
+      const mix = mixBy(fc, 'alert')
+      return all.length ? (
+        <>
+          <p className="flex gap-3 px-1.5 text-[11px] text-muted">
+            {mix.map(m => (
+              <span key={m.value}>
+                <span className="mr-1 inline-block size-1.5 rounded-full" style={{ background: ALERT_COLOR[m.value] }} />
+                {m.value} <span className="font-mono text-text">{m.count}</span>
+              </span>
+            ))}
+          </p>
+          <Label>Most serious</Label>
+          <ul>{topBy(fc, 'rank', 10).map(f => <Row key={String(f.properties.id)} f={f} kind={id} right={String(f.properties.kind ?? '')} onFocus={ctx.onFocus} />)}</ul>
+          <p className="mt-1 px-1.5 text-[10px] text-muted">GDACS, the UN and European Commission disaster alert system: green is routine, orange and red need attention.</p>
+        </>
+      ) : (
+        <Empty>No current disaster alerts.</Empty>
+      )
+    }
     case 'pins':
       return all.length ? <ul>{all.map(f => <Row key={String(f.properties.id)} f={f} kind={id} onFocus={ctx.onFocus} />)}</ul> : <Empty>No pins. Atlas drops them when telling you about places.</Empty>
   }
@@ -281,6 +302,19 @@ function FiltersTab({ id, ctx }: { id: LayerId; ctx: RailContext }) {
         <Empty>No events to filter right now.</Empty>
       )
     }
+    case 'disasters':
+      return (
+        <div className="px-1.5 text-xs">
+          <p className="hud-label mb-1">Show</p>
+          <div className="flex gap-1">
+            {(['All', 'Orange and red', 'Red only'] as const).map((label, n) => (
+              <button key={label} type="button" className={`map-chip h-7 px-2.5 ${f.disasterMinAlert === n ? 'border-accent text-accent' : ''}`} onClick={() => ctx.onFilters({ ...f, disasterMinAlert: n })}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )
     default:
       return <Empty>No filters for this layer.</Empty>
   }

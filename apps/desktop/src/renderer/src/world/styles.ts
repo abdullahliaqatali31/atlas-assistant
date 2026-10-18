@@ -140,6 +140,7 @@ const LAYER_CREDIT: Record<string, CreditPart> = {
   satellites: { text: 'CelesTrak', href: 'https://celestrak.org' },
   quakes: { text: 'USGS' },
   events: { text: 'NASA EONET' },
+  disasters: { text: 'GDACS', href: 'https://www.gdacs.org' },
 }
 
 /**

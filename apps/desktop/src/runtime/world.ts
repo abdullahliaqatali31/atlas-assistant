@@ -15,9 +15,11 @@ import { DAY, HOUR, MINUTE } from '@assistant/shared'
 
 import {
   aqiLevel,
+  DISASTER_KIND,
   kmBetween,
   weatherSummary,
   type AirNow,
+  type Disaster,
   type NaturalEvent,
   type NewsItem,
   type Place,
@@ -118,6 +120,39 @@ export const parseEvents = (j: unknown): NaturalEvent[] => {
   return out
 }
 
+const ALERT_RANK = { Red: 0, Orange: 1, Green: 2 } as const
+
+/** GDACS current alerts (EVENTS4APP GeoJSON): points only, red first, then newest. */
+export const parseGdacs = (j: unknown): Disaster[] => {
+  const features = (j as { features?: { geometry?: { type?: string; coordinates?: unknown }; properties?: Record<string, unknown> }[] })?.features ?? []
+  const out: Disaster[] = []
+  for (const f of features) {
+    const p = f.properties ?? {}
+    if (f.geometry?.type !== 'Point' || !Array.isArray(f.geometry.coordinates) || String(p.iscurrent) !== 'true') continue
+    const [lon, lat] = f.geometry.coordinates as number[]
+    const alert = p.alertlevel === 'Red' || p.alertlevel === 'Orange' ? p.alertlevel : 'Green'
+    const type = String(p.eventtype ?? '')
+    const report = (p.url as { report?: unknown } | undefined)?.report
+    const sev = String((p.severitydata as { severitytext?: unknown } | undefined)?.severitytext ?? '')
+    out.push({
+      id: `${type}-${String(p.eventid ?? '')}`,
+      type,
+      kind: DISASTER_KIND[type] ?? 'Disaster',
+      name: String(p.name ?? DISASTER_KIND[type] ?? 'Disaster'),
+      alert,
+      country: String(p.country ?? ''),
+      // "Hurricane/Typhoon > 74 mph (maximum wind speed of 194 km/h)" → the part in brackets reads best.
+      severity: /\(([^)]+)\)/.exec(sev)?.[1] ?? sev,
+      from: Date.parse(`${String(p.fromdate ?? '')}Z`) || 0,
+      to: Date.parse(`${String(p.todate ?? '')}Z`) || 0,
+      lat: num(lat),
+      lon: num(lon),
+      url: typeof report === 'string' && report.startsWith('https://') ? report : '',
+    })
+  }
+  return out.sort((a, b) => ALERT_RANK[a.alert] - ALERT_RANK[b.alert] || b.to - a.to)
+}
+
 export const parseNews = (j: unknown): NewsItem[] => {
   const arts = (j as { articles?: Record<string, unknown>[] })?.articles ?? []
   const seen = (s: string) => {
@@ -138,12 +173,15 @@ export const parseNews = (j: unknown): NewsItem[] => {
 /** A quake worth interrupting for: strong and near, or felt-strong and very near. */
 export const quakeMatters = (q: Quake, km: number) => (q.mag >= 4.5 && km <= 400) || (q.mag >= 3.5 && km <= 100) || (q.mag >= 6.5 && km <= 1000)
 const EVENT_RADIUS: Record<string, number> = { 'Severe Storms': 500, Wildfires: 150, Volcanoes: 200, Floods: 200 }
+/** How far an orange or red GDACS alert reaches a watched place, by type. */
+export const DISASTER_RADIUS: Record<string, number> = { TC: 800, FL: 300, VO: 300, DR: 500, WF: 150 }
 
 // ── the watch ────────────────────────────────────────────────────────
 
 export class WorldWatch {
   private quakes: Quake[] = []
   private events: NaturalEvent[] = []
+  private disasters: Disaster[] = []
   private weather = new Map<string, WeatherNow>()
   private air = new Map<string, AirNow>()
   private news = new Map<string, { items: NewsItem[]; at: number }>()
@@ -271,6 +309,9 @@ export class WorldWatch {
       attempt('earthquakes (USGS)', async () => {
         this.quakes = parseQuakes(await this.get('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson'))
       }),
+      attempt('disaster alerts (GDACS)', async () => {
+        this.disasters = parseGdacs(await this.get('https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP'))
+      }),
       attempt('natural events (NASA EONET)', async () => {
         this.events = parseEvents(await this.get('https://eonet.gsfc.nasa.gov/api/v3/events?status=open&days=10'))
       }),
@@ -328,6 +369,11 @@ export class WorldWatch {
       const km = kmBetween(p, e)
       if (km <= (EVENT_RADIUS[e.category] ?? 200) * 2) out.push({ kind: 'event', id: e.id, title: `${e.category}: ${e.title}`, km: Math.round(km), time: e.time })
     }
+    for (const d of this.disasters) {
+      if (d.alert === 'Green' || d.type === 'EQ') continue
+      const km = kmBetween(p, d)
+      if (km <= (DISASTER_RADIUS[d.type] ?? 300) * 2) out.push({ kind: 'event', id: d.id, title: `GDACS ${d.alert.toLowerCase()} alert: ${d.name}`, km: Math.round(km), time: d.to })
+    }
     return out.sort((a, b) => a.km - b.km).slice(0, 8)
   }
 
@@ -346,6 +392,7 @@ export class WorldWatch {
       places: this.places().map(p => ({ place: p, weather: this.weather.get(p.id) ?? null, air: this.air.get(p.id) ?? null, news: this.newsFor(p), nearby: this.nearbyOf(p) })),
       quakes: this.quakes.filter(q => q.mag >= 4).slice(0, 200),
       events: this.events.slice(0, 300),
+      disasters: this.disasters.slice(0, 300),
       updatedAt: this.updatedAt,
       problems: this.problems,
     }
@@ -402,6 +449,19 @@ export class WorldWatch {
         const km = kmBetween(p, e)
         if (now - e.time > 2 * DAY || km > (EVENT_RADIUS[e.category] ?? 0)) continue
         add(`event:${e.id}:${p.id}`, `${e.category} near ${p.name}`, `NASA EONET reports "${e.title}" (${e.category}) about ${Math.round(km)} km from ${p.name}. Tell the owner in one sentence and offer more detail.`, `EONET: ${e.title}, ${Math.round(km)} km.`, 55)
+      }
+      for (const d of this.disasters) {
+        // Earthquakes come from USGS above; green alerts are routine.
+        if (d.alert === 'Green' || d.type === 'EQ') continue
+        const km = kmBetween(p, d)
+        if (km > (DISASTER_RADIUS[d.type] ?? 300)) continue
+        add(
+          `disaster:${d.id}:${d.alert}:${p.id}`,
+          `${d.kind} near ${p.name}`,
+          `GDACS (the UN/EC disaster alert system) has a ${d.alert.toLowerCase()} alert for ${d.name}${d.country ? ` (${d.country})` : ''}, about ${Math.round(km)} km from ${p.name}${d.severity ? `: ${d.severity}` : ''}. Tell the owner calmly in one or two sentences; if it is a cyclone or flood heading their way, suggest checking local advice. Offer to show it on the World map.`,
+          `GDACS ${d.alert}: ${d.name}, ${Math.round(km)} km from ${p.name}.`,
+          d.alert === 'Red' ? 80 : 60,
+        )
       }
       const a = this.air.get(p.id)
       const today = new Date(now).toISOString().slice(0, 10)

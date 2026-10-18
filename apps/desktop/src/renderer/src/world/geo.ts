@@ -18,7 +18,9 @@ export interface FC {
   features: { type: 'Feature'; geometry: PointGeometry; properties: Record<string, string | number> }[]
 }
 
-export const toFeatures = (w: WorldSnapshot): { places: FC; quakes: FC; events: FC } => ({
+export const ALERT_COLOR: Record<string, string> = { Red: '#ef4444', Orange: '#f97316', Green: '#22c55e' }
+
+export const toFeatures = (w: WorldSnapshot): { places: FC; quakes: FC; events: FC; disasters: FC } => ({
   places: { type: 'FeatureCollection', features: w.places.map(p => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.place.lon, p.place.lat] }, properties: { id: p.place.id, title: p.place.name } })) },
   quakes: {
     type: 'FeatureCollection',
@@ -27,6 +29,14 @@ export const toFeatures = (w: WorldSnapshot): { places: FC; quakes: FC; events: 
   events: {
     type: 'FeatureCollection',
     features: w.events.map(e => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lon, e.lat] }, properties: { title: `${e.category}: ${e.title}`, category: e.category, color: EVENT_COLOR[e.category] ?? '#94a3b8', url: e.url, time: e.time } })),
+  },
+  disasters: {
+    type: 'FeatureCollection',
+    features: (w.disasters ?? []).map(d => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [d.lon, d.lat] },
+      properties: { id: d.id, title: d.name, kind: d.kind, alert: d.alert, rank: d.alert === 'Red' ? 2 : d.alert === 'Orange' ? 1 : 0, color: ALERT_COLOR[d.alert] ?? '#22c55e', country: d.country, severity: d.severity, url: d.url, time: d.to },
+    })),
   },
 })
 
