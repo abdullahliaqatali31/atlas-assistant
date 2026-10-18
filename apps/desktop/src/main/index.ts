@@ -401,7 +401,7 @@ const ui = new UiService({
 })
 ui.register()
 /** The live world at the owner's places, for the World page. */
-const world = new WorldService({ handle, toRenderer, toRuntime: msg => supervisor.world(msg), requireOwner: () => requireOwner() })
+const world = new WorldService({ handle, toRenderer, toRuntime: msg => supervisor.world(msg), requireOwner: () => requireOwner(), log: (level, message) => log(level, message) })
 world.register()
 handle(CH.send, arg => {
   const text = parseMessage(arg)
@@ -652,6 +652,7 @@ if (!app.requestSingleInstanceLock()) {
     globalShortcut.unregisterAll()
     sessionWatch?.stop()
     desktop.stop()
+    world.ships.stop()
     void supervisor.stop().finally(() => {
       tray?.destroy()
       app.quit()

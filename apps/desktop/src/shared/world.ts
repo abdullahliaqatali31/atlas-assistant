@@ -122,6 +122,69 @@ export const parseFlights = (j: unknown): Flight[] => {
     }))
 }
 
+/** A vessel broadcasting AIS, from AISStream. */
+export interface Ship {
+  mmsi: number
+  name: string
+  lat: number
+  lon: number
+  /** Knots. */
+  speed: number
+  /** Course over ground, degrees. */
+  course: number
+  heading: number | null
+  /** AIS ship type code. */
+  type: number | null
+  category: string
+  destination: string
+  /** Metres. */
+  length: number | null
+  at: number
+}
+
+export interface ShipsResult {
+  status: 'no-key' | 'off' | 'connecting' | 'live' | 'error'
+  ships: Ship[]
+  message: string | null
+}
+
+/** AIS ship type codes, grouped the way people talk about ships. */
+export const shipCategory = (type: number | null): string => {
+  if (type === null) return 'Other'
+  if (type === 30) return 'Fishing'
+  if (type === 31 || type === 32 || type === 52) return 'Tug'
+  if (type === 35) return 'Military'
+  if (type === 36 || type === 37) return 'Pleasure'
+  if (type >= 40 && type <= 49) return 'High speed'
+  if (type >= 60 && type <= 69) return 'Passenger'
+  if (type >= 70 && type <= 79) return 'Cargo'
+  if (type >= 80 && type <= 89) return 'Tanker'
+  if (type >= 50 && type <= 59) return 'Service'
+  return 'Other'
+}
+
+/** One AISStream message as a partial update to a ship, or null if it is not a ship message. */
+export const parseAisMessage = (m: unknown): { mmsi: number; fields: Partial<Ship> & { at: number } } | null => {
+  const o = m as { MessageType?: string; MetaData?: Record<string, unknown>; Message?: Record<string, Record<string, unknown>> }
+  const meta = o?.MetaData
+  const mmsi = typeof meta?.MMSI === 'number' ? meta.MMSI : null
+  if (!meta || !mmsi || !o.MessageType || !o.Message) return null
+  const body = o.Message[o.MessageType] ?? {}
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const at = Date.parse(String(meta.time_utc ?? '').replace(' +0000 UTC', 'Z').replace(/ (\d{2}:\d{2}:\d{2})\.\d+/, 'T$1')) || Date.now()
+  const name = String(meta.ShipName ?? body.Name ?? '').trim()
+  if (o.MessageType === 'ShipStaticData') {
+    const dim = body.Dimension as Record<string, unknown> | undefined
+    const length = dim ? (n(dim.A) ?? 0) + (n(dim.B) ?? 0) : null
+    return { mmsi, fields: { name, type: n(body.Type), destination: String(body.Destination ?? '').trim(), length: length || null, at } }
+  }
+  const lat = n(meta.latitude) ?? n(body.Latitude)
+  const lon = n(meta.longitude) ?? n(body.Longitude)
+  if (lat === null || lon === null || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null
+  const heading = n(body.TrueHeading)
+  return { mmsi, fields: { name: name || undefined, lat, lon, speed: n(body.Sog) ?? 0, course: n(body.Cog) ?? 0, heading: heading !== null && heading < 360 ? heading : null, at } as Partial<Ship> & { at: number } }
+}
+
 export type WorldOp = { kind: 'add'; name: string } | { kind: 'remove'; id: string } | { kind: 'refresh' }
 
 export const WLD = {
@@ -131,6 +194,8 @@ export const WLD = {
   refresh: 'world:refresh',
   flights: 'world:flights',
   satellites: 'world:satellites',
+  ships: 'world:ships',
+  shipsKey: 'world:ships-key',
   changed: 'world:changed',
 } as const
 
@@ -143,13 +208,17 @@ export interface WorldBridge {
   flights(lat: number, lon: number, dist: number): Promise<Flight[]>
   /** The ISS, stations and the brightest satellites. */
   satellites(): Promise<SatelliteElements[]>
+  /** Ships in the area on screen (needs the owner's free AISStream key). */
+  ships(box: { south: number; west: number; north: number; east: number }): Promise<ShipsResult>
+  /** Saves the AISStream key in the Windows credential store (null removes it). */
+  setShipsKey(key: string | null): Promise<{ hasKey: boolean }>
   onChanged(cb: (s: WorldSnapshot) => void): () => void
 }
 
 export const EMPTY_WORLD: WorldSnapshot = { places: [], quakes: [], events: [], updatedAt: null, problems: [] }
 
 export const ATTRIBUTION =
-  'Weather and air quality: Open-Meteo.com (CC BY 4.0) · Earthquakes: USGS · Natural events: NASA EONET · News: GDELT Project · Flights: adsb.lol (ODbL) · Satellites: CelesTrak · Map: OpenFreeMap, © OpenMapTiles, © OpenStreetMap contributors'
+  'Weather and air quality: Open-Meteo.com (CC BY 4.0) · Earthquakes: USGS · Natural events: NASA EONET · News: GDELT Project · Flights: adsb.lol (ODbL) · Ships: AISStream · Satellites: CelesTrak · Map: OpenFreeMap, © OpenMapTiles, © OpenStreetMap contributors'
 
 /** Great-circle distance in km. */
 export const kmBetween = (a: { lat: number; lon: number }, b: { lat: number; lon: number }): number => {

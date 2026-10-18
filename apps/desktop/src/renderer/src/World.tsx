@@ -5,7 +5,7 @@ import maplibregl, { type GeoJSONSource, type Map as MapLibre } from 'maplibre-g
 import * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
-import { ATTRIBUTION, EMPTY_WORLD, type Flight, type PlaceStatus, type WorldSnapshot } from '../../shared/world.ts'
+import { ATTRIBUTION, EMPTY_WORLD, type Flight, type PlaceStatus, type Ship, type ShipsResult, type WorldSnapshot } from '../../shared/world.ts'
 import { ago, useNow } from './Jarvis.tsx'
 
 const cleanError = (err: unknown) =>
@@ -42,19 +42,20 @@ const toFeatures = (w: WorldSnapshot): { places: FC; quakes: FC; events: FC } =>
   },
 })
 
-type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'satellites'
+type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites'
 const LAYERS: { id: LayerId; label: string; dot: string }[] = [
   { id: 'places', label: 'Your places', dot: '#22d3ee' },
   { id: 'flights', label: 'Flights (live)', dot: '#fbbf24' },
+  { id: 'ships', label: 'Ships (live)', dot: '#34d399' },
   { id: 'satellites', label: 'Satellites & ISS', dot: '#c084fc' },
   { id: 'quakes', label: 'Earthquakes (M4+)', dot: '#f97316' },
   { id: 'events', label: 'Fires, storms, volcanoes, floods', dot: '#ef4444' },
 ]
 /** Map layers drawn for each switch. */
-const MAP_LAYERS: Record<LayerId, string[]> = { places: ['places', 'place-labels'], quakes: ['quakes'], events: ['events'], flights: ['flights', 'flight-labels'], satellites: ['satellites', 'satellite-labels'] }
+const MAP_LAYERS: Record<LayerId, string[]> = { places: ['places', 'place-labels'], quakes: ['quakes'], events: ['events'], flights: ['flights', 'flight-labels'], ships: ['ships', 'ship-labels'], satellites: ['satellites', 'satellite-labels'] }
 
 const readLayers = (): Record<LayerId, boolean> => {
-  const all = { places: true, quakes: true, events: true, flights: true, satellites: true }
+  const all = { places: true, quakes: true, events: true, flights: true, ships: true, satellites: true }
   try {
     return { ...all, ...(JSON.parse(localStorage.getItem('world.layers') ?? '{}') as Partial<Record<LayerId, boolean>>) }
   } catch {
@@ -78,6 +79,42 @@ const planeIcon = () => {
   g.fill()
   return g.getImageData(0, 0, size, size)
 }
+
+/** A boat seen from above, pointing up; tinted per type. */
+const shipIcon = () => {
+  const size = 32
+  const c = document.createElement('canvas')
+  c.width = c.height = size
+  const g = c.getContext('2d')!
+  g.fillStyle = '#fff'
+  g.beginPath()
+  g.moveTo(16, 3)
+  g.lineTo(23, 13)
+  g.lineTo(22, 29)
+  g.lineTo(10, 29)
+  g.lineTo(9, 13)
+  g.closePath()
+  g.fill()
+  return g.getImageData(0, 0, size, size)
+}
+
+const SHIP_COLOR: Record<string, string> = { Cargo: '#34d399', Tanker: '#f87171', Passenger: '#60a5fa', Fishing: '#fbbf24', Military: '#ef4444', Tug: '#a3e635', Pleasure: '#f0abfc', 'High speed': '#22d3ee', Service: '#a3a3a3', Other: '#94a3b8' }
+
+const shipFeatures = (ships: Ship[]): FC => ({
+  type: 'FeatureCollection',
+  features: ships.map(v => ({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [v.lon, v.lat] },
+    properties: {
+      title: `${v.name || `MMSI ${v.mmsi}`} · ${v.category}`,
+      detail: `${v.speed.toFixed(1)} kn${v.destination ? ` · to ${v.destination}` : ''}${v.length ? ` · ${v.length} m` : ''}`,
+      name: v.name,
+      rotation: v.heading ?? v.course,
+      color: SHIP_COLOR[v.category] ?? SHIP_COLOR.Other!,
+      time: v.at,
+    },
+  })),
+})
 
 const flightFeatures = (flights: Flight[]): FC => ({
   type: 'FeatureCollection',
@@ -121,6 +158,9 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
   const [layers, setLayers] = useState(readLayers)
   const [counts, setCounts] = useState<Partial<Record<LayerId, number>>>({})
   const [flightNote, setFlightNote] = useState('')
+  const [shipState, setShipState] = useState<{ status: ShipsResult['status']; message: string | null }>({ status: 'off', message: null })
+  const [shipKey, setShipKey] = useState('')
+  const [shipKeyError, setShipKeyError] = useState('')
   const data = useMemo(() => toFeatures(world), [world])
   const dataRef = useRef(data)
   dataRef.current = data
@@ -135,7 +175,8 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
       const d = dataRef.current
       const empty: FC = { type: 'FeatureCollection', features: [] }
       m.addImage('plane', planeIcon(), { sdf: true })
-      for (const [id, fc] of [['quakes', d.quakes], ['events', d.events], ['places', d.places], ['flights', empty], ['satellites', empty]] as const) m.addSource(id, { type: 'geojson', data: fc })
+      m.addImage('ship', shipIcon(), { sdf: true })
+      for (const [id, fc] of [['quakes', d.quakes], ['events', d.events], ['places', d.places], ['flights', empty], ['ships', empty], ['satellites', empty]] as const) m.addSource(id, { type: 'geojson', data: fc })
       m.addLayer({
         id: 'quakes',
         type: 'circle',
@@ -156,6 +197,21 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
         source: 'satellites',
         layout: { 'text-field': ['get', 'label'], 'text-offset': [0, 1.1], 'text-size': 11, 'text-anchor': 'top' },
         paint: { 'text-color': '#e9d5ff', 'text-halo-color': '#0b1020', 'text-halo-width': 1.5 },
+      })
+      m.addLayer({
+        id: 'ships',
+        type: 'symbol',
+        source: 'ships',
+        layout: { 'icon-image': 'ship', 'icon-size': 0.45, 'icon-rotate': ['get', 'rotation'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true },
+        paint: { 'icon-color': ['get', 'color'], 'icon-halo-color': '#0b1020', 'icon-halo-width': 1 },
+      })
+      m.addLayer({
+        id: 'ship-labels',
+        type: 'symbol',
+        source: 'ships',
+        minzoom: 8,
+        layout: { 'text-field': ['get', 'name'], 'text-offset': [0, 1.1], 'text-size': 10, 'text-anchor': 'top' },
+        paint: { 'text-color': '#a7f3d0', 'text-halo-color': '#0b1020', 'text-halo-width': 1.5 },
       })
       m.addLayer({
         id: 'flights',
@@ -180,7 +236,7 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
         layout: { 'text-field': ['get', 'title'], 'text-offset': [0, 1.3], 'text-size': 12, 'text-anchor': 'top' },
         paint: { 'text-color': '#e2e8f0', 'text-halo-color': '#0b1020', 'text-halo-width': 1.5 },
       })
-      for (const layer of ['quakes', 'events', 'places', 'flights', 'satellites']) {
+      for (const layer of ['quakes', 'events', 'places', 'flights', 'ships', 'satellites']) {
         m.on('click', layer, e => {
           const f = e.features?.[0]
           if (!f) return
@@ -289,6 +345,52 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
     }
   }, [ready, layers.flights])
 
+  // Ships in the area on screen (the owner's AISStream key): when the map stops and every 8 s.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !layers.ships) return
+    let stopped = false
+    const load = async () => {
+      if (stopped || document.hidden) return
+      const b = m.getBounds()
+      const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
+      try {
+        const r = await window.world.ships({ south: clamp(b.getSouth(), 90), north: clamp(b.getNorth(), 90), west: clamp(b.getWest(), 180), east: clamp(b.getEast(), 180) })
+        if (stopped) return
+        setShipState({ status: r.status, message: r.message })
+        ;(m.getSource('ships') as GeoJSONSource | undefined)?.setData(shipFeatures(r.ships))
+        setCounts(c => ({ ...c, ships: r.ships.length }))
+      } catch {
+        setShipState({ status: 'error', message: 'Ships unavailable right now.' })
+      }
+    }
+    void load()
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const onMove = () => {
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => void load(), 600)
+    }
+    m.on('moveend', onMove)
+    const timer = setInterval(() => void load(), 8_000)
+    return () => {
+      stopped = true
+      m.off('moveend', onMove)
+      clearInterval(timer)
+      if (debounce) clearTimeout(debounce)
+    }
+  }, [ready, layers.ships, shipState.status === 'no-key'])
+
+  const saveShipKey = async (key: string | null) => {
+    setShipKeyError('')
+    try {
+      await window.world.setShipsKey(key)
+      setShipKey('')
+      setShipState({ status: key ? 'connecting' : 'no-key', message: null })
+    } catch (err) {
+      setShipKeyError(err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Could not save the key.')
+    }
+  }
+
   // Satellites: orbit elements once, positions every 2 s.
   useEffect(() => {
     const m = map.current
@@ -331,8 +433,33 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
           </label>
         ))}
         {layers.flights && flightNote && <p className="pl-6 text-[10px] text-muted">{flightNote}</p>}
-        <p className="pl-6 text-[10px] text-muted" title="Ships need a free AISStream key; public traffic cameras are mostly in the US, UK and EU">
-          Ships and cameras: not yet
+        {layers.ships && shipState.status === 'connecting' && <p className="pl-6 text-[10px] text-muted">Connecting to AISStream… ships appear as they report</p>}
+        {layers.ships && (shipState.status === 'no-key' || (shipState.status === 'error' && /key/i.test(shipState.message ?? ''))) && (
+          <form
+            className="space-y-1 pl-6 pt-1"
+            onSubmit={e => {
+              e.preventDefault()
+              if (shipKey.trim()) void saveShipKey(shipKey.trim())
+            }}
+          >
+            <p className="text-[10px] text-muted">
+              {shipState.message ?? 'Ships need your free AISStream key:'}{' '}
+              <a href="https://aisstream.io/apikeys" target="_blank" rel="noreferrer" className="text-accent underline">
+                get one
+              </a>
+            </p>
+            <div className="flex gap-1">
+              <input type="password" autoComplete="off" spellCheck={false} className="field min-w-0 flex-1 py-0.5 text-[11px]" placeholder="Paste AISStream key" value={shipKey} onChange={e => setShipKey(e.target.value)} aria-label="AISStream API key" />
+              <button type="submit" className="btn h-6 px-2 text-[11px]" disabled={!shipKey.trim()}>
+                Save
+              </button>
+            </div>
+            {shipKeyError && <p className="text-[10px] text-danger">{shipKeyError}</p>}
+          </form>
+        )}
+        {layers.ships && shipState.status === 'error' && !/key/i.test(shipState.message ?? '') && <p className="pl-6 text-[10px] text-warm">{shipState.message}</p>}
+        <p className="pl-6 text-[10px] text-muted" title="Public traffic cameras are mostly in the US, UK and EU">
+          Cameras: not yet
         </p>
       </fieldset>
     </div>

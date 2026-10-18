@@ -5,7 +5,10 @@
 import { randomUUID } from 'node:crypto'
 
 import type { HostEvent, HostRequest } from '../shared/ipc.ts'
+import { osCredentialStore } from '@assistant/runtime'
+
 import { EMPTY_WORLD, parseFlights, WLD, type Flight, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
+import { ShipFeed } from './ships.ts'
 
 const TIMEOUT_MS = 60_000
 const FLIGHTS_TTL = 15_000
@@ -27,6 +30,7 @@ export class WorldService {
   private flightsPausedUntil = 0
   private lastFlights: Flight[] = []
   private satellites: { at: number; list: SatelliteElements[] } | null = null
+  readonly ships = new ShipFeed({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
 
   constructor(
     private readonly deps: {
@@ -34,6 +38,7 @@ export class WorldService {
       toRenderer: (channel: string, payload: unknown) => void
       toRuntime: (msg: Extract<HostRequest, { type: 'world-op' }>) => boolean
       requireOwner: () => void
+      log?: (level: 'info' | 'warn', message: string) => void
     },
   ) {}
 
@@ -127,5 +132,16 @@ export class WorldService {
     // Live layers for the map: fetched here (the page may only load map tiles), politely cached.
     handle(WLD.flights, (lat, lon) => this.flights(lat, lon, 250))
     handle(WLD.satellites, () => this.satelliteList())
+    handle(WLD.ships, raw => {
+      const b = raw as { south?: unknown; west?: unknown; north?: unknown; east?: unknown } | null
+      const ok = (v: unknown, max: number) => typeof v === 'number' && Math.abs(v) <= max
+      if (!b || !ok(b.south, 90) || !ok(b.north, 90) || !ok(b.west, 180) || !ok(b.east, 180)) throw new Error('Bad map area.')
+      return this.ships.view({ south: b.south as number, north: b.north as number, west: b.west as number, east: b.east as number })
+    })
+    handle(WLD.shipsKey, owner(key => {
+      if (key !== null && typeof key !== 'string') throw new Error('Paste the key.')
+      this.ships.setKey(key as string | null)
+      return { hasKey: this.ships.hasKey }
+    }))
   }
 }

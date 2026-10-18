@@ -23,6 +23,8 @@ export const SECRET_NAMES = [
   'ELEVENLABS_API_KEY',
   'AZURE_SPEECH_KEY',
   'PLAYWRIGHT_MCP_EXTENSION_TOKEN',
+  // Map data.
+  'AISSTREAM_API_KEY',
 ] as const
 export type SecretName = (typeof SECRET_NAMES)[number]
 

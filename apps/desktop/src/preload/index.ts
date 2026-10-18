@@ -253,6 +253,8 @@ const world: WorldBridge = {
   refresh: () => ipcRenderer.invoke(WLD.refresh),
   flights: (lat, lon, dist) => ipcRenderer.invoke(WLD.flights, lat, lon, dist),
   satellites: () => ipcRenderer.invoke(WLD.satellites),
+  ships: box => ipcRenderer.invoke(WLD.ships, box),
+  setShipsKey: key => ipcRenderer.invoke(WLD.shipsKey, key),
   onChanged: cb => subscribe<WorldSnapshot>(WLD.changed, cb),
 }
 contextBridge.exposeInMainWorld('world', world)
