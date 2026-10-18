@@ -1,16 +1,20 @@
 @import 'tailwindcss';
 
 /*
- * Glass design system.
- * The window sits on Windows 11 acrylic; the page adds a deep tint and a slow
+ * Design system: themes as tokens.
+ * The window sits on Windows 11 acrylic; each theme adds its tint and a slow
  * aurora so the glass reads the same where acrylic is unavailable.
- * Rules: one level of glass (no glass inside glass), 1px light edges,
- * cyan as the single interactive accent, amber only for "attention".
+ * Rules: one level of glass (no glass inside glass), 1px light edges, one
+ * interactive accent per theme, amber only for "attention", rose for danger.
+ * Themes: :root[data-theme] (midnight, graphite, aurora, daylight), an accent
+ * override [data-accent], and [data-lite="true"] for light machines.
  */
-:root {
+:root,
+:root[data-theme='midnight'] {
   color-scheme: dark;
   --tint: rgb(6 10 20 / 0.34);
   --bg: rgb(4 8 18 / 0.55);
+  --solid: #070c18;
   --surface: rgb(255 255 255 / 0.045);
   --surface-strong: rgb(255 255 255 / 0.09);
   --border: rgb(255 255 255 / 0.10);
@@ -18,38 +22,111 @@
   --text: #e8f1ff;
   --muted: #8ea0bd;
   --accent: #22d3ee;
-  --accent-soft: rgb(34 211 238 / 0.16);
   --accent-fg: #04121a;
   --warm: #fbbf24;
   --danger: #fb7185;
   --ok: #34d399;
   --shadow: 0 10px 40px rgb(0 0 0 / 0.35);
   --blur: 18px;
+  --glow-1: rgb(34 211 238 / 0.18);
+  --glow-2: rgb(59 130 246 / 0.16);
+  --glow-3: rgb(251 191 36 / 0.07);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --tint: rgb(238 243 252 / 0.38);
-    --bg: rgb(255 255 255 / 0.55);
-    --surface: rgb(255 255 255 / 0.42);
-    --surface-strong: rgb(255 255 255 / 0.75);
-    --border: rgb(15 23 42 / 0.10);
-    --edge: rgb(255 255 255 / 0.85);
-    --text: #0b1324;
-    --muted: #55637a;
-    --accent: #0891b2;
-    --accent-soft: rgb(8 145 178 / 0.12);
-    --accent-fg: #ffffff;
-    --warm: #b45309;
-    --danger: #e11d48;
-    --ok: #059669;
-    --shadow: 0 10px 30px rgb(15 23 42 / 0.10);
-  }
+:root[data-theme='graphite'] {
+  color-scheme: dark;
+  --tint: rgb(12 13 16 / 0.55);
+  --bg: rgb(14 15 18 / 0.7);
+  --solid: #0e1013;
+  --surface: rgb(255 255 255 / 0.04);
+  --surface-strong: rgb(255 255 255 / 0.08);
+  --border: rgb(255 255 255 / 0.08);
+  --edge: rgb(255 255 255 / 0.12);
+  --text: #e7e9ee;
+  --muted: #9097a3;
+  --accent: #60a5fa;
+  --accent-fg: #061223;
+  --shadow: 0 10px 34px rgb(0 0 0 / 0.4);
+  --glow-1: rgb(96 165 250 / 0.08);
+  --glow-2: rgb(148 163 184 / 0.06);
+  --glow-3: transparent;
+}
+
+:root[data-theme='aurora'] {
+  color-scheme: dark;
+  --tint: rgb(8 8 24 / 0.4);
+  --bg: rgb(10 8 28 / 0.6);
+  --solid: #0a0820;
+  --surface: rgb(255 255 255 / 0.05);
+  --surface-strong: rgb(255 255 255 / 0.1);
+  --border: rgb(196 181 253 / 0.14);
+  --edge: rgb(255 255 255 / 0.18);
+  --text: #f1edff;
+  --muted: #a49cc4;
+  --accent: #a78bfa;
+  --accent-fg: #12062b;
+  --glow-1: rgb(167 139 250 / 0.22);
+  --glow-2: rgb(236 72 153 / 0.14);
+  --glow-3: rgb(34 211 238 / 0.1);
+}
+
+:root[data-theme='daylight'] {
+  color-scheme: light;
+  --tint: rgb(238 243 252 / 0.5);
+  --bg: rgb(255 255 255 / 0.7);
+  --solid: #f4f7fb;
+  --surface: rgb(255 255 255 / 0.55);
+  --surface-strong: rgb(255 255 255 / 0.85);
+  --border: rgb(15 23 42 / 0.10);
+  --edge: rgb(255 255 255 / 0.9);
+  --text: #0b1324;
+  --muted: #55637a;
+  --accent: #0891b2;
+  --accent-fg: #ffffff;
+  --warm: #b45309;
+  --danger: #e11d48;
+  --ok: #059669;
+  --shadow: 0 10px 30px rgb(15 23 42 / 0.10);
+  --glow-1: rgb(8 145 178 / 0.12);
+  --glow-2: rgb(59 130 246 / 0.10);
+  --glow-3: rgb(251 191 36 / 0.08);
+}
+
+/* One accent across the app, whatever the theme. */
+:root[data-accent='cyan'] { --accent: #22d3ee; --accent-fg: #04121a; }
+:root[data-accent='blue'] { --accent: #60a5fa; --accent-fg: #061223; }
+:root[data-accent='violet'] { --accent: #a78bfa; --accent-fg: #12062b; }
+:root[data-accent='emerald'] { --accent: #34d399; --accent-fg: #03140d; }
+:root[data-accent='amber'] { --accent: #fbbf24; --accent-fg: #1f1402; }
+:root[data-accent='rose'] { --accent: #fb7185; --accent-fg: #26060c; }
+:root[data-theme='daylight'][data-accent] { --accent-fg: #ffffff; }
+
+/* Derived from the accent, so every theme and accent stays consistent. */
+:root {
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* Lite: no blur, no drifting light, lighter shadows. For modest machines. */
+:root[data-lite='true'] {
+  --blur: 0px;
+  --shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+}
+:root[data-lite='true'] .glass {
+  backdrop-filter: none;
+  background: color-mix(in srgb, var(--solid) 92%, transparent);
+}
+:root[data-lite='true'] .aurora,
+:root[data-lite='true'] .scanline::after {
+  display: none;
+}
+:root[data-lite='true'] * {
+  transition-duration: 0ms !important;
 }
 
 @theme inline {
   --color-bg: var(--bg);
+  --color-solid: var(--solid);
   --color-surface: var(--surface);
   --color-surface-strong: var(--surface-strong);
   --color-border: var(--border);
@@ -110,9 +187,9 @@ body {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(40% 35% at 20% 15%, rgb(34 211 238 / 0.18), transparent 70%),
-    radial-gradient(35% 30% at 85% 80%, rgb(59 130 246 / 0.16), transparent 70%),
-    radial-gradient(25% 25% at 70% 20%, rgb(251 191 36 / 0.07), transparent 70%);
+    radial-gradient(40% 35% at 20% 15%, var(--glow-1), transparent 70%),
+    radial-gradient(35% 30% at 85% 80%, var(--glow-2), transparent 70%),
+    radial-gradient(25% 25% at 70% 20%, var(--glow-3), transparent 70%);
   filter: blur(20px);
   animation: aurora-drift 40s ease-in-out infinite alternate;
 }
@@ -179,7 +256,7 @@ body {
     border-color: transparent;
     color: var(--accent-fg);
     font-weight: 600;
-    box-shadow: 0 0 18px rgb(34 211 238 / 0.35);
+    box-shadow: 0 0 18px var(--accent-glow);
   }
   .btn-primary:hover:not(:disabled) {
     background: var(--accent);
@@ -282,7 +359,7 @@ input[type='checkbox']:checked,
 input[type='radio']:checked {
   background: var(--accent);
   border-color: transparent;
-  box-shadow: 0 0 10px rgb(34 211 238 / 0.4);
+  box-shadow: 0 0 10px var(--accent-glow);
 }
 input[type='checkbox']:checked::before,
 input[type='radio']:checked::before {
@@ -318,7 +395,7 @@ input[type='radio']:disabled {
   background: rgb(148 163 184 / 0.28) padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(34 211 238 / 0.55) padding-box;
+  background: var(--accent-glow) padding-box;
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
@@ -359,7 +436,7 @@ input[type='radio']:disabled {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, rgb(34 211 238 / 0.12), transparent);
+  background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
   animation: scan 2.4s linear infinite;
 }
 

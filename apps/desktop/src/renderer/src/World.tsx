@@ -312,6 +312,9 @@ function WorldMap({ world }: { world: WorldSnapshot }) {
         m.on('mouseleave', layer, () => (m.getCanvas().style.cursor = ''))
       }
       setReady(true)
+      // The stage may still be settling its size when the map starts (lazy page, opening drawer): measure again.
+      m.resize()
+      setTimeout(() => m.resize(), 300)
     })
     const resize = new ResizeObserver(() => m.resize())
     resize.observe(box.current)

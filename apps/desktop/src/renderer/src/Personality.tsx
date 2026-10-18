@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { parseName, type PersonalityProfile } from '@assistant/shared'
 
 import type { PersonalityView } from '../../shared/personality.ts'
+import { AppearanceSettings } from './Appearance.tsx'
 import { SecuritySettings } from './Security.tsx'
 
 const cleanError = (err: unknown, fallback: string) =>
@@ -20,7 +21,7 @@ const LANGUAGES: { value: PersonalityProfile['language']; label: string }[] = [
 
 /** Setup with Connection (keys, voice) and Personality side by side as sections. */
 export function SetupSections({ connection, onClose }: { connection: ReactNode; onClose: () => void }) {
-  const [section, setSection] = useState<'connection' | 'personality' | 'security'>('connection')
+  const [section, setSection] = useState<'appearance' | 'connection' | 'personality' | 'security'>('appearance')
   const [assistantName, setAssistantName] = useState('')
   useEffect(() => {
     void window.personality.get().then(v => setAssistantName(v?.profile.assistantName ?? ''), () => undefined)
@@ -36,7 +37,7 @@ export function SetupSections({ connection, onClose }: { connection: ReactNode; 
           aria-label="Setup section"
           className="flex rounded-xl border border-border bg-bg p-0.5"
         >
-          {(['connection', 'personality', 'security'] as const).map(s => (
+          {(['appearance', 'connection', 'personality', 'security'] as const).map(s => (
             <ToggleGroup.Item key={s} value={s} className="rounded-md px-2 py-0.5 text-xs capitalize text-muted transition-colors hover:text-text data-[state=on]:bg-accent-soft data-[state=on]:text-accent">
               {s === 'security' ? 'Security & backups' : s}
             </ToggleGroup.Item>
@@ -46,7 +47,7 @@ export function SetupSections({ connection, onClose }: { connection: ReactNode; 
           Close
         </button>
       </nav>
-      <div className="min-h-0 flex-1 overflow-y-auto">{section === 'connection' ? connection : section === 'personality' ? <PersonalitySettings onRunIntro={onClose} /> : <SecuritySettings assistantName={assistantName} />}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{section === 'appearance' ? <AppearanceSettings /> : section === 'connection' ? connection : section === 'personality' ? <PersonalitySettings onRunIntro={onClose} /> : <SecuritySettings assistantName={assistantName} />}</div>
     </div>
   )
 }
