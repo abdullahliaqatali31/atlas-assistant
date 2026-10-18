@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { ATTRIBUTION, EMPTY_WORLD, type PlaceStatus, type WorldSnapshot } from '../../shared/world.ts'
 import { ago, useNow } from './Jarvis.tsx'
 import { cleanError } from './world/geo.ts'
+import type { NearbyItem } from './world/hover.ts'
 import { Inspector, type Selected } from './world/Inspector.tsx'
 import { MapView, type MapPrefs } from './world/MapView.tsx'
 import { readMapPrefs, saveMapPrefs, styleCredit } from './world/styles.ts'
@@ -21,6 +22,7 @@ export function WorldPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<Selected | null>(null)
+  const [nearby, setNearby] = useState<NearbyItem[]>([])
   const [focus, setFocus] = useState<{ lngLat: [number, number]; zoom?: number; n: number } | null>(null)
   const [info, setInfo] = useState(false)
   const [prefs, setPrefs] = useState<MapPrefs>(readMapPrefs)
@@ -110,7 +112,7 @@ export function WorldPage() {
 
   return (
     <div className="@container relative h-full min-h-0">
-      <MapView world={world} selected={selected} onSelect={setSelected} focus={focus} prefs={prefs} onPrefs={changePrefs} toolbar={toolbar} />
+      <MapView world={world} selected={selected} onSelect={setSelected} focus={focus} prefs={prefs} onPrefs={changePrefs} toolbar={toolbar} now={now} onNearby={setNearby} />
 
       {error && (
         <p role="alert" className="ask-pop glass absolute left-1/2 top-14 z-20 max-w-[90%] -translate-x-1/2 rounded-lg bg-solid/90 px-3 py-1.5 text-xs text-danger">
@@ -142,6 +144,11 @@ export function WorldPage() {
             world={world}
             now={now}
             onClose={() => setSelected(null)}
+            nearby={nearby}
+            onPick={n => {
+              setSelected({ kind: n.kind, lngLat: n.lngLat, props: n.props })
+              setFocus({ lngLat: n.lngLat, zoom: 8, n: Date.now() })
+            }}
             onCentre={() => setFocus({ lngLat: selected.lngLat, zoom: selected.kind === 'places' ? 7 : 8, n: Date.now() })}
             onRemovePlace={id => {
               setSelected(null)

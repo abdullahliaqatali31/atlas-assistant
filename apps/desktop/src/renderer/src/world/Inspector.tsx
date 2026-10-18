@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { PlaceStatus, WorldSnapshot } from '../../../shared/world.ts'
 import { ago } from '../Jarvis.tsx'
 import { ASK_EVENT } from '../shell/live.ts'
+import { hoverInfo, type NearbyItem } from './hover.ts'
 import { layerDef, type LayerId } from './layers.ts'
 
 /** Something picked on the map, shown in the Inspector. */
@@ -125,11 +126,31 @@ function CameraDetail({ id, source }: { id: string; source: string }) {
 }
 
 /** The Inspector: what was picked on the map, with what you can do about it. */
-export function Inspector({ sel, world, now, onClose, onCentre, onRemovePlace }: { sel: Selected; world: WorldSnapshot; now: number; onClose: () => void; onCentre: () => void; onRemovePlace: (id: string) => void }) {
+export function Inspector({
+  sel,
+  world,
+  now,
+  nearby,
+  onPick,
+  onClose,
+  onCentre,
+  onRemovePlace,
+}: {
+  sel: Selected
+  world: WorldSnapshot
+  now: number
+  nearby: NearbyItem[]
+  onPick: (item: NearbyItem) => void
+  onClose: () => void
+  onCentre: () => void
+  onRemovePlace: (id: string) => void
+}) {
   const p = sel.props
-  const { kind: kindLabel, dot } = layerDef(sel.kind)
+  const { kind: kindLabel } = layerDef(sel.kind)
+  const info = hoverInfo(sel.kind, p, world, now)
+  const dot = info.color
   const place = sel.kind === 'places' ? world.places.find(x => x.place.id === p.id) : undefined
-  const title = place ? place.place.name : String(p.title ?? kindLabel)
+  const title = place ? place.place.name : info.title
   const [lon, lat] = sel.lngLat
   const where = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`
   const ask = () => {
@@ -144,7 +165,7 @@ export function Inspector({ sel, world, now, onClose, onCentre, onRemovePlace }:
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted">
             <span className="size-1.5 rounded-full" style={{ background: dot }} aria-hidden />
-            {kindLabel}
+            {info.kind.toLowerCase()}
           </p>
           <h3 className="truncate text-sm font-medium" title={title}>
             {title}
@@ -162,10 +183,32 @@ export function Inspector({ sel, world, now, onClose, onCentre, onRemovePlace }:
           <CameraDetail id={String(p.id)} source={String(p.source ?? '')} />
         ) : (
           <>
-            {p.detail && <p>{String(p.detail)}</p>}
+            {info.facts
+              .filter(f => !f.endsWith(' ago'))
+              .map(f => (
+                <p key={f}>{f}</p>
+              ))}
             {p.time && <p className="text-xs text-muted">{ago(Number(p.time), now)} · {new Date(Number(p.time)).toLocaleString()}</p>}
             {(sel.kind === 'flights' || sel.kind === 'satellites' || sel.kind === 'ships') && <p className="text-[11px] text-muted">Position when you picked it; it keeps moving on the map.</p>}
           </>
+        )}
+        {nearby.length > 0 && (
+          <section>
+            <p className="hud-label mb-1">Around it on the map</p>
+            <ul className="space-y-0.5">
+              {nearby.map(n => (
+                <li key={`${n.kind}:${n.title}:${n.lngLat.join(',')}`}>
+                  <button type="button" className="flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left text-xs hover:bg-surface" onClick={() => onPick(n)}>
+                    <span className="size-1.5 shrink-0 rounded-full" style={{ background: layerDef(n.kind).dot }} aria-hidden />
+                    <span className="min-w-0 flex-1 truncate" title={n.title} dir="auto">
+                      {n.title}
+                    </span>
+                    <span className="shrink-0 font-mono text-[10px] text-muted">{n.km < 1 ? '<1' : n.km} km</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
         <p className="font-mono text-[10px] text-muted">{where}</p>
       </div>

@@ -11,9 +11,12 @@ import * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { CAMERA_COVERAGE, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
-import { cleanError, flightFeatures, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC, type PointGeometry } from './geo.ts'
+import { cleanError, flightFeatures, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
+import { nearbyItems, type NearbyItem } from './hover.ts'
+import { HoverCard } from './HoverCard.tsx'
 import type { Selected } from './Inspector.tsx'
 import { LAYERS, OWN_SOURCES, PICKABLE, readLayers, SELECTED_LAYER, type LayerId } from './layers.ts'
+import { pickAt } from './pick.ts'
 import { BASE_URL, carryOverlays, composeStyle, STYLES, type StyleId } from './styles.ts'
 
 export interface MapPrefs {
@@ -59,6 +62,8 @@ export function MapView({
   prefs,
   onPrefs,
   toolbar,
+  now,
+  onNearby,
 }: {
   world: WorldSnapshot
   selected: Selected | null
@@ -67,6 +72,9 @@ export function MapView({
   prefs: MapPrefs
   onPrefs: (p: MapPrefs) => void
   toolbar: (controls: ReactNode) => ReactNode
+  now: number
+  /** What sits near the picked item, nearest first. */
+  onNearby: (items: NearbyItem[]) => void
 }) {
   const box = useRef<HTMLDivElement>(null)
   const map = useRef<MapLibre | null>(null)
@@ -86,6 +94,12 @@ export function MapView({
   const data = useMemo(() => toFeatures(world), [world])
   const dataRef = useRef(data)
   dataRef.current = data
+  /** What each layer shows right now, for "Nearby" in the Inspector. */
+  const latest = useRef<Partial<Record<LayerId, FC>>>({})
+  const put = (id: LayerId, fc: FC) => {
+    latest.current[id] = fc
+    ;(map.current?.getSource(id) as GeoJSONSource | undefined)?.setData(fc)
+  }
   const selectRef = useRef(onSelect)
   selectRef.current = onSelect
   // Lite mode keeps the map flat: the globe costs the most GPU.
@@ -113,20 +127,8 @@ export function MapView({
 
       // One click handler: the top-most item near the pointer, or nothing (closes the Inspector).
       m.on('click', e => {
-        const live = PICKABLE.filter(p => m.getLayer(p.layer) && m.getLayoutProperty(p.layer, 'visibility') !== 'none')
-        const r = 6
-        const hits = m.queryRenderedFeatures(
-          [
-            [e.point.x - r, e.point.y - r],
-            [e.point.x + r, e.point.y + r],
-          ],
-          { layers: live.map(p => p.layer) },
-        )
-        const order = (id: string) => PICKABLE.findIndex(p => p.layer === id)
-        const hit = hits.sort((a, b) => order(a.layer.id) - order(b.layer.id))[0]
-        if (!hit) return selectRef.current(null)
-        const kind = PICKABLE.find(p => p.layer === hit.layer.id)!.kind
-        selectRef.current({ kind, lngLat: (hit.geometry as unknown as PointGeometry).coordinates as [number, number], props: hit.properties as Record<string, string | number> })
+        const hit = pickAt(m, e.point)
+        selectRef.current(hit ? { kind: hit.kind, lngLat: hit.lngLat, props: hit.props } : null)
       })
       for (const { layer } of PICKABLE) {
         m.on('mouseenter', layer, () => (m.getCanvas().style.cursor = 'pointer'))
@@ -175,6 +177,13 @@ export function MapView({
     })
   }, [selected, ready])
 
+  // What else is on the map around the picked item, at the moment it was picked.
+  const nearbyRef = useRef(onNearby)
+  nearbyRef.current = onNearby
+  useEffect(() => {
+    nearbyRef.current(selected ? nearbyItems(selected.lngLat, latest.current, { radiusKm: selected.kind === 'places' ? 150 : 100, exclude: selected }) : [])
+  }, [selected])
+
   // "Centre on map" and picking a place from the toolbar; the view before it is kept for Back.
   useEffect(() => {
     const m = map.current
@@ -197,9 +206,9 @@ export function MapView({
   useEffect(() => {
     const m = map.current
     if (!m || !ready) return
-    ;(m.getSource('quakes') as GeoJSONSource | undefined)?.setData(data.quakes)
-    ;(m.getSource('events') as GeoJSONSource | undefined)?.setData(data.events)
-    ;(m.getSource('places') as GeoJSONSource | undefined)?.setData(data.places)
+    put('quakes', data.quakes)
+    put('events', data.events)
+    put('places', data.places)
     setCounts(c => ({ ...c, places: data.places.features.length, quakes: data.quakes.features.length, events: data.events.features.length }))
     if (!fitted.current && data.places.features.length) {
       fitted.current = true
@@ -237,7 +246,7 @@ export function MapView({
       if (stopped || document.hidden) return
       if (m.getZoom() < 4) {
         setFlightNote('Zoom in to see flights')
-        ;(m.getSource('flights') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: [] })
+        put('flights', { type: 'FeatureCollection', features: [] })
         setCounts(c => ({ ...c, flights: 0 }))
         return
       }
@@ -245,7 +254,7 @@ export function MapView({
       try {
         const flights = await window.world.flights(c.lat, c.lng, 250)
         if (stopped) return
-        ;(m.getSource('flights') as GeoJSONSource | undefined)?.setData(flightFeatures(flights))
+        put('flights', flightFeatures(flights))
         setCounts(x => ({ ...x, flights: flights.length }))
         setFlightNote('Within 250 nm of the map centre')
       } catch {
@@ -281,7 +290,7 @@ export function MapView({
         const r = await window.world.ships({ south: clamp(b.getSouth(), 90), north: clamp(b.getNorth(), 90), west: clamp(b.getWest(), 180), east: clamp(b.getEast(), 180) })
         if (stopped) return
         setShipState({ status: r.status, message: r.message })
-        ;(m.getSource('ships') as GeoJSONSource | undefined)?.setData(shipFeatures(r.ships))
+        put('ships', shipFeatures(r.ships))
         setCounts(c => ({ ...c, ships: r.ships.length }))
       } catch {
         setShipState({ status: 'error', message: 'Ships unavailable right now.' })
@@ -321,7 +330,7 @@ export function MapView({
     let stopped = false
     void window.world.cameras().then(list => {
       if (stopped) return
-      ;(m.getSource('cameras') as GeoJSONSource | undefined)?.setData({
+      put('cameras', {
         type: 'FeatureCollection',
         features: list.map(c => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lon, c.lat] }, properties: { id: c.id, title: c.name, source: c.source } })),
       })
@@ -340,7 +349,7 @@ export function MapView({
     let sats: { name: string; rec: satellite.SatRec }[] = []
     const draw = () => {
       if (stopped || document.hidden || !sats.length) return
-      ;(m.getSource('satellites') as GeoJSONSource | undefined)?.setData(satelliteFeatures(sats, new Date()))
+      put('satellites', satelliteFeatures(sats, new Date()))
     }
     void window.world.satellites().then(list => {
       sats = list.flatMap(s => {
@@ -399,6 +408,7 @@ export function MapView({
   return (
     <div className="relative h-full w-full overflow-hidden">
       <div ref={box} className="h-full w-full" aria-label="World map" role="region" />
+      <HoverCard map={map.current} ready={ready} world={world} now={now} />
       {toolbar(controls)}
       {styleError && <p className="glass absolute bottom-16 left-2 z-10 rounded-lg bg-solid/85 px-2 py-1 text-[11px] text-warm">{styleError}</p>}
       {open === 'style' && (

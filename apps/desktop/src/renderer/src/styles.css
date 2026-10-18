@@ -465,6 +465,47 @@ input[type='radio']:disabled {
   transform-origin: bottom center;
 }
 
+/* World map hover: the leader line draws out of the item, then the card opens at its end. */
+@keyframes leader-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+@keyframes hover-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes ring-in {
+  from {
+    opacity: 0;
+    r: 3;
+  }
+}
+.hover-leader {
+  stroke-dasharray: 1;
+  animation: leader-draw 160ms ease-out both;
+}
+.hover-ring {
+  animation: ring-in 160ms ease-out both;
+}
+.hover-card {
+  animation: hover-in 140ms ease-out 110ms both;
+}
+:root[data-lite='true'] .hover-leader,
+:root[data-lite='true'] .hover-ring,
+:root[data-lite='true'] .hover-card {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hover-leader,
+  .hover-ring,
+  .hover-card {
+    animation: none;
+  }
+}
+
 /* Inputs that sit inside their own styled box (Ask bar, palette) show focus on the box instead. */
 .bare-input:focus-visible {
   outline: none;
