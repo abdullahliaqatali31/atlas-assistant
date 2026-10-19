@@ -67,6 +67,7 @@ export const hoverInfo = (kind: LayerId, props: Props, world: WorldSnapshot, now
     case 'pins':
       return { ...base, title, facts: [str(props.note)].filter(Boolean) }
     case 'flights':
+      return { ...base, title, facts: [str(props.routeFrom) && str(props.routeTo) ? `${str(props.routeFrom)} → ${str(props.routeTo)}${str(props.airline) ? ` · ${str(props.airline)}` : ''}` : '', str(props.detail), time && `Seen ${time} ago`].filter(Boolean) }
     case 'ships':
     case 'satellites':
       return { ...base, title, facts: [str(props.detail), time && `Seen ${time} ago`].filter(Boolean) }

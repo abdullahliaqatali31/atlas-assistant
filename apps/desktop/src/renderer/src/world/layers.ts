@@ -352,8 +352,43 @@ export const TRAIL_LAYER: LayerSpecification = {
   paint: { 'line-color': ['coalesce', ['get', 'color'], '#22d3ee'], 'line-width': ['coalesce', ['get', 'width'], 2], 'line-opacity': 0.85, 'line-dasharray': [2, 1.5] },
 }
 
+/** A picked flight's route: flown (solid), still to go (dashed), and its two airports. */
+export const ROUTE_LAYERS: LayerSpecification[] = [
+  {
+    id: 'route-flown',
+    type: 'line',
+    source: 'route',
+    filter: ['==', ['get', 'part'], 'flown'],
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#fbbf24', 'line-width': 2, 'line-opacity': 0.9 },
+  },
+  {
+    id: 'route-ahead',
+    type: 'line',
+    source: 'route',
+    filter: ['==', ['get', 'part'], 'ahead'],
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#fde68a', 'line-width': 1.5, 'line-opacity': 0.75, 'line-dasharray': [2, 2] },
+  },
+  {
+    id: 'route-airports',
+    type: 'circle',
+    source: 'route',
+    filter: ['==', ['geometry-type'], 'Point'],
+    paint: { 'circle-radius': 4, 'circle-color': '#0b1220', 'circle-stroke-width': 2, 'circle-stroke-color': '#fbbf24' },
+  },
+  {
+    id: 'route-labels',
+    type: 'symbol',
+    source: 'route',
+    filter: ['==', ['geometry-type'], 'Point'],
+    layout: { 'text-field': ['get', 'code'], 'text-size': 11, 'text-offset': [0, 1.1], 'text-anchor': 'top', 'text-allow-overlap': true },
+    paint: { 'text-color': '#fde68a', 'text-halo-color': 'rgba(0,0,0,0.85)', 'text-halo-width': 1.2 },
+  },
+]
+
 /** Every source the map owns (kept across style switches). */
-export const OWN_SOURCES: ReadonlySet<string> = new Set([...LAYERS.flatMap(l => [l.source, ...(l.extraSources ?? [])]), 'selected', 'trail'])
+export const OWN_SOURCES: ReadonlySet<string> = new Set([...LAYERS.flatMap(l => [l.source, ...(l.extraSources ?? [])]), 'selected', 'trail', 'route'])
 
 /** Layers that can be clicked, top priority first. */
 export const PICKABLE = [...LAYERS].sort((a, b) => a.pickRank - b.pickRank).map(l => ({ layer: l.pickLayer ?? l.draw[0]!.id, kind: l.id }))

@@ -49,6 +49,27 @@ export function FlightDetail({ p }: { p: Props }) {
         badge={emergency ? `EMERGENCY · ${emergency.toUpperCase()}` : military ? 'MILITARY' : 'CIVILIAN'}
         badgeTone={emergency ? 'border-danger text-danger' : military ? 'border-red-400/60 text-red-300' : 'border-accent/50 text-accent'}
       />
+      {str(p.routeFrom) && str(p.routeTo) && (
+        <div className="rounded-lg bg-surface px-3 py-2">
+          <div className="flex items-baseline justify-between gap-2 font-mono">
+            <span className="text-lg" title={str(p.routeFromName) ?? undefined}>{str(p.routeFrom)}</span>
+            <Plane className="size-3.5 shrink-0 text-warm" aria-hidden />
+            <span className="text-lg" title={str(p.routeToName) ?? undefined}>{str(p.routeTo)}</span>
+          </div>
+          <div className="mt-1 h-1 overflow-hidden rounded-full bg-border" aria-label="Progress along the route">
+            <div className="h-full rounded-full bg-warm" style={{ width: `${Math.round((num(p.routeProgress) ?? 0) * 100)}%` }} />
+          </div>
+          <div className="mt-1 flex justify-between gap-2 text-[11px] text-muted">
+            <span className="truncate">{str(p.routeFromCity)}</span>
+            <span className="truncate text-right">{str(p.routeToCity)}</span>
+          </div>
+          {(str(p.airline) || num(p.routeKmLeft) !== null) && (
+            <p className="mt-1 text-[11px] text-muted">
+              {[str(p.airline), num(p.routeKmLeft) !== null ? `${fmt(num(p.routeKmLeft)!)} km to go` : null].filter(Boolean).join(' · ')}
+            </p>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
         <Field label="Type" wide>
           {str(p.typeName) ?? str(p.type) ?? 'Unknown'}
@@ -63,7 +84,7 @@ export function FlightDetail({ p }: { p: Props }) {
         <Field label="Squawk">{str(p.squawk) ?? '—'}</Field>
         <Field label="ICAO hex">{str(p.hex)?.toUpperCase() ?? '—'}</Field>
       </div>
-      <p className="text-[10px] text-muted">Live from ADS-B (adsb.lol); the path shows where it flew while the map was open.</p>
+      <p className="text-[10px] text-muted">Live from ADS-B (adsb.lol){str(p.routeFrom) ? '; route from adsbdb.com by callsign (the planned route, not a live flight plan)' : '; the path shows where it flew while the map was open'}.</p>
     </div>
   )
 }

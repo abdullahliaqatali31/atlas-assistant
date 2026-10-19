@@ -9,6 +9,7 @@ import { osCredentialStore } from '@assistant/runtime'
 
 import { EMPTY_WORLD, parseFlights, parseOpenSky, WLD, type Flight, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
 import { CameraDirectory } from './cameras.ts'
+import { FlightSweep, RouteBook } from './flights.ts'
 import { ShipFeed } from './ships.ts'
 import { WebcamService } from './webcams.ts'
 
@@ -45,6 +46,8 @@ export class WorldService {
   private satellites: { at: number; list: SatelliteElements[] } | null = null
   private readonly cams = new CameraDirectory((level, message) => this.deps.log?.(level, message))
   readonly webcams = new WebcamService({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
+  private readonly sweep = new FlightSweep({ getJson, log: (level, message) => this.deps.log?.(level, message) })
+  private readonly routes = new RouteBook({ getJson })
   readonly ships = new ShipFeed({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
 
   constructor(
@@ -203,6 +206,18 @@ export class WorldService {
     handle(WLD.refresh, owner(() => this.ask({ kind: 'refresh' })))
     // Live layers for the map: fetched here (the page may only load map tiles), politely cached.
     handle(WLD.flights, (lat, lon, dist, fill) => this.flights(lat, lon, typeof dist === 'number' && Number.isFinite(dist) ? dist : 250, fill === true))
+    handle(WLD.flightsArea, async raw => {
+      const b = raw as { south?: unknown; west?: unknown; north?: unknown; east?: unknown } | null
+      const ok = (v: unknown, max: number) => typeof v === 'number' && Math.abs(v) <= max
+      if (!b || !ok(b.south, 90) || !ok(b.north, 90) || !ok(b.west, 180) || !ok(b.east, 180)) throw new Error('Bad map area.')
+      const box = { south: b.south as number, north: b.north as number, west: b.west as number, east: b.east as number }
+      const area = this.sweep.view(box)
+      // Military aircraft worldwide on top, as at every zoom.
+      const seen = new Set(area.flights.map(f => f.hex))
+      const military = (await this.military()).filter(f => !seen.has(f.hex))
+      return { ...area, flights: [...area.flights, ...military] }
+    })
+    handle(WLD.flightRoute, callsign => (typeof callsign === 'string' ? this.routes.get(callsign) : null))
     handle(WLD.satellites, () => this.satelliteList())
     handle(WLD.ships, raw => {
       const b = raw as { south?: unknown; west?: unknown; north?: unknown; east?: unknown } | null

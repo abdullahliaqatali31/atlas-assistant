@@ -157,6 +157,85 @@ export const parseFlights = (j: unknown): Flight[] => {
     }))
 }
 
+/** A map area, in degrees. */
+export interface GeoBox {
+  south: number
+  west: number
+  north: number
+  east: number
+}
+
+/** adsb.lol answers up to this far around a point; the sweep covers a wide view with circles this size. */
+export const SWEEP_RADIUS_NM = 1000
+/** Degrees of latitude between sweep rows: a 22° square fits inside a 1000 nm circle. */
+const SWEEP_STEP = 22
+
+/**
+ * The 1000 nm areas that cover a map view, on a fixed world grid (so a pan
+ * reuses what was already fetched). Rows run from 55° S to 77° N, where the
+ * aircraft are; each row's longitude step is set at its equator-side edge,
+ * where a degree of longitude is widest, so the circles always overlap.
+ */
+export const sweepCells = (box: GeoBox): { id: string; lat: number; lon: number }[] => {
+  const cells: { id: string; lat: number; lon: number }[] = []
+  for (let i = 0; i < 7; i++) {
+    const lat = -55 + SWEEP_STEP * i
+    if (lat - SWEEP_STEP / 2 > box.north || lat + SWEEP_STEP / 2 < box.south) continue
+    const edge = Math.max(0, Math.abs(lat) - SWEEP_STEP / 2)
+    const count = Math.ceil(360 / (SWEEP_STEP / Math.cos((edge * Math.PI) / 180)))
+    const step = 360 / count
+    for (let j = 0; j < count; j++) {
+      const lon = -180 + step * (j + 0.5)
+      if (lon + step / 2 < box.west || lon - step / 2 > box.east) continue
+      cells.push({ id: `${i}:${j}`, lat, lon: Math.round(lon * 1000) / 1000 })
+    }
+  }
+  return cells
+}
+
+/** Aircraft over a wide view, filled in area by area. */
+export interface FlightsArea {
+  flights: Flight[]
+  /** Areas that cover the view, and how many have been fetched so far. */
+  cells: number
+  loaded: number
+}
+
+export interface Airport {
+  iata: string
+  icao: string
+  name: string
+  city: string
+  country: string
+  lat: number
+  lon: number
+}
+
+/** Where a flight is going, by its callsign (adsbdb.com). */
+export interface FlightRoute {
+  callsign: string
+  airline: string
+  origin: Airport
+  destination: Airport
+}
+
+/** adsbdb's { response: { flightroute: { origin, destination, airline } } }; null when it has no route. */
+export const parseAdsbdbRoute = (j: unknown): FlightRoute | null => {
+  const r = (j as { response?: { flightroute?: Record<string, unknown> } })?.response?.flightroute
+  if (!r || typeof r !== 'object') return null
+  const airport = (a: unknown): Airport | null => {
+    const o = a as Record<string, unknown> | null
+    if (!o || typeof o.latitude !== 'number' || typeof o.longitude !== 'number' || Math.abs(o.latitude) > 90 || Math.abs(o.longitude) > 180) return null
+    const str = (v: unknown) => (typeof v === 'string' ? v.slice(0, 80) : '')
+    return { iata: str(o.iata_code), icao: str(o.icao_code), name: str(o.name), city: str(o.municipality), country: str(o.country_name), lat: o.latitude, lon: o.longitude }
+  }
+  const origin = airport(r.origin)
+  const destination = airport(r.destination)
+  if (!origin || !destination) return null
+  const airline = (r.airline as { name?: unknown } | null)?.name
+  return { callsign: typeof r.callsign === 'string' ? r.callsign : '', airline: typeof airline === 'string' ? airline.slice(0, 80) : '', origin, destination }
+}
+
 /**
  * OpenSky Network state vectors ({ time, states: [[icao24, callsign, country,
  * timePosition, lastContact, lon, lat, baroAltitudeM, onGround, velocityMs,
@@ -383,6 +462,8 @@ export const WLD = {
   remove: 'world:remove',
   refresh: 'world:refresh',
   flights: 'world:flights',
+  flightsArea: 'world:flights-area',
+  flightRoute: 'world:flight-route',
   satellites: 'world:satellites',
   ships: 'world:ships',
   shipsKey: 'world:ships-key',
@@ -400,6 +481,10 @@ export interface WorldBridge {
   refresh(): Promise<WorldSnapshot>
   /** Aircraft within dist nautical miles (up to 1000) of a point, plus military worldwide; fill asks OpenSky too where coverage is thin. */
   flights(lat: number, lon: number, dist: number, fill?: boolean): Promise<Flight[]>
+  /** Every aircraft over a wide view, filled in area by area as Atlas sweeps it, plus military worldwide. */
+  flightsArea(box: GeoBox): Promise<FlightsArea>
+  /** Where a flight flies from and to, by callsign; null when no route is known. */
+  flightRoute(callsign: string): Promise<FlightRoute | null>
   /** The ISS, stations and the brightest satellites. */
   satellites(): Promise<SatelliteElements[]>
   /** Ships in the area on screen (needs the owner's free AISStream key). */

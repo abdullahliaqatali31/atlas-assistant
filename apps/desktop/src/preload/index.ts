@@ -263,6 +263,8 @@ const world: WorldBridge = {
   remove: id => ipcRenderer.invoke(WLD.remove, id),
   refresh: () => ipcRenderer.invoke(WLD.refresh),
   flights: (lat, lon, dist, fill) => ipcRenderer.invoke(WLD.flights, lat, lon, dist, fill === true),
+  flightsArea: box => ipcRenderer.invoke(WLD.flightsArea, box),
+  flightRoute: callsign => ipcRenderer.invoke(WLD.flightRoute, callsign),
   satellites: () => ipcRenderer.invoke(WLD.satellites),
   ships: box => ipcRenderer.invoke(WLD.ships, box),
   setShipsKey: key => ipcRenderer.invoke(WLD.shipsKey, key),

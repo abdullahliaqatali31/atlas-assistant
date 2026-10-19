@@ -12,15 +12,15 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { MAX_PINS, type MapOp, type Pin, type Story } from '../../../shared/map.ts'
 import type { NewsResult } from '../../../shared/news.ts'
-import { CAMERA_COVERAGE, kmBetween, type Camera, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
+import { CAMERA_COVERAGE, kmBetween, type Camera, type Flight, type FlightRoute, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
 import { cleanError, flightFeatures, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
 import { nearbyItems, type NearbyItem } from './hover.ts'
 import { HoverCard } from './HoverCard.tsx'
 import type { Selected } from './Inspector.tsx'
-import { layerDef, LAYERS, OWN_SOURCES, PICKABLE, readLayers, SELECTED_LAYER, TRAIL_LAYER, type LayerId } from './layers.ts'
+import { layerDef, LAYERS, OWN_SOURCES, PICKABLE, readLayers, ROUTE_LAYERS, SELECTED_LAYER, TRAIL_LAYER, type LayerId } from './layers.ts'
 import { groundTrack, horizonKm, nextPasses, orbitFacts, ring } from './passes.ts'
 import { Trails } from './trails.ts'
-import { describeFound, describeVisible, findItems, linkFeatures, pinFeatures, storyFeatures, ZOOM_FOR } from './mapops.ts'
+import { describeFound, describeVisible, findItems, linkFeatures, pinFeatures, routeFeatures, routeProgress, storyFeatures, ZOOM_FOR } from './mapops.ts'
 import { LayerRail, RAIL } from './LayerRail.tsx'
 import { NewsCanvas } from './NewsCanvas.tsx'
 import { newsFeatures } from './newsmap.ts'
@@ -145,8 +145,9 @@ export function MapView({
       const empty: FC = { type: 'FeatureCollection', features: [] }
       const initial: Record<string, FC> = { quakes: d.quakes, events: d.events, places: d.places }
       for (const l of LAYERS) for (const id of [l.source, ...(l.extraSources ?? [])]) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: initial[id] ?? empty, ...(id === l.source ? l.sourceOptions : {}) })
-      for (const id of ['selected', 'trail']) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: empty })
+      for (const id of ['selected', 'trail', 'route']) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: empty })
       for (const l of LAYERS) for (const spec of l.draw) if (!m.getLayer(spec.id)) m.addLayer(spec)
+      for (const spec of ROUTE_LAYERS) if (!m.getLayer(spec.id)) m.addLayer(spec)
       if (!m.getLayer(TRAIL_LAYER.id)) m.addLayer(TRAIL_LAYER)
       if (!m.getLayer(SELECTED_LAYER.id)) m.addLayer(SELECTED_LAYER)
 
@@ -220,11 +221,26 @@ export function MapView({
         type: 'FeatureCollection',
         features: items.filter(i => i.coords.length > 1).map(i => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: i.coords }, properties: { color: i.color, width: i.width ?? 2 } })),
       })
+    const routeSource = () => m.getSource('route') as GeoJSONSource | undefined
     const kind = selectedNow.current?.kind
     if (!kind || !selectedId || (kind !== 'flights' && kind !== 'ships' && kind !== 'satellites')) {
       lines([])
+      routeSource()?.setData(routeFeatures(null, [0, 0]))
       return
     }
+    // A picked flight: ask once where it is going; the line follows the aircraft on each tick.
+    let route: FlightRoute | null = null
+    let gone = false
+    const callsign = kind === 'flights' ? String(selectedNow.current?.props.callsign ?? '').trim() : ''
+    if (callsign)
+      void window.world.flightRoute(callsign).then(
+        r => {
+          if (gone || !r) return
+          route = r
+          tick()
+        },
+        () => undefined,
+      )
     const sat = kind === 'satellites' ? satsRef.current.find(x => `sat:${String(x.rec.satnum).trim()}` === selectedId) : undefined
     // The next pass over the first watched place, worked out once per pick.
     const home = worldNow.current.places[0]?.place
@@ -250,14 +266,22 @@ export function MapView({
           ])
         }
       } else lines([{ coords: trails.current.path(selectedId), color: kind === 'flights' ? '#fbbf24' : '#34d399' }])
+      if (route) {
+        const r = route as FlightRoute
+        const at = routeProgress(r, { lat: lngLat[1], lon: lngLat[0] })
+        routeSource()?.setData(routeFeatures(r, lngLat))
+        props = { ...props, routeFrom: r.origin.iata || r.origin.icao, routeTo: r.destination.iata || r.destination.icao, routeFromCity: r.origin.city, routeToCity: r.destination.city, routeFromName: r.origin.name, routeToName: r.destination.name, airline: r.airline, routeProgress: at.fraction, routeKmLeft: at.kmLeft }
+      }
       if (lngLat[0] !== sel.lngLat[0] || lngLat[1] !== sel.lngLat[1] || props !== sel.props) selectRef.current({ kind, lngLat, props })
       if (followNow.current) m.easeTo({ center: lngLat, duration: isLite() ? 0 : 800 })
     }
     tick()
     const timer = setInterval(tick, kind === 'satellites' ? 2_000 : 4_000)
     return () => {
+      gone = true
       clearInterval(timer)
       lines([])
+      routeSource()?.setData(routeFeatures(null, [0, 0]))
     }
   }, [ready, selectedId])
 
@@ -571,28 +595,44 @@ export function MapView({
     }
   }, [layers, ready])
 
-  // Live flights around the map's centre: when it stops moving and every 20 s, if zoomed in enough.
+  // Live flights: a region (up to 1000 nm across) in one call; a wider view is swept area by area. When the map stops and every 20 s (every 4 s while the sweep fills in).
   useEffect(() => {
     const m = map.current
     if (!m || !ready || !layers.flights) return
     let stopped = false
+    let timer: ReturnType<typeof setTimeout> | null = null
     const load = async () => {
-      if (stopped || document.hidden) return
-      // Zoomed far out: military aircraft worldwide. Zoomed in to a region: everything in view (up to 1000 nm).
-      const c = m.getCenter()
-      const corner = m.getBounds().getNorthEast()
-      const nm = kmBetween({ lat: c.lat, lon: c.lng }, { lat: corner.lat, lon: corner.lng }) / 1.852
-      const regional = m.getZoom() >= 3
-      try {
-        const flights = await window.world.flights(c.lat, c.lng, regional ? Math.min(1000, Math.ceil(nm)) : 0, regional && filtersNow.current.openSky)
-        if (stopped) return
-        trails.current.add(flights.map(f => ({ id: `f:${f.hex}`, lon: f.lon, lat: f.lat })))
-        put('flights', flightFeatures(flights))
-        setCounts(x => ({ ...x, flights: flights.length }))
-        setFlightNote(regional ? (nm > 1000 ? 'Within 1000 nm of the map centre, plus military aircraft worldwide' : 'Everything on screen, plus military aircraft worldwide') : 'Military aircraft worldwide; zoom in to a region for every flight')
-      } catch {
-        setFlightNote('Flights unavailable right now')
+      if (timer) clearTimeout(timer)
+      let again = 20_000
+      if (!stopped && !document.hidden) {
+        const c = m.getCenter()
+        const b = m.getBounds()
+        const corner = b.getNorthEast()
+        const nm = kmBetween({ lat: c.lat, lon: c.lng }, { lat: corner.lat, lon: corner.lng }) / 1.852
+        const show = (flights: Flight[]) => {
+          trails.current.add(flights.map(f => ({ id: `f:${f.hex}`, lon: f.lon, lat: f.lat })))
+          put('flights', flightFeatures(flights))
+          setCounts(x => ({ ...x, flights: flights.length }))
+        }
+        try {
+          if (nm <= 1000 && m.getZoom() >= 3) {
+            const flights = await window.world.flights(c.lat, c.lng, Math.ceil(nm), filtersNow.current.openSky)
+            if (stopped) return
+            show(flights)
+            setFlightNote('Everything on screen, plus military aircraft worldwide')
+          } else {
+            const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
+            const r = await window.world.flightsArea({ south: clamp(b.getSouth(), 90), north: clamp(b.getNorth(), 90), west: clamp(b.getWest(), 180), east: clamp(b.getEast(), 180) })
+            if (stopped) return
+            show(r.flights)
+            if (r.loaded < r.cells) again = 4_000
+            setFlightNote(r.loaded < r.cells ? `Filling in every flight on screen: ${r.loaded} of ${r.cells} areas so far, plus military aircraft worldwide` : 'Every flight on screen, plus military aircraft worldwide')
+          }
+        } catch {
+          setFlightNote('Flights unavailable right now')
+        }
       }
+      if (!stopped) timer = setTimeout(() => void load(), again)
     }
     void load()
     let debounce: ReturnType<typeof setTimeout> | null = null
@@ -601,11 +641,10 @@ export function MapView({
       debounce = setTimeout(() => void load(), 600)
     }
     m.on('moveend', onMove)
-    const timer = setInterval(() => void load(), 20_000)
     return () => {
       stopped = true
       m.off('moveend', onMove)
-      clearInterval(timer)
+      if (timer) clearTimeout(timer)
       if (debounce) clearTimeout(debounce)
     }
   }, [ready, layers.flights, filters.openSky])
@@ -920,6 +959,7 @@ export function MapView({
         parts={creditLine(prefs.style, LAYERS.filter(l => layers[l.id]).map(l => l.id), [
           ...(layers.cameras && webcamState.inView ? [{ text: 'Webcams Windy.com', href: 'https://www.windy.com/webcams' }] : []),
           ...(layers.flights && filters.openSky ? [{ text: 'OpenSky Network', href: 'https://opensky-network.org' }] : []),
+          ...(selected?.kind === 'flights' && selected.props.routeFrom ? [{ text: 'Routes adsbdb', href: 'https://www.adsbdb.com' }] : []),
         ])}
       />
       {styleError && <p className="glass absolute bottom-16 left-2 z-10 rounded-lg bg-solid/85 px-2 py-1 text-[11px] text-warm">{styleError}</p>}

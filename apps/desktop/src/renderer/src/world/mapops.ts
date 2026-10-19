@@ -4,7 +4,7 @@
  * and the pins layer. MapView does the flying; this decides what to say.
  */
 import type { Pin, Story } from '../../../shared/map.ts'
-import { kmBetween } from '../../../shared/world.ts'
+import { kmBetween, type FlightRoute } from '../../../shared/world.ts'
 import type { FC } from './geo.ts'
 import type { NearbyItem, Props } from './hover.ts'
 import { layerDef, LAYERS, type LayerId } from './layers.ts'
@@ -165,3 +165,29 @@ export const linkFeatures = (story: Story | null): LineFC => ({
     return [{ type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: greatCircle([a.lon, a.lat], [b.lon, b.lat]) }, properties: { from: l.from, to: l.to, reason: l.reason ?? '' } }]
   }),
 })
+
+type RouteFC = { type: 'FeatureCollection'; features: ({ type: 'Feature'; geometry: { type: 'LineString'; coordinates: [number, number][] } | { type: 'Point'; coordinates: [number, number] }; properties: Record<string, string> })[] }
+
+/** A picked flight's route: origin to the aircraft (flown), the aircraft to destination (ahead), and both airports. */
+export const routeFeatures = (route: FlightRoute | null, plane: [number, number]): RouteFC => {
+  if (!route) return { type: 'FeatureCollection', features: [] }
+  const from: [number, number] = [route.origin.lon, route.origin.lat]
+  const to: [number, number] = [route.destination.lon, route.destination.lat]
+  const code = (a: FlightRoute['origin']) => a.iata || a.icao
+  return {
+    type: 'FeatureCollection',
+    features: [
+      { type: 'Feature', geometry: { type: 'LineString', coordinates: greatCircle(from, plane) }, properties: { part: 'flown' } },
+      { type: 'Feature', geometry: { type: 'LineString', coordinates: greatCircle(plane, to) }, properties: { part: 'ahead' } },
+      { type: 'Feature', geometry: { type: 'Point', coordinates: from }, properties: { code: code(route.origin) } },
+      { type: 'Feature', geometry: { type: 'Point', coordinates: to }, properties: { code: code(route.destination) } },
+    ],
+  }
+}
+
+/** How far along its route an aircraft is (0 to 1), and the distance still to fly. */
+export const routeProgress = (route: FlightRoute, plane: { lat: number; lon: number }) => {
+  const done = kmBetween({ lat: route.origin.lat, lon: route.origin.lon }, plane)
+  const left = kmBetween(plane, { lat: route.destination.lat, lon: route.destination.lon })
+  return { fraction: done + left > 0 ? done / (done + left) : 0, kmLeft: Math.round(left) }
+}
