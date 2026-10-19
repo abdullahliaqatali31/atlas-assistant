@@ -593,6 +593,11 @@ export function Companion({
             name={personality?.profile.assistantName ?? ''}
             onEnd={endConversation}
             onKeyboard={endConversation}
+            onStop={() => {
+              void window.assistant.interrupt().catch(() => undefined)
+              interrupt()
+              void startListeningRef.current()
+            }}
           />
         </div>
       )}
