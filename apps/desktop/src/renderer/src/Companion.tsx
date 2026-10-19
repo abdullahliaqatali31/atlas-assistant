@@ -15,7 +15,7 @@ import { ChatMenu } from './ChatMenu.tsx'
 import { chatViewVars, readChatView, saveChatView, type ChatView } from './chatview.ts'
 import { Onboarding } from './Onboarding.tsx'
 import { Markdown } from './ui/Markdown.tsx'
-import { ASK_EVENT, MIC_EVENT, publishLive } from './shell/live.ts'
+import { ASK_EVENT, MIC_EVENT, publishLive, STOP_EVENT } from './shell/live.ts'
 
 interface Line {
   id: string
@@ -504,6 +504,43 @@ export function Companion({
   const state = listening ? 'Listening' : transcribing ? 'Transcribing' : speaking ? 'Speaking' : replyId ? 'Thinking' : PHASE_TEXT[status.phase]
   const presence: Presence['state'] = listening ? 'listening' : speaking ? 'speaking' : replyId || transcribing ? 'thinking' : 'idle'
   useEffect(() => onPresence?.({ state: presence, level: listening ? level : 0 }), [onPresence, presence, level, listening])
+
+  // The desktop widget mirrors this: what Atlas is doing and its newest words, at most four times a second.
+  const lastReply = lines.findLast(l => l.who === 'assistant')?.text ?? ''
+  const presenceNow = useRef({ activity: presence, caption: '', level: 0 })
+  presenceNow.current = { activity: presence, caption: presence === 'idle' || presence === 'listening' ? '' : lastReply, level: listening ? level : 0 }
+  useEffect(() => {
+    let sent = ''
+    const t = setInterval(() => {
+      const now = presenceNow.current
+      const key = `${now.activity}|${now.caption}|${Math.round(now.level * 10)}`
+      if (key === sent) return
+      sent = key
+      void window.presenceHost.update(now).catch(() => undefined)
+    }, 250)
+    return () => clearInterval(t)
+  }, [])
+
+  // The widget's Stop and Talk act here, where the microphone and the speech are.
+  const widgetAsks = useRef<(c: 'stop' | 'talk') => void>(() => undefined)
+  widgetAsks.current = c => {
+    if (c === 'talk') {
+      if (!conversationRef.current) beginConversation()
+      return
+    }
+    if (conversationRef.current && (speaking || replyId)) {
+      void window.assistant.interrupt().catch(() => undefined)
+      interrupt()
+      void startListeningRef.current()
+    } else if (conversationRef.current) endConversation()
+    else interrupt()
+  }
+  useEffect(() => window.presenceHost.onCommand(c => widgetAsks.current(c)), [])
+  useEffect(() => {
+    const stop = () => widgetAsks.current('stop')
+    window.addEventListener(STOP_EVENT, stop)
+    return () => window.removeEventListener(STOP_EVENT, stop)
+  }, [])
 
   return (
     // A container: the header adapts to the panel width (side panel, drawer or compact window), not the screen.

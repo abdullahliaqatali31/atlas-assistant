@@ -36,3 +36,6 @@ const subscribe = (fn: () => void) => {
 }
 
 export const useLive = () => useSyncExternalStore(subscribe, () => current)
+
+/** Stop Atlas from anywhere in the window (the presence pill): the conversation decides what stopping means now. */
+export const STOP_EVENT = 'atlas:stop'

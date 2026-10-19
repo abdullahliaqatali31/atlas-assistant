@@ -49,6 +49,7 @@ import { AskBar } from "./shell/AskBar.tsx";
 import { useAlerts } from "./shell/alerts.ts";
 import { AlertsTimeline } from "./shell/AlertsTimeline.tsx";
 import { CornerWidget } from "./shell/CornerWidget.tsx";
+import { PresencePill } from "./shell/PresencePill.tsx";
 import {
   CommandPalette,
   type Command,
@@ -676,6 +677,11 @@ export function App() {
                   onOpenChat={() => open("chat")}
                 />
               </main>
+            )}
+
+            {/* Atlas's presence on any page while the conversation is closed. */}
+            {!compact && drawer !== "chat" && (
+              <PresencePill presence={presence} onOpen={() => open("chat")} />
             )}
 
             {/* A floating drawer: clicking the stage puts it away. */}

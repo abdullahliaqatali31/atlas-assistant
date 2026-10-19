@@ -46,6 +46,8 @@ import { registerPersonalityIpc } from './personality.ts'
 import { watchSession } from './session.ts'
 import { providerFor, readSetup, runtimeEnv, saveSetup, saveSpeakReplies, setupSummary as readSetupSummary } from './settings.ts'
 import { RuntimeSupervisor } from './supervisor.ts'
+import { PresenceWidget } from './presence.ts'
+import { PRS, WIDGET_WHEN, type WidgetWhen } from '../shared/presence.ts'
 
 // Privileged scheme for the local speech model must be declared before 'ready'.
 // Electron takes one list of privileged schemes, before 'ready': local speech models and news pictures.
@@ -80,7 +82,10 @@ let sessionWatch: ReturnType<typeof watchSession> | null = null
 // would start a briefing is held here until the security code is confirmed.
 const identity = new IdentityGate(join(app.getPath('userData'), 'identity.json'))
 let heldReturn: Extract<SessionChange, { idleMs: number }> | null = null
-const publishIdentity = () => toRenderer(IC.changed, identity.view())
+const publishIdentity = () => {
+  toRenderer(IC.changed, identity.view())
+  presence.refresh()
+}
 const requireOwner = () => {
   if (identity.locked) throw new Error('Please confirm it is you first.')
 }
@@ -127,6 +132,7 @@ const notify = (item: InitiativeItem) => {
 const publish = (next: Partial<RuntimeStatus>) => {
   status = { ...status, ...next }
   toRenderer(CH.statusChanged, status)
+  presence.refresh()
   updateTray()
 }
 
@@ -161,7 +167,10 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
   },
   onReply: (e: ReplyEvent) => {
     // The assistant is speaking up on its own: make sure the owner can see and hear it.
-    if (e.type === 'initiative') drawAttention()
+    if (e.type === 'initiative') {
+      drawAttention()
+      presence.spokeUp(e.item)
+    }
     replyToRenderer(e)
   },
   onLater: (later, item) => {
@@ -222,6 +231,27 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
   log,
 })
 
+// ── desktop widget ──────────────────────────────────────────
+
+const presence = new PresenceWidget({
+  file: join(app.getPath('userData'), 'presence.json'),
+  preload: join(import.meta.dirname, '../preload/presence.cjs'),
+  isDev,
+  load: (w, page) => void (isDev ? w.loadURL(`${process.env.ELECTRON_RENDERER_URL}/${page}.html`) : w.loadFile(join(import.meta.dirname, `../renderer/${page}.html`))),
+  openMain: () => createWindow(),
+  command: c => {
+    if (!win || win.isDestroyed() || !rendererReady) return false
+    toRenderer(PRS.command, c)
+    return true
+  },
+  answerApproval: (id, approved) => supervisor.answerApproval(id, approved),
+  initiativeAction: (id, action) => supervisor.initiativeAction(id, action),
+  approvals: () => status.approvals,
+  locked: () => identity.locked,
+  name: () => 'Atlas',
+})
+presence.register()
+
 // ── window ──────────────────────────────────────────────────
 
 const createWindow = ({ inactive = false } = {}) => {
@@ -257,9 +287,13 @@ const createWindow = ({ inactive = false } = {}) => {
   win.once('ready-to-show', () => (inactive ? win?.showInactive() : win?.show()))
   ui.watch(win)
   win.on('focus', () => win?.flashFrame(false))
+  // The desktop widget steps in while Atlas's window is out of sight or behind other apps.
+  const seen = () => presence.mainWindow(Boolean(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused()))
+  for (const ev of ['show', 'hide', 'minimize', 'restore', 'focus', 'blur'] as const) win.on(ev as 'show', seen)
   // Closing the window destroys the renderer (keeping idle RAM low); the tray and runtime stay up.
   win.on('closed', () => {
     win = null
+    presence.mainWindow(false)
     rendererReady = false
     heldReplies = []
   })
@@ -456,6 +490,14 @@ handle(CH.initiativeAction, (id, action) => {
   if (!parsed) throw new Error('Unknown initiative action.')
   supervisor.initiativeAction(parsed.id, parsed.action)
 })
+handle(PRS.update, raw => presence.update(raw))
+handle(PRS.getWhen, () => presence.when)
+handle(PRS.setWhen, when => {
+  requireOwner()
+  if (!WIDGET_WHEN.includes(when as WidgetWhen)) throw new Error('Unknown widget setting.')
+  presence.setWhen(when as WidgetWhen)
+  return presence.when
+})
 handle(CH.ready, () => {
   for (const e of heldReplies.splice(0)) toRenderer(CH.reply, e)
   rendererReady = true
@@ -638,8 +680,9 @@ if (!app.requestSingleInstanceLock()) {
       heldReturn = { signal: 'unlock', idleMs: 0 }
     }
     supervisor.start()
-    // Started by Windows at login: stay in the tray until the owner opens Atlas.
+    // Started by Windows at login: stay in the tray until the owner opens Atlas (the widget shows meanwhile).
     if (!startedHidden()) createWindow()
+    else presence.mainWindow(false)
   })
   // Staying alive in the tray is the point: never quit when the last window closes.
   app.on('window-all-closed', () => {})
@@ -651,6 +694,7 @@ if (!app.requestSingleInstanceLock()) {
     sessionWatch?.stop()
     desktop.stop()
     world.ships.stop()
+    presence.stop()
     void supervisor.stop().finally(() => {
       tray?.destroy()
       app.quit()

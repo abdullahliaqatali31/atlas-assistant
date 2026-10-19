@@ -14,10 +14,14 @@ import type { NewsBridge } from '../shared/news.ts'
 import type { PersonalityBridge } from '../shared/personality.ts'
 import type { ProjectsBridge } from '../shared/projects.ts'
 import type { WakeBridge } from '../shared/wake.ts'
+import type { PresenceBridge, PresenceHostBridge } from '../shared/presence.ts'
 
 declare global {
   interface Window {
     assistant: AssistantBridge
+    presenceHost: PresenceHostBridge
+    /** Only in the desktop widget's page. */
+    presence: PresenceBridge
     controls: ControlBridge
     personality: PersonalityBridge
     activity: ActivityBridge

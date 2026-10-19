@@ -20,6 +20,7 @@ import { NC, type NewsBridge, type NewsResult } from '../shared/news.ts'
 import { WC, type WakeBridge, type WakeView } from '../shared/wake.ts'
 import { PC, type PersonalityBridge, type PersonalityView } from '../shared/personality.ts'
 import { PJ, type ProjectsBridge } from '../shared/projects.ts'
+import { PRS, type PresenceCommand, type PresenceHostBridge } from '../shared/presence.ts'
 
 const subscribe = <T>(channel: string, cb: (v: T) => void) => {
   const listener = (_e: IpcRendererEvent, v: T) => cb(v)
@@ -275,3 +276,12 @@ const world: WorldBridge = {
   onChanged: cb => subscribe<WorldSnapshot>(WLD.changed, cb),
 }
 contextBridge.exposeInMainWorld('world', world)
+
+/** The desktop widget's link to the conversation in this window. */
+const presenceHost: PresenceHostBridge = {
+  update: u => ipcRenderer.invoke(PRS.update, u),
+  onCommand: cb => subscribe<PresenceCommand>(PRS.command, cb),
+  when: () => ipcRenderer.invoke(PRS.getWhen),
+  setWhen: when => ipcRenderer.invoke(PRS.setWhen, when),
+}
+contextBridge.exposeInMainWorld('presenceHost', presenceHost)

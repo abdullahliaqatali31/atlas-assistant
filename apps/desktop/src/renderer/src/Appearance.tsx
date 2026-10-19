@@ -1,4 +1,7 @@
-import { Feather, Palette } from 'lucide-react'
+import { Feather, MonitorUp, Palette } from 'lucide-react'
+import { useEffect, useState } from 'react'
+
+import type { WidgetWhen } from '../../shared/presence.ts'
 
 import { ACCENTS, THEME_LABEL, THEMES, useAppearance, type Accent, type LiteChoice, type ThemeName } from './theme.ts'
 
@@ -13,6 +16,16 @@ const PREVIEW: Record<Exclude<ThemeName, 'system'>, { bg: string; card: string; 
 /** Settings › Appearance: theme, accent and Lite mode, applied instantly and remembered on this computer. */
 export function AppearanceSettings() {
   const [a, set] = useAppearance()
+  const [widget, setWidget] = useState<WidgetWhen | null>(null)
+  const [widgetError, setWidgetError] = useState('')
+  useEffect(() => {
+    void window.presenceHost.when().then(setWidget, () => undefined)
+  }, [])
+  const chooseWidget = (w: WidgetWhen) =>
+    void window.presenceHost.setWhen(w).then(
+      v => (setWidget(v), setWidgetError('')),
+      e => setWidgetError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Could not change it.'),
+    )
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-3">
       <section className="space-y-3">
@@ -78,6 +91,21 @@ export function AppearanceSettings() {
           ))}
         </div>
         <p className="text-[11px] text-muted">Now: {document.documentElement.dataset.lite === 'true' ? 'Lite (light on the machine)' : 'Full effects'}</p>
+      </section>
+
+      <section className="space-y-2">
+        <h3 className="flex items-center gap-2 text-sm font-medium">
+          <MonitorUp className="size-4 text-accent" aria-hidden /> Atlas on the desktop
+        </h3>
+        <p className="text-xs text-muted">A small widget that floats over your other apps: a quiet orb when idle, a pill with Stop while Atlas listens or speaks, and a card when it speaks up or needs your yes. Drag it anywhere; right-click it for size and options.</p>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Desktop widget">
+          {(['background', 'always', 'off'] as WidgetWhen[]).map(w => (
+            <button key={w} type="button" role="radio" aria-checked={widget === w} disabled={widget === null} onClick={() => chooseWidget(w)} className={`btn ${widget === w ? 'border-accent text-accent' : ''}`}>
+              {w === 'background' ? 'When Atlas is in the background' : w === 'always' ? 'Always' : 'Never'}
+            </button>
+          ))}
+        </div>
+        {widgetError && <p className="text-xs text-danger">{widgetError}</p>}
       </section>
     </div>
   )
