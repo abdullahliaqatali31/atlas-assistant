@@ -11,13 +11,13 @@ import type { RuntimeTool } from '@assistant/runtime'
 
 import { GLASS_VIEWS, MAX_GLASS_PINS, parseGlassShow } from '../shared/glass.ts'
 import { CATEGORIES } from '../shared/news.ts'
-import { MAP_LAYERS, MAP_STYLES, mapOpFromTool, MAX_PINS, MAX_STORY_ITEMS } from '../shared/map.ts'
+import { GLOBE3D_ACTIONS, GLOBE3D_LAYERS, MAP_LAYERS, MAP_STYLES, mapOpFromTool, MAX_PINS, MAX_STORY_ITEMS } from '../shared/map.ts'
 import { describeUi, VIEWS, WINDOW_SIZES, type UiChange, type UiOp, type UiState } from '../shared/ui.ts'
 
 const REQUEST_TIMEOUT_MS = 30_000
 
 /** The World map tools only change the view, so they are observe-class and run without asking, even after reading news. */
-export const MAP_TOOLS = ['map_view', 'map_layers', 'map_visible', 'map_find', 'map_focus', 'map_pins', 'map_back', 'map_story', 'map_tour'] as const
+export const MAP_TOOLS = ['map_view', 'map_layers', 'map_visible', 'map_find', 'map_focus', 'map_pins', 'map_back', 'map_story', 'map_tour', 'map_3d'] as const
 
 /** The glass panel only shows things on the owner's own screen: no asking, even after reading the web. */
 export const GLASS_TOOLS = ['glass_show', 'glass_close'] as const
@@ -53,6 +53,18 @@ export class HostUi {
       input = { ...input, lat: found.lat, lon: found.lon, label: typeof input.label === 'string' ? input.label : [found.name, found.country].filter(Boolean).join(', ') }
     }
     return this.request({ kind: 'map', op: mapOpFromTool('map_view', input) }, signal)
+  }
+
+  /** map_3d with a place name: look it up first. */
+  private async map3d(input: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
+    const place = typeof input.place === 'string' ? input.place.trim().slice(0, 80) : ''
+    if (place && (typeof input.lat !== 'number' || typeof input.lon !== 'number')) {
+      if (!this.deps.geocode) throw new Error('Place lookup is not available; give lat and lon.')
+      const found = await this.deps.geocode(place)
+      if (!found) throw new Error(`Could not find a place called "${place}". Try a nearby city or give lat and lon.`)
+      input = { ...input, lat: found.lat, lon: found.lon, label: typeof input.label === 'string' ? input.label : [found.name, found.country].filter(Boolean).join(', ') }
+    }
+    return this.request({ kind: 'map', op: mapOpFromTool('map_3d', input) }, signal)
   }
 
   /** map_story: items given by place name get coordinates first (one lookup per distinct place). */
@@ -161,7 +173,7 @@ export class HostUi {
       actionClass: 'observe',
       isUntrusted,
       run: (input, signal) =>
-        name === 'map_view' ? this.mapView(input, signal) : name === 'map_story' ? this.mapStory(input, signal) : this.request({ kind: 'map', op: mapOpFromTool(name, input) }, signal),
+        name === 'map_view' ? this.mapView(input, signal) : name === 'map_story' ? this.mapStory(input, signal) : name === 'map_3d' ? this.map3d(input, signal) : this.request({ kind: 'map', op: mapOpFromTool(name, input) }, signal),
     })
     const layerArray = { type: 'array', items: { type: 'string', enum: [...MAP_LAYERS] } }
     return [
@@ -240,6 +252,25 @@ export class HostUi {
           clear: { type: 'boolean' },
         },
         false,
+      ),
+      tool(
+        'map_3d',
+        `The World's 3D view (God's Eye style): a real 3D Earth with live aircraft at their altitude, ships, satellites by group, public cameras with their live view, submarine cables and the Sun/Moon ring. action open: show it (optionally at a place or lat/lon, zoom 2 world - 16 streets); close: back to the flat map; layers: show/hide ${GLOBE3D_LAYERS.join(', ')} (sats = satellites, celestial = Sun, Moon, day and night); fly_with: ride an aircraft (query a callsign or registration, or "nearest"; mode chase or cockpit) with its speed, altitude, route and nearby contacts; next_contact: jump to the next aircraft around it (previous: true for the one before); follow_sat: follow a satellite by name (query "ISS", "Hubble", "Starlink", "GPS"…; mode eye looks straight down from it); camera: open a public camera (query its name, or "nearest" to the view or to place) with its view cone and live frame in 3D; orbit: slowly circle the view (on: false stops); stop: stop riding; state: what the 3D view shows now. Use for "3D mein dikhao", "is plane ke sath udo", "ISS follow karo", "cables dikhao", "is jagah ka camera dikhao".`,
+        {
+          action: { type: 'string', enum: [...GLOBE3D_ACTIONS] },
+          place: { type: 'string', description: 'A city, country or landmark (open, camera).' },
+          lat: { type: 'number' },
+          lon: { type: 'number' },
+          zoom: { type: 'number' },
+          label: { type: 'string' },
+          query: { type: 'string' },
+          mode: { type: 'string', enum: ['chase', 'cockpit', 'follow', 'eye'] },
+          show: { type: 'array', items: { type: 'string', enum: [...GLOBE3D_LAYERS] } },
+          hide: { type: 'array', items: { type: 'string', enum: [...GLOBE3D_LAYERS] } },
+          previous: { type: 'boolean' },
+          on: { type: 'boolean' },
+        },
+        true,
       ),
       tool(
         'map_tour',

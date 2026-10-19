@@ -24,6 +24,7 @@ import { ArrowLeftRight, Box, Cable, ChevronLeft, ChevronRight, Crosshair, Eye, 
 import { useEffect, useRef, useState } from 'react'
 
 import { kmBetween, type Flight, type FlightRoute, type Ship } from '../../../shared/world.ts'
+import type { Map3dOp } from '../../../shared/map.ts'
 import { aircraftName } from '../../../shared/aircraft.ts'
 import { satGroup, SAT_GROUPS, type CableDetail, type SatGroupId } from '../../../shared/space.ts'
 import { Cables3D } from './cables3d.ts'
@@ -82,12 +83,20 @@ const RAIL: { k: LayerKey; label: string; icon: typeof Plane; count: (c: Counts)
   { k: 'celestial', label: 'Celestial', icon: Sparkles, count: () => '' },
 ]
 
+/** What the World page (and through it, Atlas) can ask of the 3D view. */
+export interface Globe3DControl {
+  run(op: Map3dOp): Promise<string>
+}
+
+const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west']
+const compass = (deg: number) => COMPASS[Math.round((((deg % 360) + 360) % 360) / 45) % 8]!
+
 interface SatRide {
   i: number
   mode: 'follow' | 'eye'
 }
 
-export default function Globe3D({ start, onClose }: { start: { lat: number; lon: number; zoom: number }; onClose: () => void }) {
+export default function Globe3D({ start, onClose, controlRef }: { start: { lat: number; lon: number; zoom: number }; onClose: () => void; controlRef?: { current: Globe3DControl | null } }) {
   const box = useRef<HTMLDivElement>(null)
   const credits = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<Cesium.CesiumWidget | null>(null)
@@ -115,6 +124,9 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
   const [satCounts, setSatCounts] = useState<Partial<Record<SatGroupId, number>>>({})
   const [cable, setCable] = useState<{ id: string; name: string; detail: CableDetail | null } | null>(null)
   const [landing, setLanding] = useState<string | null>(null)
+  /** Orbit: circling a point on the ground, or spinning the whole globe. */
+  const [orbit, setOrbit] = useState(false)
+  const orbitRef = useRef<ReturnType<typeof Cesium.Cartesian3.fromDegrees> | 'globe' | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -315,6 +327,16 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
       const enu = new Cesium.Matrix4()
       const scratch = new Cesium.Cartesian3()
       scene.preRender.addEventListener(() => {
+        const ot = orbitRef.current
+        if (ot && viewer && !followRef.current && !satRideRef.current) {
+          if (ot === 'globe') viewer.camera.rotate(Cesium.Cartesian3.UNIT_Z, -0.0012)
+          else {
+            viewer.camera.lookAtTransform(Transforms.eastNorthUpToFixedFrame(ot, Cesium.Ellipsoid.WGS84, enu))
+            viewer.camera.rotateRight(0.0022)
+            viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
+          }
+          return
+        }
         // Riding a satellite: follow it (the camera keeps its offset, so it can still be turned), or look straight down from it.
         const ride = satRideRef.current
         const rs = ride ? sats.list[ride.i] : undefined
@@ -344,6 +366,14 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
 
       // ── picking ──
       const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas)
+      const takeBack = () => {
+        if (!orbitRef.current) return
+        orbitRef.current = null
+        setOrbit(false)
+      }
+      handler.setInputAction(takeBack, Cesium.ScreenSpaceEventType.LEFT_DOWN)
+      handler.setInputAction(takeBack, Cesium.ScreenSpaceEventType.RIGHT_DOWN)
+      handler.setInputAction(takeBack, Cesium.ScreenSpaceEventType.WHEEL)
       handler.setInputAction((click: { position: Cartesian2 }) => {
         const hit = scene.pick(click.position) as { id?: { kind?: string; hex?: string; i?: number; id?: string; name?: string } } | undefined
         const id = hit?.id
@@ -444,9 +474,9 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
   // Continuous frames only while the camera rides something.
   useEffect(() => {
     if (!widget || widget.isDestroyed()) return
-    widget.scene.requestRenderMode = !(follow || satRide)
+    widget.scene.requestRenderMode = !(follow || satRide || orbit)
     widget.scene.requestRender()
-  }, [widget, follow, satRide])
+  }, [widget, follow, satRide, orbit])
 
   // The picked satellite's orbit ring.
   useEffect(() => {
@@ -548,6 +578,157 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
     if (!widget || !v || v.heading === undefined) return
     widget.camera.flyTo({ destination: v.eye, orientation: { heading: Cesium.Math.toRadians(v.heading), pitch: Cesium.Math.toRadians(-v.tiltDeg), roll: 0 }, duration: 1.4 })
   }
+
+  // ── Atlas drives the 3D view (map_3d): each answer is text the model can relay ──
+  const flyTo = (lat: number, lon: number, zoom = 11) =>
+    new Promise<void>(done => {
+      if (!widget) return done()
+      const wide = zoom < 5
+      widget.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, wide ? lat : lat - Math.min(8, 30 / 2 ** zoom), Math.min(22_000_000, heightForZoom(zoom, lat))), orientation: { heading: 0, pitch: Cesium.Math.toRadians(wide ? -90 : -45), roll: 0 }, duration: 2.2, complete: done, cancel: done })
+    })
+  const camAt = () => {
+    const c = widget!.camera.positionCartographic
+    return { lat: Cesium.Math.toDegrees(c.latitude), lon: Cesium.Math.toDegrees(c.longitude), height: c.height }
+  }
+  const run3d = async (op: Map3dOp): Promise<string> => {
+    const pt = parts.current
+    if (!widget || !pt || widget.isDestroyed()) throw new Error('The 3D view is still starting; try again in a moment.')
+    const where = op.label ?? (op.lat !== undefined ? `${op.lat.toFixed(2)}, ${op.lon!.toFixed(2)}` : '')
+    switch (op.action) {
+      case 'open': {
+        if (op.lat !== undefined && op.lon !== undefined) await flyTo(op.lat, op.lon, op.zoom ?? 11)
+        return `The 3D view is open${where ? ` over ${where}` : ''} (${tier ? TIER_LABEL[tier] : 'loading'}). Showing: ${RAIL.filter(r => layersRef.current[r.k]).map(r => r.label).join(', ')}.`
+      }
+      case 'layers': {
+        setLayers(l => {
+          const next = { ...l }
+          for (const k of op.show) next[k] = true
+          for (const k of op.hide) next[k] = false
+          return next
+        })
+        if (op.show.includes('celestial')) {
+          const c = camAt()
+          await flyTo(Cesium.Math.clamp(c.lat, -30, 30), c.lon, 1)
+        }
+        return `3D layers: ${op.show.length ? `showing ${op.show.join(', ')}` : ''}${op.show.length && op.hide.length ? '; ' : ''}${op.hide.length ? `hid ${op.hide.join(', ')}` : ''}.${op.show.includes('cables') ? ' The cables load from TeleGeography’s map in a few seconds.' : ''}`
+      }
+      case 'fly_with': {
+        if (op.lat !== undefined && op.lon !== undefined) {
+          await flyTo(op.lat, op.lon, 8)
+          await new Promise(r => setTimeout(r, 9000))
+        }
+        const airborne = flights.current.list.filter(f => f.altitude !== null && f.altitude > 0)
+        if (!airborne.length) throw new Error('No aircraft are loaded in this view yet. Open 3D over a busy area (a city, a continent) and try again in a few seconds.')
+        const q = (op.query ?? '').toUpperCase().replace(/\s+/g, '')
+        const c = camAt()
+        const target = q && q !== 'NEAREST' ? (airborne.find(f => [f.callsign, f.registration, f.hex].some(x => x && x.toUpperCase().replace(/\s+/g, '') === q)) ?? airborne.find(f => f.callsign.toUpperCase().startsWith(q))) : [...airborne].sort((a, b) => kmBetween(c, a) - kmBetween(c, b))[0]
+        if (!target) throw new Error(`No aircraft "${op.query}" is in the 3D view right now (${airborne.length} airborne loaded). Ask for "nearest", or open 3D where it flies.`)
+        setSatRide(null)
+        setPicked(null)
+        orbitRef.current = null
+        setOrbit(false)
+        setFollow({ hex: target.hex, mode: op.mode === 'cockpit' ? 'cockpit' : 'chase' })
+        const kind = aircraftName(target.type) || target.type
+        return `Flying with ${flightLabel(target)}${kind ? ` (${kind}${target.registration ? `, ${target.registration}` : ''})` : ''}${target.military ? ', a military aircraft' : ''}: ${Math.round(target.speed)} knots heading ${compass(target.track)}, ${op.mode === 'cockpit' ? 'from the cockpit' : 'chase view'}. Its route card shows where it is going when the callsign has a published route. Say "next contact" to jump to the nearest other aircraft.`
+      }
+      case 'next_contact': {
+        if (!followRef.current) throw new Error('Not flying with an aircraft yet: use fly_with first.')
+        const cur = flights.current.byHex.get(followRef.current.hex)
+        if (!cur) throw new Error('The aircraft being followed has left the feed.')
+        const order = flights.current.list.filter(f => f.altitude !== null && f.altitude > 0).map(f => ({ f, km: kmBetween(cur, f) })).sort((a, b) => a.km - b.km)
+        const i = order.findIndex(o => o.f.hex === cur.hex)
+        const next = order[(i + (op.direction === -1 ? -1 : 1) + order.length) % order.length]
+        if (!next || next.f.hex === cur.hex) throw new Error('No other aircraft around it right now.')
+        setFollow(fo => (fo ? { ...fo, hex: next.f.hex } : fo))
+        return `Now with ${flightLabel(next.f)}${aircraftName(next.f.type) ? ` (${aircraftName(next.f.type)})` : ''}, ${Math.round(next.km)} km from the last one.`
+      }
+      case 'follow_sat': {
+        if (!layersRef.current.sats) setLayers(l => ({ ...l, sats: true }))
+        const q = (op.query ?? '').toLowerCase()
+        const alias = q === 'iss' || q.includes('space station') ? 'iss (zarya)' : q === 'hubble' ? 'hst' : q
+        const list = pt.sats.list
+        const found = list.find(x => x.name.toLowerCase() === alias) ?? list.find(x => x.name.toLowerCase().includes(alias)) ?? list.find(x => x.norad === op.query)
+        if (!found) throw new Error(`No satellite called "${op.query}" among the ${list.length} tracked (stations, brightest, GPS, Galileo, GLONASS, BeiDou, weather, geostationary).`)
+        if (layersRef.current.hiddenSats.includes(found.group)) setLayers(l => ({ ...l, hiddenSats: l.hiddenSats.filter(g => g !== found.group) }))
+        setFollow(null)
+        orbitRef.current = null
+        setOrbit(false)
+        setSatPick(found.i)
+        setSatRide({ i: found.i, mode: op.mode === 'eye' ? 'eye' : 'follow' })
+        const f = pt.sats.facts(found)
+        return `${op.mode === 'eye' ? 'Looking straight down from' : 'Following'} ${found.name}${f ? `: ${Math.round(f.altKm).toLocaleString()} km up, ${f.speedKms.toFixed(1)} km/s, one orbit every ${f.periodMin < 200 ? `${Math.round(f.periodMin)} minutes` : `${(f.periodMin / 60).toFixed(1)} hours`}, now over ${latLonLabel(f)}` : ''}. Its orbit ring is drawn.`
+      }
+      case 'camera': {
+        if (!layersRef.current.cameras) setLayers(l => ({ ...l, cameras: true }))
+        if (!pt.cams.loaded) {
+          const list = await window.world.cameras()
+          if (!pt.cams.loaded) (pt.cams.load(list), setCounts(x => ({ ...x, cameras: list.length })))
+        }
+        const list = pt.cams.list
+        const q = (op.query ?? '').toLowerCase()
+        const from = op.lat !== undefined && op.lon !== undefined ? { lat: op.lat, lon: op.lon } : camAt()
+        let i = q && q !== 'nearest' ? list.findIndex(c => c.name.toLowerCase().includes(q)) : -1
+        if (i < 0) {
+          let best = Infinity
+          list.forEach((c, k) => {
+            const km = kmBetween(from, c)
+            if (km < best) (best = km), (i = k)
+          })
+          if (i < 0 || best > 300) throw new Error(`No public camera within 300 km${where ? ` of ${where}` : ''}. Cameras come from official open feeds in the UK, US (California, Washington, Delaware), Canada (BC, Calgary, Toronto), Finland, Norway, Australia (NSW), New Zealand, Hong Kong and Singapore.`)
+        }
+        const cam = list[i]!
+        setCamPick(i)
+        return `Showing the ${cam.source} camera "${cam.name}" (${cam.country}${cam.heading !== undefined ? `, looking ${compass(cam.heading)}` : ''})${cam.video ? ' with live video' : ', its latest frame'}${cam.heading !== undefined ? '; its view cone and frame are in the scene, and the card can look through it' : ''}.`
+      }
+      case 'orbit': {
+        if (op.direction === 0) {
+          orbitRef.current = null
+          setOrbit(false)
+          return 'Stopped circling.'
+        }
+        const canvas = widget.scene.canvas
+        const target = widget.camera.pickEllipsoid(new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2))
+        setFollow(null)
+        setSatRide(null)
+        orbitRef.current = target ?? 'globe'
+        setOrbit(true)
+        return target ? 'Circling slowly around the middle of the view. A click or scroll stops it.' : 'Turning the globe slowly. A click or scroll stops it.'
+      }
+      case 'stop': {
+        setFollow(null)
+        setSatRide(null)
+        orbitRef.current = null
+        setOrbit(false)
+        return 'Stopped; the camera stays where it is.'
+      }
+      case 'state': {
+        const c = camAt()
+        const fol = followRef.current ? flights.current.byHex.get(followRef.current.hex) : null
+        const ride = satRideRef.current ? pt.sats.list[satRideRef.current.i] : null
+        const parts2 = [
+          `3D view (${tier ? TIER_LABEL[tier] : 'loading'}) looking at ${latLonLabel(c)} from ${c.height > 100_000 ? `${Math.round(c.height / 1000).toLocaleString()} km` : `${Math.round(c.height).toLocaleString()} m`} up.`,
+          `Layers: ${RAIL.filter(r => layersRef.current[r.k]).map(r => `${r.label}${r.count(counts) ? ` ${r.count(counts)}` : ''}`).join(', ')}.`,
+          fol ? `Flying with ${flightLabel(fol)}${route ? ` from ${route.origin.city || route.origin.name} to ${route.destination.city || route.destination.name}` : ''}.` : '',
+          ride ? `Riding the satellite ${ride.name}.` : '',
+          cam ? `Camera open: ${cam.name}.` : '',
+          cable ? `Cable open: ${cable.name}.` : '',
+          orbitRef.current ? 'Circling slowly.' : '',
+        ]
+        return parts2.filter(Boolean).join(' ')
+      }
+      case 'close':
+        return 'Closing the 3D view.'
+    }
+  }
+  const runRef = useRef(run3d)
+  runRef.current = run3d
+  useEffect(() => {
+    if (!controlRef || !widget) return
+    controlRef.current = { run: op => runRef.current(op) }
+    return () => {
+      controlRef.current = null
+    }
+  }, [controlRef, widget])
 
   // Escape steps back: stop riding, then close what is open.
   useEffect(() => {

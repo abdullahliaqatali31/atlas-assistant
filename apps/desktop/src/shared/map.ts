@@ -53,6 +53,29 @@ export interface Story {
 
 export const MAX_STORY_ITEMS = 20
 
+/** The 3D view's layers (its own rail), and what the assistant can do there. */
+export const GLOBE3D_LAYERS = ['flights', 'ships', 'sats', 'cameras', 'cables', 'celestial'] as const
+export type Globe3dLayer = (typeof GLOBE3D_LAYERS)[number]
+export const GLOBE3D_ACTIONS = ['open', 'close', 'layers', 'fly_with', 'next_contact', 'follow_sat', 'camera', 'orbit', 'stop', 'state'] as const
+export type Globe3dAction = (typeof GLOBE3D_ACTIONS)[number]
+
+export interface Map3dOp {
+  kind: '3d'
+  action: Globe3dAction
+  lat?: number | undefined
+  lon?: number | undefined
+  zoom?: number | undefined
+  label?: string | undefined
+  /** A callsign, satellite or camera name; "nearest" for the closest one. */
+  query?: string | undefined
+  /** fly_with: chase | cockpit; follow_sat: follow | eye. */
+  mode?: 'chase' | 'cockpit' | 'follow' | 'eye' | undefined
+  show: Globe3dLayer[]
+  hide: Globe3dLayer[]
+  /** next_contact: 1 next, -1 previous. orbit: 1 on, 0 off. */
+  direction?: number | undefined
+}
+
 export type MapOp =
   | { kind: 'view'; lat?: number | undefined; lon?: number | undefined; zoom?: number | undefined; label?: string | undefined; style?: MapStyle | undefined; globe?: boolean | undefined }
   | { kind: 'layers'; show: MapLayer[]; hide: MapLayer[] }
@@ -64,6 +87,7 @@ export type MapOp =
   | { kind: 'back' }
   | { kind: 'story'; story: Story | null }
   | { kind: 'tour'; action: 'play' | 'stop'; secondsEach: number }
+  | Map3dOp
 
 export const MC = {
   op: 'map:op',
@@ -86,6 +110,7 @@ const isStyle = (v: unknown): v is MapStyle => (MAP_STYLES as readonly unknown[]
 const num = (v: unknown, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : undefined)
 const text = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined)
 const layers = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter(isLayer))] : [])
+const layers3d = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((x): x is Globe3dLayer => (GLOBE3D_LAYERS as readonly unknown[]).includes(x)))] : [])
 
 export const MAX_PINS = 40
 
@@ -178,6 +203,20 @@ export const mapOpFromTool = (tool: string, input: Record<string, unknown>): Map
     case 'map_story': {
       if (input.clear === true && input.items === undefined) return { kind: 'story', story: null }
       return { kind: 'story', story: parseStory(input) }
+    }
+    case 'map_3d': {
+      const action = (GLOBE3D_ACTIONS as readonly unknown[]).includes(input.action) ? (input.action as Globe3dAction) : undefined
+      if (!action) throw new Error(`Say the action: ${GLOBE3D_ACTIONS.join(', ')}.`)
+      const lat = num(input.lat, -90, 90)
+      const lon = num(input.lon, -180, 180)
+      if ((lat === undefined) !== (lon === undefined)) throw new Error('Give both lat and lon, or a place name.')
+      const show = layers3d(input.show)
+      const hide = layers3d(input.hide).filter(l => !show.includes(l))
+      if (action === 'layers' && !show.length && !hide.length) throw new Error(`Name 3D layers to show or hide: ${GLOBE3D_LAYERS.join(', ')}.`)
+      const query = text(input.query, 60)
+      if (action === 'follow_sat' && !query) throw new Error('Which satellite? A name such as "ISS", "Hubble" or "GPS".')
+      const mode = (['chase', 'cockpit', 'follow', 'eye'] as const).find(m => m === input.mode)
+      return { kind: '3d', action, lat, lon, zoom: num(input.zoom, 0, 20), label: text(input.label, 80), query, mode, show, hide, direction: action === 'next_contact' ? (input.previous === true ? -1 : 1) : action === 'orbit' ? (input.on === false ? 0 : 1) : undefined }
     }
     case 'map_tour': {
       const action = input.action === 'stop' ? 'stop' : 'play'

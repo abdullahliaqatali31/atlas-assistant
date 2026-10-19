@@ -30,6 +30,7 @@ import { DisplayDefs, DisplayFx, TacticalHud } from './Display.tsx'
 import { DISPLAY_MODES, MODE_FILTER, MODE_LABEL, readDisplay, saveDisplay, type DisplayPrefs } from './hud.ts'
 // CesiumJS is large: the 3D view loads only when opened.
 const Globe3D = lazy(() => import('./Globe3D.tsx'))
+import type { Globe3DControl } from './Globe3D.tsx'
 /** If the 3D view fails (no WebGL, a bad driver), say so and keep the 2D map working. */
 class Guard3D extends Component<{ onClose: () => void; children: ReactNode }, { error: string | null }> {
   state = { error: null as string | null }
@@ -130,6 +131,10 @@ export function MapView({
   const [open, setOpen] = useState<'layers' | 'style' | 'display' | null>(null)
   /** The 3D view (terrain, buildings, aircraft at real altitude), opened where the map is. */
   const [threeD, setThreeD] = useState<{ lat: number; lon: number; zoom: number } | null>(null)
+  const threeDRef = useRef(threeD)
+  threeDRef.current = threeD
+  /** The open 3D view's handle, for Atlas's map_3d. */
+  const globeCtl = useRef<Globe3DControl | null>(null)
   // Visual mode, tactical HUD and scope (keys 1-5, H).
   const [display, setDisplay] = useState<DisplayPrefs>(readDisplay)
   useEffect(() => saveDisplay(display), [display])
@@ -409,6 +414,29 @@ export function MapView({
     const { prefs: p, layers: on, selected: sel, globe: isGlobe } = now$.current
     const showLayer = (id: LayerId) => !on[id] && setLayers(x => ({ ...x, [id]: true }))
     switch (op.kind) {
+      case '3d': {
+        if (op.action === 'close') {
+          if (!threeDRef.current) return 'The 3D view is not open; this is the flat map.'
+          setThreeD(null)
+          return 'Back on the flat map.'
+        }
+        // Open it where asked (or where the map is), then wait for it to start.
+        if (!threeDRef.current) {
+          const at = op.lat !== undefined && op.lon !== undefined ? { lat: op.lat, lon: op.lon, zoom: op.zoom ?? (op.action === 'open' ? 11 : 8) } : { lat: m.getCenter().lat, lon: m.getCenter().lng, zoom: m.getZoom() }
+          globeCtl.current = null
+          setThreeD(at)
+          // Read through a function: the handle is set by the 3D view as it starts.
+          const ctl = () => globeCtl.current
+          for (let i = 0; i < 80 && !ctl(); i++) await new Promise(r => setTimeout(r, 250))
+          const started = ctl()
+          if (!started) throw new Error('The 3D view did not start (this PC may not support WebGL).')
+          // Already there: no second flight.
+          if (op.action === 'open') return started.run({ ...op, lat: undefined, lon: undefined, label: op.label })
+          return started.run({ ...op, lat: op.action === 'camera' ? op.lat : undefined, lon: op.action === 'camera' ? op.lon : undefined })
+        }
+        if (!globeCtl.current) throw new Error('The 3D view is still starting; try again in a moment.')
+        return globeCtl.current.run(op)
+      }
       case 'view': {
         if (op.style !== undefined || op.globe !== undefined) onPrefs({ style: op.style ?? p.style, globe: op.globe ?? p.globe })
         if (op.lat !== undefined && op.lon !== undefined) await fly(m, { center: [op.lon, op.lat], zoom: op.zoom ?? Math.max(m.getZoom(), 6) })
@@ -1093,7 +1121,7 @@ export function MapView({
       {threeD && (
         <Guard3D onClose={() => setThreeD(null)}>
         <Suspense fallback={<div className="absolute inset-0 z-30 grid place-items-center bg-black/80 text-xs text-muted">Loading the 3D world…</div>}>
-          <Globe3D start={threeD} onClose={() => setThreeD(null)} />
+          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} />
         </Suspense>
         </Guard3D>
       )}
