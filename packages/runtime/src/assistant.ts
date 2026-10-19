@@ -65,6 +65,8 @@ export interface AssistantDeps {
   prefs: InitiativePrefs
   tools?: RuntimeTool[]
   rules?: () => readonly Rule[]
+  /** The owner turned Full control on: commands run without asking (policy keeps its hard limits). */
+  fullControl?: () => boolean
   /** Ask the owner to approve one action. Resolve false to decline. */
   confirm?: (tool: RuntimeTool, input: Record<string, unknown>, decision: Decision) => Promise<boolean>
   onAction?: (notice: ActionNotice) => void
@@ -398,7 +400,7 @@ export class Assistant {
     const summary = JSON.stringify(input).slice(0, 200)
 
     const decision = evaluate(
-      { tool: tool.name, actionClass: tool.actionClass, scope: tool.scope?.(input), fromUntrustedSource: tainted },
+      { tool: tool.name, actionClass: tool.actionClass, scope: tool.scope?.(input), fromUntrustedSource: tainted, fullControl: this.deps.fullControl?.() ?? false },
       rules?.() ?? [],
       clock.now(),
     )

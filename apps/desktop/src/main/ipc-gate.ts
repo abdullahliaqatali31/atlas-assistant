@@ -56,6 +56,8 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   PJ.resolveCommitment,
   // What Atlas may know about the PC, and what it must never index.
   PCC.setMap,
+  // Full control: Atlas acting without asking.
+  CC.setFullControl,
   PCC.rebuild,
   PCC.addExcluded,
   PCC.removeExcluded,

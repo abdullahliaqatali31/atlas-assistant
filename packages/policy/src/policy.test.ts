@@ -89,3 +89,34 @@ describe('owner rule shapes', () => {
     expect(evaluate({ tool: 'filesystem__read_file', actionClass: 'observe' }, r, NOW).effect).toBe('ask')
   })
 })
+
+describe('Full control', () => {
+  const rules: Rule[] = [
+    { id: 'ask-open', tool: 'open_item', actionClass: 'modify', effect: 'ask' },
+    { id: 'ask-send', tool: 'whatsapp_send', actionClass: 'external-send', effect: 'ask' },
+    { id: 'ask-risky', tool: 'desktop_act', actionClass: 'modify', effect: 'ask', scopePrefix: 'risky' },
+    { id: 'no-x', tool: 'format_disk', actionClass: 'modify', effect: 'deny' },
+  ]
+  const fc = (req: Parameters<typeof evaluate>[0]) => evaluate({ ...req, fullControl: true }, rules, 0).effect
+
+  it('runs the owner’s commands without asking, known tool or not', () => {
+    expect(fc({ tool: 'open_item', actionClass: 'modify' })).toBe('allow')
+    expect(fc({ tool: 'whatsapp_send', actionClass: 'external-send' })).toBe('allow')
+    expect(fc({ tool: 'desktop_act', actionClass: 'modify', scope: 'risky' })).toBe('allow')
+    expect(fc({ tool: 'some_mcp__write', actionClass: 'external-send' })).toBe('allow')
+    // Without it, the same calls ask.
+    expect(evaluate({ tool: 'open_item', actionClass: 'modify' }, rules, 0).effect).toBe('ask')
+  })
+
+  it('still confirms the irreversible, still obeys deny rules', () => {
+    for (const actionClass of ['destructive', 'credential', 'payment'] as const) expect(fc({ tool: 'x', actionClass })).toBe('ask')
+    expect(fc({ tool: 'format_disk', actionClass: 'modify' })).toBe('deny')
+  })
+
+  it('keeps the injection guard: after outside content, nothing leaves and nothing risky runs unasked', () => {
+    expect(fc({ tool: 'whatsapp_send', actionClass: 'external-send', fromUntrustedSource: true })).toBe('ask')
+    expect(fc({ tool: 'desktop_act', actionClass: 'modify', scope: 'risky', fromUntrustedSource: true })).toBe('ask')
+    // Ordinary work goes on.
+    expect(fc({ tool: 'open_item', actionClass: 'modify', fromUntrustedSource: true })).toBe('allow')
+  })
+})

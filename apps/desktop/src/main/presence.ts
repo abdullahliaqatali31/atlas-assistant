@@ -56,6 +56,7 @@ export class PresenceWidget {
   private mainInView = true
   private lastSent = ''
   private glassOpen = false
+  private fullControlOn = false
   private dragging: { timer: NodeJS.Timeout; dx: number; dy: number; until: number } | null = null
 
   constructor(
@@ -130,6 +131,12 @@ export class PresenceWidget {
     this.push()
   }
 
+  /** Full control turned on or off (the widget wears an amber ring while on). */
+  fullControl(on: boolean) {
+    this.fullControlOn = on
+    this.push()
+  }
+
   /** The glass panel opened or closed beside the widget. */
   glass(open: boolean) {
     this.glassOpen = open
@@ -162,6 +169,7 @@ export class PresenceWidget {
       name: this.deps.name(),
       scale: this.saved.scale,
       glass: this.glassOpen,
+      fullControl: this.fullControlOn,
     }
   }
 

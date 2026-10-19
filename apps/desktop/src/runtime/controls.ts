@@ -25,6 +25,8 @@ export interface HostControlsDeps {
 
 export class HostControls {
   paused = false
+  /** Set by main: the owner turned Full control on. */
+  fullControl: { on: boolean; mode: string | null; until: number | null } = { on: false, mode: null, until: null }
   private ownerRules: Rule[] = []
   private apps: { id: string; name: string }[] = []
   private mcp: McpHost | null = null

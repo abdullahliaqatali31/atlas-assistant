@@ -40,6 +40,9 @@ import {
   type ServerState,
   type ServerView,
   type ToolView,
+  FULL_CONTROL_MODES,
+  type FullControlMode,
+  type FullControlView,
 } from '../shared/control.ts'
 import type { ActionNotice } from '../shared/ipc.ts'
 
@@ -129,6 +132,8 @@ export interface ControlsDeps {
   mcpConfigPath: () => string
   /** Post to the runtime host; dropped while it is down (it gets `initMessages` on start). */
   post: (msg: ControlHostRequest) => void
+  /** Full control turned on or off (indicators: title bar, widget, tray). */
+  onFullControl?: (v: FullControlView) => void
   listActions: () => Promise<ActivityEntry[]>
   /** Push to the renderer and refresh the tray. */
   onChange: (state: ControlState) => void
@@ -200,6 +205,7 @@ export class Controls {
     const { rules, apps } = this.readControls()
     return [
       { type: 'set-paused', paused: this.paused },
+      { type: 'set-full-control', on: this.fullControl.on, mode: this.fullControl.mode, until: this.fullControl.until },
       { type: 'set-rules', rules },
       { type: 'set-apps', apps: apps.map(({ id, name }) => ({ id, name })) },
     ]
@@ -238,6 +244,7 @@ export class Controls {
     }
     return {
       paused: this.paused,
+      fullControl: this.fullControl,
       hotkey: this.hotkey,
       servers,
       apps: this.readControls().apps,
@@ -312,6 +319,37 @@ export class Controls {
 
   // ── safety switches ──
 
+  private fullControl: FullControlView = { on: false, mode: null, until: null, since: null }
+  private fullControlTimer: NodeJS.Timeout | null = null
+
+  get fullControlView(): FullControlView {
+    return this.fullControl
+  }
+
+  /**
+   * Full control on or off. Never saved: a restart starts in Normal. Pausing
+   * (Stop all) turns it off too. Callers check the owner first.
+   */
+  setFullControl(on: boolean, mode: FullControlMode = 'session') {
+    if (this.fullControlTimer) clearTimeout(this.fullControlTimer)
+    this.fullControlTimer = null
+    if (on && this.paused) throw new Error('Atlas is paused; resume it first.')
+    const until = on && mode === 'hour' ? Date.now() + 60 * 60_000 : null
+    this.fullControl = on ? { on: true, mode, until, since: Date.now() } : { on: false, mode: null, until: null, since: null }
+    if (until) {
+      this.fullControlTimer = setTimeout(() => this.setFullControl(false), until - Date.now())
+      this.fullControlTimer.unref?.()
+    }
+    this.deps.post({ type: 'set-full-control', on, mode: on ? mode : null, until })
+    this.deps.onFullControl?.(this.fullControl)
+    this.changed()
+  }
+
+  /** The owner locked the PC, it slept, or the owner left: session-long Full control ends. */
+  endFullControlSession() {
+    if (this.fullControl.on && this.fullControl.mode === 'session') this.setFullControl(false)
+  }
+
   setPaused(paused: boolean) {
     if (paused) {
       this.deps.onStop()
@@ -319,6 +357,7 @@ export class Controls {
     }
     this.paused = paused
     this.deps.post({ type: 'set-paused', paused })
+    if (paused && this.fullControl.on) this.setFullControl(false)
     this.changed()
   }
 
@@ -604,6 +643,11 @@ export class Controls {
     })
     handle(CC.pickScopeFolder, () => this.pickScopeFolder())
     handle(CC.activity, () => this.deps.listActions())
+    handle(CC.setFullControl, (on, mode) => {
+      if (typeof on !== 'boolean') throw new Error('On or off.')
+      this.setFullControl(on, FULL_CONTROL_MODES.includes(mode as FullControlMode) ? (mode as FullControlMode) : 'session')
+      return this.state()
+    })
     handle(CC.setPaused, paused => {
       this.setPaused(bool(paused))
       return this.state()

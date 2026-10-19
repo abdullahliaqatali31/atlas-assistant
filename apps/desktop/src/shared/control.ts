@@ -153,9 +153,23 @@ export interface RunningAction {
   since: number
 }
 
+/** How long Full control lasts once on: until the owner locks, leaves or the PC sleeps; an hour; or until turned off. */
+export const FULL_CONTROL_MODES = ['session', 'hour', 'manual'] as const
+export type FullControlMode = (typeof FULL_CONTROL_MODES)[number]
+
+export interface FullControlView {
+  on: boolean
+  mode: FullControlMode | null
+  /** When it turns itself off (hour mode). */
+  until: number | null
+  since: number | null
+}
+
 export interface ControlState {
   /** Automation is stopped: no tool runs until the owner resumes. */
   paused: boolean
+  /** Atlas runs the owner's commands without asking (the irreversible and injection guards stay). */
+  fullControl: FullControlView
   /** Accelerator for the global pause switch, or null when another app holds it. */
   hotkey: string | null
   servers: ServerView[]
@@ -209,6 +223,7 @@ export const CC = {
   pickScopeFolder: 'controls:pick-scope-folder',
   activity: 'controls:activity',
   setPaused: 'controls:set-paused',
+  setFullControl: 'controls:set-full-control',
   stopAll: 'controls:stop-all',
   pickCredentials: 'controls:pick-credentials',
   setBrowser: 'controls:set-browser',
@@ -244,6 +259,8 @@ export interface ControlBridge {
   setBrowser(setting: BrowserSetting): Promise<ControlState>
   /** Stores the Playwright Extension token in the OS credential store; empty removes it. */
   setExtensionToken(token: string): Promise<ControlState>
+  /** Full control on (with how long it lasts) or off. Owner only. */
+  setFullControl(on: boolean, mode?: FullControlMode): Promise<ControlState>
 }
 
 // ── validation (main process side) ──────────────────────────
@@ -297,6 +314,7 @@ export type ControlHostRequest =
   /** Owner rules, re-sent whenever they change. The host never writes them. */
   | { type: 'set-rules'; rules: Rule[] }
   | { type: 'set-paused'; paused: boolean }
+  | { type: 'set-full-control'; on: boolean; mode: FullControlMode | null; until: number | null }
   | { type: 'stop-all' }
   /** mcp.servers.json changed: restart only the MCP host. */
   | { type: 'reload-mcp' }

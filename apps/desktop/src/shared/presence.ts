@@ -33,6 +33,8 @@ export interface PresenceState {
   scale: WidgetScale
   /** The glass panel is open beside it: stay a compact orb (it shows what Atlas is doing). */
   glass: boolean
+  /** Full control is on: an amber ring, so it is never on unnoticed. */
+  fullControl: boolean
 }
 
 /** What the main window's conversation reports; main adds the card, name and scale. */

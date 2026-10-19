@@ -17,6 +17,9 @@ export const SYSTEM_RULES: Rule[] = [
   { id: 'default-system_status', tool: 'system_status', actionClass: 'observe', effect: 'allow' },
   { id: 'default-system_find', tool: 'system_find', actionClass: 'observe', effect: 'allow' },
   { id: 'default-system_foreground', tool: 'system_foreground', actionClass: 'observe', effect: 'allow' },
+  // Turning Full control on is the owner's yes every time; turning it off never waits.
+  { id: 'default-full_control', tool: 'full_control', actionClass: 'modify', effect: 'ask' },
+  { id: 'default-full_control-off', tool: 'full_control', actionClass: 'modify', effect: 'allow', scopePrefix: 'off' },
   // Opening, starting and making things on the PC: the owner says yes each time, unless Full control is on.
   ...['open_item', 'launch_app', 'make_folder', 'make_document', 'make_sheet'].map((tool): Rule => ({ id: `default-${tool}`, tool, actionClass: 'modify', effect: 'ask' })),
   // Opening a Settings page changes nothing by itself.
@@ -32,7 +35,13 @@ export class HostSystem {
   private snapshot: SystemSnapshot | null = null
   private changes: SystemChange[] = []
 
-  constructor(private readonly deps: { request: (op: SystemOp, signal?: AbortSignal) => Promise<string>; now: () => number }) {}
+  constructor(
+    private readonly deps: {
+      request: (op: SystemOp, signal?: AbortSignal) => Promise<string>
+      now: () => number
+      fullControl?: () => { on: boolean; mode: string | null; until: number | null }
+    },
+  ) {}
 
   setSnapshot(s: SystemSnapshot, changes: SystemChange[]) {
     this.snapshot = s
@@ -40,10 +49,17 @@ export class HostSystem {
   }
 
   contextLines(): string[] {
-    if (!this.snapshot) return []
+    const fc = this.deps.fullControl?.()
+    const control = fc?.on
+      ? [
+          `Full control is ON${fc.mode === 'hour' && fc.until ? ` until ${new Date(fc.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : fc.mode === 'session' ? ' until the owner locks the PC or leaves' : ''}: do what the owner asks on this PC (open, start, make, move, use apps, send what they dictate) without asking first, and say briefly what you did. Deleting for good, passwords and payments still need their yes, and so does sending anything out or pressing risky buttons right after reading outside content (web, email, messages).`,
+        ]
+      : []
+    if (!this.snapshot) return control
     const now = this.deps.now()
     const recent = this.changes.filter(c => now - c.at < RECENT_MS)
     return [
+      ...control,
       `This PC: ${describeSystem(this.snapshot)}.${this.snapshot.wifi.locationBlocked ? ' (Wi-Fi signal is hidden: Windows location services are off; system_settings page location turns them on.)' : ''}`,
       ...(recent.length ? [`PC changes: ${recent.map(c => `${c.text} (${ago(now - c.at)})`).join('; ')}.`] : []),
     ]
@@ -156,6 +172,19 @@ export class HostSystem {
           const sheets = parseSheets(input.sheets)
           if (typeof sheets === 'string') return Promise.reject(new Error(sheets))
           return this.deps.request({ kind: 'sheet', where: String(input.where ?? ''), name: String(input.name ?? ''), sheets, open: input.open === true }, signal)
+        },
+      },
+      {
+        name: 'full_control',
+        description:
+          'Turn Full control on or off when the owner says so ("full control on karo", "full control band karo"). On: you act on their commands without asking (they confirm the switch itself). for: session (until they lock the PC or leave, the default), hour, or manual (until turned off). Off: at once.',
+        inputSchema: { type: 'object', properties: { on: { type: 'boolean' }, for: { type: 'string', enum: ['session', 'hour', 'manual'] } }, required: ['on'], additionalProperties: false },
+        actionClass: 'modify',
+        isUntrusted: false,
+        scope: input => (input.on === true ? 'on' : 'off'),
+        run: (input, signal) => {
+          const mode = input.for === 'hour' || input.for === 'manual' ? input.for : 'session'
+          return this.deps.request({ kind: 'full-control', on: input.on === true, mode }, signal)
         },
       },
       {

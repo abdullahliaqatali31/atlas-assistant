@@ -29,6 +29,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 
@@ -875,6 +876,12 @@ type RuntimePhaseName = RuntimeStatus["phase"];
  */
 function TitleBar({ status }: { status: RuntimeStatus | null }) {
   const phase = status?.phase ?? "starting";
+  // Full control is never on unnoticed: an amber badge here, one click turns it off.
+  const [fullControl, setFullControl] = useState(false);
+  useEffect(() => {
+    void window.controls.state().then((s) => setFullControl(s.fullControl.on), () => undefined);
+    return window.controls.onState((s) => setFullControl(s.fullControl.on));
+  }, []);
   return (
     <header className="titlebar flex h-10 shrink-0 items-center gap-2.5 pl-4 select-none">
       <img
@@ -893,6 +900,18 @@ function TitleBar({ status }: { status: RuntimeStatus | null }) {
           <span className="capitalize"> · {status.mode}</span>
         ) : null}
       </span>
+      {fullControl && (
+        <button
+          type="button"
+          onClick={() => void window.controls.setFullControl(false).catch(() => undefined)}
+          style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
+          className="flex items-center gap-1.5 rounded-full border border-warm/70 bg-warm/15 px-2 py-0.5 text-[11px] font-medium text-warm shadow-[0_0_12px_rgba(251,191,36,0.35)] hover:bg-warm/25"
+          title="Atlas acts on your commands without asking. Click to turn it off."
+        >
+          <span className="size-1.5 animate-pulse rounded-full bg-warm" aria-hidden />
+          Full control
+        </button>
+      )}
     </header>
   );
 }

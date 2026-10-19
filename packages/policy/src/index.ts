@@ -29,6 +29,12 @@ export interface ActionRequest {
   value?: number
   /** True when the request originated from untrusted content rather than the owner. */
   fromUntrustedSource?: boolean
+  /**
+   * The owner turned Full control on: their commands run without asking.
+   * Deny rules and the always-confirm classes still hold, and after untrusted
+   * content anything that sends something out or is risky still asks.
+   */
+  fullControl?: boolean
 }
 
 export interface Rule {
@@ -96,12 +102,16 @@ export const evaluate = (req: ActionRequest, rules: readonly Rule[], now: number
     return { effect: 'ask', ruleId: top?.id ?? null, reason: `${req.actionClass} actions always need confirmation.` }
   }
 
-  if (req.fromUntrustedSource && req.actionClass !== 'observe') {
+  if (req.fromUntrustedSource && req.actionClass !== 'observe' && (!req.fullControl || req.actionClass === 'external-send' || req.scope?.startsWith('risky'))) {
     return {
       effect: 'ask',
       ruleId: top?.id ?? null,
       reason: 'The request came from untrusted content, so the owner must confirm it.',
     }
+  }
+
+  if (req.fullControl) {
+    return { effect: 'allow', ruleId: top?.id ?? 'full-control', reason: 'Full control is on: the owner’s command runs without asking.' }
   }
 
   if (!top) {

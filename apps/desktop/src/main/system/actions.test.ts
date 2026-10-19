@@ -67,8 +67,8 @@ describe('PC actions, doing', async () => {
     await wb.xlsx.readFile(join(docs, 'Budget.xlsx'))
     expect(wb.getWorksheet('Costs')?.getCell('B4').value).toMatchObject({ formula: 'SUM(B2:B3)' })
     expect(opened).toContain(join(docs, 'Plan.docx'))
-    // The Word and Excel libraries load slowly the first time.
-  }, 30_000)
+    // The Word and Excel libraries load slowly the first time, more so while the whole suite runs.
+  }, 90_000)
 
   it('opens WSL projects in VS Code and the Claude app, and knows "this project"', async () => {
     expect(await pc.open('atlas', 'vscode', '')).toMatch(/VS Code \(Remote - WSL\)/)

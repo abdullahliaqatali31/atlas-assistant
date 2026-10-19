@@ -82,6 +82,7 @@ const controls: ControlBridge = {
   pickScopeFolder: () => ipcRenderer.invoke(CC.pickScopeFolder),
   activity: () => ipcRenderer.invoke(CC.activity),
   setPaused: paused => ipcRenderer.invoke(CC.setPaused, paused),
+  setFullControl: (on, mode) => ipcRenderer.invoke(CC.setFullControl, on, mode ?? 'session'),
   stopAll: () => ipcRenderer.invoke(CC.stopAll),
   pickCredentials: name => ipcRenderer.invoke(CC.pickCredentials, name),
 }

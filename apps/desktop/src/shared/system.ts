@@ -1,3 +1,4 @@
+import type { FullControlMode } from './control.ts'
 import type { OpenWith, SheetSpec } from './pcactions.ts'
 import type { MapKind } from './sysmap.ts'
 
@@ -209,6 +210,8 @@ export type SystemOp =
   | { kind: 'folder'; where: string; name: string }
   | { kind: 'document'; where: string; name: string; markdown: string; open: boolean }
   | { kind: 'sheet'; where: string; name: string; sheets: SheetSpec[]; open: boolean }
+  /** Atlas asked to turn Full control on (after the owner's yes) or off. */
+  | { kind: 'full-control'; on: boolean; mode: FullControlMode }
 
 /** The This PC tab: live status, the system map's state. */
 export interface PcState {

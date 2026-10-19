@@ -87,7 +87,7 @@ export function PresenceApp() {
   const busy = s?.activity === 'thinking' || s?.activity === 'speaking'
 
   return (
-    <div ref={root} className="inline-block p-1" style={{ zoom: ZOOM[s?.scale ?? 'm'] }} onContextMenu={menu}>
+    <div ref={root} className={`inline-block p-1 ${s?.fullControl ? '[&>*]:!border-warm [&>*]:shadow-[0_0_14px_rgba(251,191,36,0.55)]' : ''}`} style={{ zoom: ZOOM[s?.scale ?? 'm'] }} onContextMenu={menu} title={s?.fullControl ? 'Full control is on' : undefined}>
       {shape === 'dot' ? (
         // Idle: a quiet orb. Click to talk, drag to move, right-click for options. It never changes size on hover.
         <div

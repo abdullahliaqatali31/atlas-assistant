@@ -1,7 +1,10 @@
-import { Battery, BatteryCharging, Bluetooth, BluetoothOff, FolderX, Map as MapIcon, RefreshCw, Shield, Wifi, WifiOff } from 'lucide-react'
+import { Battery, BatteryCharging, Zap, Bluetooth, BluetoothOff, FolderX, Map as MapIcon, RefreshCw, Shield, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import type { FullControlMode, FullControlView } from '../../shared/control.ts'
 import type { PcState } from '../../shared/system.ts'
+
+const MODE_LABEL: Record<FullControlMode, string> = { session: 'Until I lock or leave', hour: 'For an hour', manual: 'Until I turn it off' }
 
 const ago = (t: number) => {
   const m = Math.round((Date.now() - t) / 60_000)
@@ -16,10 +19,21 @@ const ago = (t: number) => {
  */
 export function ThisPc({ run }: { run: <T>(fn: () => Promise<T>) => Promise<T | undefined> }) {
   const [s, setS] = useState<PcState | null>(null)
+  const [fc, setFc] = useState<FullControlView | null>(null)
   useEffect(() => {
     void window.pc.state().then(setS, () => undefined)
-    return window.pc.onChanged(setS)
+    void window.controls.state().then(c => setFc(c.fullControl), () => undefined)
+    const off = window.controls.onState(c => setFc(c.fullControl))
+    const offPc = window.pc.onChanged(setS)
+    return () => {
+      off()
+      offPc()
+    }
   }, [])
+  const switchFc = async (on: boolean, mode?: FullControlMode) => {
+    const next = await run(() => window.controls.setFullControl(on, mode))
+    if (next) setFc(next.fullControl)
+  }
   const act = async (fn: () => Promise<PcState>) => {
     const next = await run(fn)
     if (next) setS(next)
@@ -30,6 +44,28 @@ export function ThisPc({ run }: { run: <T>(fn: () => Promise<T>) => Promise<T | 
 
   return (
     <div className="space-y-3">
+      <section className={`tile space-y-2 p-3 ${fc?.on ? 'border-warm/70 shadow-[0_0_18px_rgba(251,191,36,0.18)]' : ''}`}>
+        <h3 className="flex items-center gap-2 font-medium">
+          <Zap className={`size-4 ${fc?.on ? 'text-warm' : 'text-muted'}`} aria-hidden /> Full control
+          <span className={`ml-auto text-xs font-normal ${fc?.on ? 'text-warm' : 'text-muted'}`}>
+            {fc?.on ? `On · ${fc.mode ? MODE_LABEL[fc.mode].toLowerCase() : ''}${fc.until ? ` (until ${new Date(fc.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}` : 'Off · Atlas asks first'}
+          </span>
+        </h3>
+        <p className="text-xs text-muted">
+          Atlas does what you ask on this PC without asking first: opening and starting things, making folders, documents and sheets, moving and tidying files, using your apps, sending what you dictate. It still asks before deleting anything for good, anything with passwords or payments, and before sending anything or pressing Send / Delete / Pay right after it read a web page, an email or a message (so outside text can never steer it). Turns off when you lock the PC, it sleeps, the owner check closes, or you press Stop all. You can also say “full control on karo” (Atlas asks you once) or “full control band karo”.
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {(['session', 'hour', 'manual'] as FullControlMode[]).map(m => (
+            <button key={m} type="button" onClick={() => void switchFc(true, m)} className={`btn h-8 px-3 text-xs ${fc?.on && fc.mode === m ? 'border-warm text-warm' : ''}`} aria-pressed={fc?.on && fc.mode === m}>
+              {MODE_LABEL[m]}
+            </button>
+          ))}
+          <button type="button" onClick={() => void switchFc(false)} className={`btn h-8 px-3 text-xs ${!fc?.on ? 'border-accent text-accent' : ''}`} aria-pressed={!fc?.on}>
+            Off (ask first)
+          </button>
+        </div>
+      </section>
+
       <section className="tile space-y-2 p-3">
         <h3 className="flex items-center gap-2 font-medium">
           Right now

@@ -93,8 +93,11 @@ let heldReturn: Extract<SessionChange, { idleMs: number }> | null = null
 const publishIdentity = () => {
   toRenderer(IC.changed, identity.view())
   presence.refresh()
-  // Nothing stays on the desktop while the owner check is on.
-  if (identity.locked) glass.close()
+  // Nothing stays on the desktop while the owner check is on, and nobody unconfirmed gets Full control.
+  if (identity.locked) {
+    glass.close()
+    if (controls.fullControlView.on) controls.setFullControl(false)
+  }
 }
 const requireOwner = () => {
   if (identity.locked) throw new Error('Please confirm it is you first.')
@@ -158,6 +161,8 @@ const controls: Controls = new Controls({
     updateTray()
   },
   onStop: () => toRenderer(CH.silence, null),
+  // Full control shows everywhere: the widget's amber ring, the tray, the title bar (from the controls state).
+  onFullControl: v => presence.fullControl(v.on),
   log,
 })
 
@@ -313,6 +318,11 @@ const pcOp = async (op: SystemOp): Promise<string> => {
       return pcActions.document(op.where, op.name, op.markdown, op.open)
     case 'sheet':
       return pcActions.sheet(op.where, op.name, op.sheets, op.open)
+    case 'full-control':
+      // The runtime asked the owner first (turning on is never automatic); the owner check still applies here.
+      if (op.on && identity.locked) throw new Error('The owner check is on: confirm it is you first.')
+      controls.setFullControl(op.on, op.mode)
+      return op.on ? `Full control is on (${op.mode === 'hour' ? 'for an hour' : op.mode === 'manual' ? 'until you turn it off' : 'until you lock the PC or leave'}).` : 'Full control is off; I will ask before acting again.'
     case 'status':
     case 'settings':
       return pcSystem.handle(op)
@@ -457,12 +467,15 @@ const PHASE_LABEL: Record<RuntimeStatus['phase'], string> = {
 
 const updateTray = () => {
   if (!tray) return
-  tray.setToolTip(`Assistant: ${PHASE_LABEL[status.phase]}`)
+  tray.setToolTip(`Assistant: ${PHASE_LABEL[status.phase]}${controls.fullControlView.on ? ' · Full control' : ''}`)
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'Open assistant', click: () => createWindow() },
       { label: PHASE_LABEL[status.phase], enabled: false },
       { type: 'separator' },
+      controls.fullControlView.on
+        ? { label: 'Full control is on: turn it off', click: () => controls.setFullControl(false) }
+        : { label: 'Normal mode (Atlas asks first)', enabled: false },
       controls.isPaused
         ? { label: 'Resume automation', click: () => controls.setPaused(false) }
         : { label: 'Stop all automation', accelerator: controls.activeHotkey ?? undefined, click: () => controls.stopAll() },
@@ -780,6 +793,8 @@ if (!app.requestSingleInstanceLock()) {
     }
     updateTray()
     sessionWatch = watchSession(change => {
+      // Leaving (lock, sleep, away): a session's Full control ends here.
+      if (change.signal === 'lock' || change.signal === 'suspend' || change.signal === 'idle') controls.endFullControlSession()
       if (change.signal === 'lock' || change.signal === 'suspend') {
         // Privacy first: playback and the mic stop here, before the runtime even hears about it.
         toRenderer(CH.silence, null)

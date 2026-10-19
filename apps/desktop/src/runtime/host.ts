@@ -89,7 +89,7 @@ const code = new HostCode({ post: e => post(e), now: () => systemClock.now() })
 const files = new HostFiles({ post: e => post(e) })
 const desktop = new HostDesktop({ post: e => post(e) })
 const ui = new HostUi({ post: e => post(e), geocode: name => (world ? world.geocode(name) : Promise.reject(new Error('The assistant is not ready yet.'))) })
-const system = new HostSystem({ request: (op, signal) => ui.ask({ kind: 'system', op }, signal), now: () => Date.now() })
+const system = new HostSystem({ request: (op, signal) => ui.ask({ kind: 'system', op }, signal), now: () => Date.now(), fullControl: () => controls.fullControl })
 const news = new HostNews()
 const controls = new HostControls({
   post: e => post(e),
@@ -239,6 +239,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
     prefs: { ...DEFAULT_PREFS, utcOffsetMin: config.owner.utcOffsetMin, quietHours: parseQuietHours(merged.ASSISTANT_QUIET_HOURS) },
     tools: [],
     rules: controls.rules,
+    fullControl: () => controls.fullControl.on && !controls.paused,
     // While paused, nothing even asks.
     confirm: (tool, input, decision) => (controls.paused ? Promise.resolve(false) : askOwner(tool, input, decision.reason, current?.abort.signal)),
     onAction: n => post({ type: 'action', notice: { tool: n.tool, status: n.status, detail: n.detail === undefined ? undefined : redact(n.detail) } }),
@@ -604,6 +605,9 @@ port.on('message', ({ data }: { data: HostRequest }) => {
     }
     case 'open-app-result':
       controls.onOpenResult(data.requestId, data.error)
+      break
+    case 'set-full-control':
+      controls.fullControl = { on: data.on, mode: data.mode, until: data.until }
       break
     case 'set-paused':
       controls.paused = data.paused
