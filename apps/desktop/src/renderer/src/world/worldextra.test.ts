@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseLaunches, parseRadio } from './world.ts'
-import { deadReckon, flightLabel, launchWhen, rainTiles } from '../renderer/src/world/geo.ts'
-import type { Flight } from './world.ts'
+import { parseLaunches, parseRadio } from '../../../shared/world.ts'
+import { deadReckon, flightLabel, launchWhen, rainTiles } from './geo.ts'
+import type { Flight } from '../../../shared/world.ts'
 
 const plane = (over: Partial<Flight> = {}): Flight => ({ hex: 'abc123', callsign: 'PIA301', registration: 'AP-BMH', type: 'B77W', lat: 25, lon: 67, altitude: 34_000, speed: 480, track: 90, military: false, squawk: '', verticalRate: 0, emergency: 'none', seen: 0, ...over })
 

@@ -52,7 +52,7 @@ export const LAYERS: LayerDef[] = [
     kind: 'Radio station',
     dot: '#e879f9',
     source: 'radio',
-    pickRank: 6,
+    pickRank: 7,
     pickLayer: 'radio',
     // Thousands of stations: they group into bubbles until zoomed in.
     sourceOptions: { cluster: true, clusterRadius: 36, clusterMaxZoom: 8 },
@@ -90,7 +90,7 @@ export const LAYERS: LayerDef[] = [
     kind: 'Space launch',
     dot: '#a3e635',
     source: 'launches',
-    pickRank: 3,
+    pickRank: 3.5,
     draw: [
       { id: 'launches', type: 'circle', source: 'launches', paint: { 'circle-radius': ['case', ['==', ['get', 'upcoming'], 1], 7, 5], 'circle-color': ['get', 'color'], 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff', 'circle-stroke-opacity': 0.85 } },
       {
