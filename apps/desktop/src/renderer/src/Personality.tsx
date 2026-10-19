@@ -7,6 +7,7 @@ import { parseName, type PersonalityProfile } from '@assistant/shared'
 import type { PersonalityView } from '../../shared/personality.ts'
 import { AppearanceSettings } from './Appearance.tsx'
 import { SecuritySettings } from './Security.tsx'
+import { PowerUpPage } from './PowerUp.tsx'
 
 const cleanError = (err: unknown, fallback: string) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : fallback
@@ -21,7 +22,7 @@ const LANGUAGES: { value: PersonalityProfile['language']; label: string }[] = [
 
 /** Setup with Connection (keys, voice) and Personality side by side as sections. */
 export function SetupSections({ connection, onClose }: { connection: ReactNode; onClose: () => void }) {
-  const [section, setSection] = useState<'appearance' | 'connection' | 'personality' | 'security'>('appearance')
+  const [section, setSection] = useState<'appearance' | 'connection' | 'power' | 'personality' | 'security'>('appearance')
   const [assistantName, setAssistantName] = useState('')
   useEffect(() => {
     void window.personality.get().then(v => setAssistantName(v?.profile.assistantName ?? ''), () => undefined)
@@ -37,14 +38,14 @@ export function SetupSections({ connection, onClose }: { connection: ReactNode; 
           aria-label="Setup section"
           className="flex rounded-xl border border-border bg-bg p-0.5"
         >
-          {(['appearance', 'connection', 'personality', 'security'] as const).map(s => (
+          {(['appearance', 'connection', 'power', 'personality', 'security'] as const).map(s => (
             <ToggleGroup.Item key={s} value={s} className="rounded-md px-2 py-0.5 text-xs capitalize text-muted transition-colors hover:text-text data-[state=on]:bg-accent-soft data-[state=on]:text-accent">
-              {s === 'security' ? 'Security & backups' : s}
+              {s === 'security' ? 'Security & backups' : s === 'power' ? 'Power up' : s}
             </ToggleGroup.Item>
           ))}
         </ToggleGroup.Root>
       </nav>
-      <div className="min-h-0 flex-1 overflow-y-auto">{section === 'appearance' ? <AppearanceSettings /> : section === 'connection' ? connection : section === 'personality' ? <PersonalitySettings onRunIntro={onClose} /> : <SecuritySettings assistantName={assistantName} />}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{section === 'appearance' ? <AppearanceSettings /> : section === 'connection' ? connection : section === 'power' ? <PowerUpPage /> : section === 'personality' ? <PersonalitySettings onRunIntro={onClose} /> : <SecuritySettings assistantName={assistantName} />}</div>
     </div>
   )
 }

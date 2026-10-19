@@ -22,6 +22,7 @@ import { PC, type PersonalityBridge, type PersonalityView } from '../shared/pers
 import { PJ, type ProjectsBridge } from '../shared/projects.ts'
 import { PRS, type PresenceCommand, type PresenceHostBridge } from '../shared/presence.ts'
 import { PCC, type PcBridge, type PcState } from '../shared/system.ts'
+import { PWC, type PowerUpBridge } from '../shared/powerup.ts'
 
 const subscribe = <T>(channel: string, cb: (v: T) => void) => {
   const listener = (_e: IpcRendererEvent, v: T) => cb(v)
@@ -298,3 +299,12 @@ const pc: PcBridge = {
   removeExcluded: path => ipcRenderer.invoke(PCC.removeExcluded, path),
 }
 contextBridge.exposeInMainWorld('pc', pc)
+
+/** Setup › Power up: set, remove and test keys; values go in, never out. */
+const powerup: PowerUpBridge = {
+  state: () => ipcRenderer.invoke(PWC.state),
+  save: (id, key) => ipcRenderer.invoke(PWC.save, id, key),
+  remove: id => ipcRenderer.invoke(PWC.remove, id),
+  test: id => ipcRenderer.invoke(PWC.test, id),
+}
+contextBridge.exposeInMainWorld('powerup', powerup)

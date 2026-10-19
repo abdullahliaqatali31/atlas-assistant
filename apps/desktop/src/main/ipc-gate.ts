@@ -11,6 +11,7 @@ import { CH } from '../shared/ipc.ts'
 import { PC } from '../shared/personality.ts'
 import { PJ } from '../shared/projects.ts'
 import { PCC } from '../shared/system.ts'
+import { PWC } from '../shared/powerup.ts'
 
 export const OWNER_ONLY: ReadonlySet<string> = new Set([
   // Provider, key and server address: a swap would send conversations elsewhere.
@@ -55,6 +56,11 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   PJ.assignCommitment,
   PJ.resolveCommitment,
   // What Atlas may know about the PC, and what it must never index.
+  // Keys: which services Atlas may use, and whether they work.
+  PWC.state,
+  PWC.save,
+  PWC.remove,
+  PWC.test,
   PCC.setMap,
   // Full control: Atlas acting without asking.
   CC.setFullControl,

@@ -49,6 +49,9 @@ import { RuntimeSupervisor } from './supervisor.ts'
 import { PresenceWidget } from './presence.ts'
 import { GlassPanel } from './glass.ts'
 import { SystemService } from './system/service.ts'
+import { PowerUp } from './powerup.ts'
+import { osCredentialStore } from '@assistant/runtime'
+import { PWC } from '../shared/powerup.ts'
 import { SystemMapService } from './system/sysmap.ts'
 import { PcActions } from './system/actions.ts'
 import { PCC, type PcState, type SystemOp } from '../shared/system.ts'
@@ -605,6 +608,31 @@ handle(CH.initiativeAction, (id, action) => {
 })
 handle(PRS.update, raw => presence.update(raw))
 handle(PCC.state, () => pcState())
+
+// Power up: every key Atlas can use, saved, removed and tested here; values never reach the page.
+const powerUp = new PowerUp({
+  secrets: osCredentialStore(),
+  env: () => runtimeEnv(devEnvFile),
+  inUse: () => ({ llm: setupSummary().llmProvider, voice: setupSummary().voiceProvider }),
+  listModels: (provider, key) => supervisor.listModels(provider, key, ''),
+  azureRegion: () => readSetup().azureRegion,
+  restart: async () => {
+    await supervisor.restart()
+    status = { ...status, phase: 'starting', problems: [], setup: setupSummary() }
+  },
+  changedWorldKey: (id, key) => {
+    try {
+      if (id === 'aisstream') world.ships.setKey(key)
+      else void world.webcams.setKey(key)
+    } catch {
+      // The key is saved; the layer picks it up on its next look.
+    }
+  },
+})
+handle(PWC.state, () => powerUp.rows())
+handle(PWC.save, (id, key) => powerUp.save(id, key))
+handle(PWC.remove, id => powerUp.remove(id))
+handle(PWC.test, id => powerUp.test(id))
 handle(PCC.setMap, on => {
   if (typeof on !== 'boolean') throw new Error('On or off.')
   sysmap.setEnabled(on)
