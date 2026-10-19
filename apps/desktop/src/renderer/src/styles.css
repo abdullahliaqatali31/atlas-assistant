@@ -640,3 +640,21 @@ input[type='radio']:disabled {
   padding: 0 0.6rem;
   font-size: 0.6875rem;
 }
+
+/* World display modes: night-vision grain drifts, the CRT flickers a little. */
+@keyframes atlas-grain {
+  0% { background-position: 0 0; }
+  25% { background-position: -40px 25px; }
+  50% { background-position: 30px -35px; }
+  75% { background-position: -20px -15px; }
+  100% { background-position: 0 0; }
+}
+@keyframes atlas-flicker {
+  0%, 100% { opacity: 0.55; }
+  48% { opacity: 1; }
+  50% { opacity: 0.35; }
+  52% { opacity: 0.9; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [class*='atlas-grain'], [class*='atlas-flicker'] { animation: none !important; }
+}

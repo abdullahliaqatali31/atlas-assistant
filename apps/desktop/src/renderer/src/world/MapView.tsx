@@ -5,7 +5,7 @@
  */
 import 'maplibre-gl/dist/maplibre-gl.css'
 
-import { ArrowLeft, Globe2, Layers, Map as MapIcon } from 'lucide-react'
+import { ArrowLeft, Globe2, Layers, Map as MapIcon, ScanEye } from 'lucide-react'
 import maplibregl, { type FilterSpecification, type GeoJSONSource, type Map as MapLibre, type RasterTileSource, type StyleSpecification } from 'maplibre-gl'
 import * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -26,6 +26,8 @@ import { NewsCanvas } from './NewsCanvas.tsx'
 import { newsFeatures } from './newsmap.ts'
 import { layerFilter, readFilters, saveFilters } from './panels.ts'
 import { pickAt } from './pick.ts'
+import { DisplayDefs, DisplayFx, TacticalHud } from './Display.tsx'
+import { DISPLAY_MODES, MODE_FILTER, MODE_LABEL, readDisplay, saveDisplay, type DisplayPrefs } from './hud.ts'
 import { BASE_URL, carryOverlays, composeStyle, creditLine, STYLES, type CreditPart, type StyleId } from './styles.ts'
 
 export interface MapPrefs {
@@ -103,7 +105,10 @@ export function MapView({
   const glide = useRef<{ list: Flight[]; at: number } | null>(null)
   /** Where aircraft and ships have been since the map opened. */
   const trails = useRef(new Trails())
-  const [open, setOpen] = useState<'layers' | 'style' | null>(null)
+  const [open, setOpen] = useState<'layers' | 'style' | 'display' | null>(null)
+  // Visual mode, tactical HUD and scope (keys 1-5, H).
+  const [display, setDisplay] = useState<DisplayPrefs>(readDisplay)
+  useEffect(() => saveDisplay(display), [display])
   const [counts, setCounts] = useState<Partial<Record<LayerId, number>>>({})
   const [flightNote, setFlightNote] = useState('')
   const [shipState, setShipState] = useState<{ status: ShipsResult['status']; message: string | null }>({ status: 'off', message: null })
@@ -582,6 +587,11 @@ export function MapView({
       const t = e.target
       if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)) return
       if (!box.current?.offsetParent) return
+      if (e.key === 'Escape') return setOpen(null)
+      // 1-5: visual modes; H: the tactical HUD.
+      const n = Number(e.key)
+      if (Number.isInteger(n) && n >= 1 && n <= DISPLAY_MODES.length) return setDisplay(d => ({ ...d, mode: DISPLAY_MODES[n - 1]! }))
+      if (e.key.toLowerCase() === 'h') return setDisplay(d => ({ ...d, hud: !d.hud }))
       const r = RAIL.find(x => x.key === e.key.toLowerCase())
       if (!r) return
       setLayers(x => ({ ...x, [r.id]: !x[r.id] }))
@@ -950,7 +960,7 @@ export function MapView({
 
   const on = LAYERS.filter(l => layers[l.id]).length
   const current = STYLES.find(s => s.id === prefs.style)!
-  const toggle = (which: 'layers' | 'style') => setOpen(o => (o === which ? null : which))
+  const toggle = (which: 'layers' | 'style' | 'display') => setOpen(o => (o === which ? null : which))
   const controls = (
     <>
       {canGoBack && (
@@ -974,6 +984,10 @@ export function MapView({
         <Globe2 className="size-3.5" aria-hidden />
         <span className="hidden @[640px]:inline">{globe ? 'Globe' : '2D'}</span>
       </button>
+      <button type="button" onClick={() => toggle('display')} aria-expanded={open === 'display'} className={`map-chip px-2 ${open === 'display' || display.mode !== 'normal' || display.hud ? 'border-accent text-accent' : ''}`} title="Display: night vision, thermal, CRT, HUD (keys 1-5, H)">
+        <ScanEye className="size-3.5" aria-hidden />
+        <span className="hidden @[760px]:inline">{display.mode === 'normal' ? 'Display' : MODE_LABEL[display.mode]}</span>
+      </button>
       <button type="button" onClick={() => toggle('layers')} aria-expanded={open === 'layers'} className={`map-chip @[640px]:hidden ${open === 'layers' ? 'border-accent text-accent' : ''}`} title="Map layers">
         <Layers className="size-3.5" aria-hidden />
         <span className="hidden @[520px]:inline">Layers</span>
@@ -986,7 +1000,10 @@ export function MapView({
 
   return (
     <div className="relative h-full w-full overflow-hidden">
-      <div ref={box} className="h-full w-full" aria-label="World map" role="region" />
+      <DisplayDefs />
+      <div ref={box} className="h-full w-full" aria-label="World map" role="region" style={{ filter: MODE_FILTER[display.mode], transition: isLite() ? 'none' : 'filter 500ms ease-in-out' }} />
+      <DisplayFx mode={display.mode} scope={display.scope} />
+      {display.hud && ready && <TacticalHud map={map.current} mode={display.mode} counts={counts} />}
       <HoverCard map={map.current} ready={ready} world={world} now={now} />
       {ready && map.current && (
         <LayerRail
@@ -1044,6 +1061,26 @@ export function MapView({
         ])}
       />
       {styleError && <p className="glass absolute bottom-16 left-2 z-10 rounded-lg bg-solid/85 px-2 py-1 text-[11px] text-warm">{styleError}</p>}
+      {open === 'display' && (
+        <fieldset className="ask-pop glass absolute left-2 top-12 z-20 w-[min(260px,calc(100%-1rem))] space-y-1 rounded-xl bg-solid/90 p-2 text-xs shadow-2xl">
+          <legend className="sr-only">Display</legend>
+          <p className="hud-label px-1">Vision</p>
+          <div className="grid grid-cols-2 gap-1">
+            {DISPLAY_MODES.map((m, i) => (
+              <button key={m} type="button" onClick={() => setDisplay(d => ({ ...d, mode: m }))} className={`flex items-center justify-between rounded-lg border px-2 py-1.5 text-left ${display.mode === m ? 'border-accent text-accent' : 'border-border hover:border-edge'}`}>
+                {MODE_LABEL[m]} <span className="font-mono text-[10px] text-muted">{i + 1}</span>
+              </button>
+            ))}
+          </div>
+          <p className="hud-label px-1 pt-1">Overlay</p>
+          <label className="flex items-center gap-2 rounded-lg px-1 py-1">
+            <input type="checkbox" checked={display.hud} onChange={() => setDisplay(d => ({ ...d, hud: !d.hud }))} /> Tactical HUD <span className="ml-auto font-mono text-[10px] text-muted">H</span>
+          </label>
+          <label className="flex items-center gap-2 rounded-lg px-1 py-1">
+            <input type="checkbox" checked={display.scope} onChange={() => setDisplay(d => ({ ...d, scope: !d.scope }))} /> Scope
+          </label>
+        </fieldset>
+      )}
       {open === 'style' && (
         <fieldset className="ask-pop glass absolute left-2 top-12 z-20 w-[min(280px,calc(100%-1rem))] space-y-0.5 rounded-xl bg-solid/90 p-1.5 text-xs shadow-2xl">
           <legend className="sr-only">Map style</legend>
