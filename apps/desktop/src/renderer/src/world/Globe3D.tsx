@@ -20,16 +20,20 @@ import '@cesium/engine/Source/Widget/CesiumWidget.css'
 // The engine alone: the full "cesium" package's widgets evaluate code from strings, which the page's security policy forbids.
 import * as Cesium from '@cesium/engine'
 import { Cartesian2, FixedFrameTransforms as Transforms } from '@cesium/core'
-import { ArrowLeftRight, Box, Cable, ChevronLeft, ChevronRight, Crosshair, Eye, Orbit, Plane, Satellite, Ship as ShipIcon, Sparkles, Video, Cctv, X } from 'lucide-react'
+import { ArrowLeftRight, Box, Cable, ChevronLeft, ChevronRight, Crosshair, Eye, Orbit, Plane, Satellite, Ship as ShipIcon, Sparkles, Video, Cctv, Newspaper, Radio, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-import { kmBetween, type Flight, type FlightRoute, type Ship } from '../../../shared/world.ts'
+import { kmBetween, type Flight, type FlightRoute, type RadioStation, type Ship } from '../../../shared/world.ts'
 import type { Map3dOp } from '../../../shared/map.ts'
 import { aircraftName } from '../../../shared/aircraft.ts'
 import { satGroup, SAT_GROUPS, type CableDetail, type SatGroupId } from '../../../shared/space.ts'
 import { Cables3D } from './cables3d.ts'
 import { Cameras3D, type CameraView } from './cams3d.ts'
 import { CameraDetail } from './Inspector.tsx'
+import { RadioDetail } from './Details.tsx'
+import { Points3D } from './points3d.ts'
+import { newsFeatures } from './newsmap.ts'
+import type { FC } from './geo.ts'
 import { CelestialRing } from './CelestialRing.tsx'
 import { deadReckon, flightLabel, planeIcon, shipIcon } from './geo.ts'
 import { MODEL_HEADING_OFFSET, headingTape, heightForZoom, modelFor, type ModelId } from './models3d.ts'
@@ -61,10 +65,10 @@ interface Follow {
   mode: 'chase' | 'cockpit'
 }
 
-type LayerKey = 'flights' | 'ships' | 'sats' | 'cameras' | 'cables' | 'celestial'
+type LayerKey = 'flights' | 'ships' | 'sats' | 'cameras' | 'news' | 'radio' | 'cables' | 'celestial'
 type Layers = Record<LayerKey, boolean> & { hiddenSats: SatGroupId[] }
 const LAYERS_KEY = 'atlas.globe3d.layers'
-const DEFAULT_LAYERS: Layers = { flights: true, ships: true, sats: true, cameras: true, cables: false, celestial: false, hiddenSats: [] }
+const DEFAULT_LAYERS: Layers = { flights: true, ships: true, sats: true, cameras: true, news: true, radio: false, cables: false, celestial: false, hiddenSats: [] }
 const readLayers = (): Layers => {
   try {
     return { ...DEFAULT_LAYERS, ...(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '{}') as Partial<Layers>) }
@@ -73,12 +77,15 @@ const readLayers = (): Layers => {
   }
 }
 
-type Counts = { flights: number; ships: number; sats: number; cables: number; cameras: number }
+type Counts = { flights: number; ships: number; sats: number; cables: number; cameras: number; news: number; radio: number }
+type NewsItem = FC['features'][number]
 const RAIL: { k: LayerKey; label: string; icon: typeof Plane; count: (c: Counts) => string }[] = [
   { k: 'flights', label: 'Flights', icon: Plane, count: c => String(c.flights) },
   { k: 'ships', label: 'Ships', icon: ShipIcon, count: c => String(c.ships) },
   { k: 'sats', label: 'Satellites', icon: Satellite, count: c => String(c.sats) },
   { k: 'cameras', label: 'Cameras', icon: Cctv, count: c => (c.cameras ? String(c.cameras) : '') },
+  { k: 'news', label: 'News', icon: Newspaper, count: c => (c.news ? String(c.news) : '') },
+  { k: 'radio', label: 'Radio', icon: Radio, count: c => (c.radio ? String(c.radio) : '') },
   { k: 'cables', label: 'Sea cables', icon: Cable, count: c => (c.cables ? String(c.cables) : '') },
   { k: 'celestial', label: 'Celestial', icon: Sparkles, count: () => '' },
 ]
@@ -108,13 +115,15 @@ export default function Globe3D({ start, onClose, controlRef }: { start: { lat: 
   const [follow, setFollow] = useState<Follow | null>(null)
   const [route, setRoute] = useState<FlightRoute | null>(null)
   const [, tick] = useState(0)
-  const [counts, setCounts] = useState<Counts>({ flights: 0, ships: 0, sats: 0, cables: 0, cameras: 0 })
+  const [counts, setCounts] = useState<Counts>({ flights: 0, ships: 0, sats: 0, cables: 0, cameras: 0, news: 0, radio: 0 })
   followRef.current = follow
   const [layers, setLayers] = useState(readLayers)
   const layersRef = useRef(layers)
   layersRef.current = layers
   const [widget, setWidget] = useState<Cesium.CesiumWidget | null>(null)
-  const parts = useRef<{ bills: Cesium.BillboardCollection; shipBills: Cesium.BillboardCollection; sats: Satellites3D; cables: Cables3D; cams: Cameras3D } | null>(null)
+  const parts = useRef<{ bills: Cesium.BillboardCollection; shipBills: Cesium.BillboardCollection; sats: Satellites3D; cables: Cables3D; cams: Cameras3D; radio: Points3D<RadioStation>; news: Points3D<NewsItem> } | null>(null)
+  const [radioPick, setRadioPick] = useState<number | null>(null)
+  const [newsPick, setNewsPick] = useState<number | null>(null)
   const [camPick, setCamPick] = useState<number | null>(null)
   const camView = useRef<CameraView | null>(null)
   const [satPick, setSatPick] = useState<number | null>(null)
@@ -303,7 +312,9 @@ export default function Globe3D({ start, onClose, controlRef }: { start: { lat: 
       const sats = new Satellites3D(scene)
       const cables = new Cables3D(scene)
       const cams = new Cameras3D(scene)
-      parts.current = { bills, shipBills, sats, cables, cams }
+      const radio = new Points3D<RadioStation>(scene, 'radio')
+      const news = new Points3D<NewsItem>(scene, 'news')
+      parts.current = { bills, shipBills, sats, cables, cams, radio, news }
       setWidget(viewer)
       void window.world.satellites('all').then(
         list => {
@@ -382,6 +393,8 @@ export default function Globe3D({ start, onClose, controlRef }: { start: { lat: 
         if (satRideRef.current) return
         setSatPick(id?.kind === 'sat' && typeof id.i === 'number' ? id.i : null)
         setCamPick(id?.kind === 'cam' && typeof id.i === 'number' ? id.i : null)
+        setRadioPick(id?.kind === 'radio' && typeof id.i === 'number' ? id.i : null)
+        setNewsPick(id?.kind === 'news' && typeof id.i === 'number' ? id.i : null)
         setLanding(id?.kind === 'landing' ? (id.name ?? null) : null)
         const cableId = id?.kind === 'cable' ? id.id : undefined
         cables.highlight(cableId ?? null)
@@ -454,6 +467,19 @@ export default function Globe3D({ start, onClose, controlRef }: { start: { lat: 
         },
         () => undefined,
       )
+    pt.radio.setVisible(layers.radio)
+    if (layers.radio && !pt.radio.loaded)
+      void window.world.radio().then(
+        list => {
+          if (widget.isDestroyed() || pt.radio.loaded) return
+          pt.radio.load(list, s => ({ lat: s.lat, lon: s.lon, color: '#e879f9', size: 5 }))
+          pt.radio.setVisible(layersRef.current.radio)
+          setCounts(x => ({ ...x, radio: list.length }))
+          widget.scene.requestRender()
+        },
+        () => undefined,
+      )
+    pt.news.setVisible(layers.news)
     pt.cables.setVisible(layers.cables)
     if (layers.cables && !pt.cables.loaded)
       void window.world.cables().then(
@@ -470,6 +496,26 @@ export default function Globe3D({ start, onClose, controlRef }: { start: { lat: 
     widget.scene.globe.enableLighting = layers.celestial
     widget.scene.requestRender()
   }, [widget, layers])
+
+  // News where it happens (the same placement as the flat map), kept fresh.
+  useEffect(() => {
+    const pt = parts.current
+    if (!widget || !pt) return
+    const show = (r: { headlines: Parameters<typeof newsFeatures>[0] }) => {
+      if (widget.isDestroyed()) return
+      const items = newsFeatures(r.headlines).features
+      pt.news.load(items, f => {
+        const [lon, lat] = f.geometry.coordinates as [number, number]
+        const sev = Number(f.properties.severity ?? 0)
+        return { lat, lon, color: String(f.properties.color ?? '#44adff'), size: 5 + Math.min(6, sev / 1.6) }
+      })
+      pt.news.setVisible(layersRef.current.news)
+      setCounts(x => ({ ...x, news: items.length }))
+      widget.scene.requestRender()
+    }
+    void window.news.list().then(show, () => undefined)
+    return window.news.onChanged(show)
+  }, [widget])
 
   // Continuous frames only while the camera rides something.
   useEffect(() => {
@@ -739,6 +785,8 @@ export default function Globe3D({ start, onClose, controlRef }: { start: { lat: 
       setPicked(null)
       setSatPick(null)
       setCamPick(null)
+      setRadioPick(null)
+      setNewsPick(null)
       setCable(null)
       setLanding(null)
       parts.current?.cables.highlight(null)
@@ -758,6 +806,8 @@ export default function Globe3D({ start, onClose, controlRef }: { start: { lat: 
     if (k === 'sats' && !on) (setSatPick(null), setSatRide(null))
     if (k === 'cables' && !on) (setCable(null), setLanding(null))
     if (k === 'cameras' && !on) setCamPick(null)
+    if (k === 'radio' && !on) setRadioPick(null)
+    if (k === 'news' && !on) setNewsPick(null)
   }
 
   const closeCable = () => {
@@ -773,6 +823,20 @@ export default function Globe3D({ start, onClose, controlRef }: { start: { lat: 
   }
 
   const cam = camPick !== null ? parts.current?.cams.list[camPick] : undefined
+  const station = radioPick !== null ? parts.current?.radio.items[radioPick] : undefined
+  const story = newsPick !== null ? parts.current?.news.items[newsPick] : undefined
+  /** The radio tuner: the next station by distance from this one, and fly there. */
+  const tune = (dir: 1 | -1) => {
+    const list = parts.current?.radio.items
+    if (!list?.length || !station || !widget) return
+    const order = list.map((s, i) => ({ i, km: kmBetween(station, s) })).sort((a, b) => a.km - b.km)
+    const pos = order.findIndex(o => o.i === radioPick)
+    const next = order[(pos + dir + order.length) % order.length]!
+    const s = list[next.i]!
+    setRadioPick(next.i)
+    const c = widget.camera.positionCartographic
+    widget.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(s.lon, s.lat, Math.max(200_000, Math.min(3_000_000, c.height))), duration: 1.4 })
+  }
   const sat = satPick !== null ? parts.current?.sats.list[satPick] : undefined
   const satNow = sat ? parts.current?.sats.facts(sat) : null
 
@@ -939,8 +1003,57 @@ export default function Globe3D({ start, onClose, controlRef }: { start: { lat: 
         </div>
       )}
 
+      {/* A picked radio station: play it, and turn the dial to the next one. */}
+      {station && !follow && !sat && !cam && (
+        <div className={`absolute bottom-24 left-3 w-80 max-w-[calc(100%-1.5rem)] space-y-2 p-3 ${panel}`}>
+          <div className="flex items-start gap-2">
+            <Radio className="mt-0.5 size-4 text-fuchsia-300" aria-hidden />
+            <p className="min-w-0 flex-1 truncate text-sm font-semibold" title={station.name}>
+              {station.name}
+            </p>
+            <button type="button" onClick={() => setRadioPick(null)} className="text-white/60 hover:text-white" aria-label="Close">
+              <X className="size-4" aria-hidden />
+            </button>
+          </div>
+          {/* A new key per station: the player starts fresh (and stops the last one). */}
+          <RadioDetail key={station.id} p={{ url: station.url, country: station.country, tags: station.tags, codec: station.codec, bitrate: station.bitrate }} />
+          <div className="flex items-center justify-between">
+            <button type="button" onClick={() => tune(-1)} className="flex items-center gap-1 rounded-full border border-white/20 px-2.5 py-1 text-xs hover:border-fuchsia-300">
+              <ChevronLeft className="size-3.5" aria-hidden /> Nearby
+            </button>
+            <span className={`text-[10px] text-white/45 ${mono}`}>Tuner</span>
+            <button type="button" onClick={() => tune(1)} className="flex items-center gap-1 rounded-full border border-white/20 px-2.5 py-1 text-xs hover:border-fuchsia-300">
+              Next <ChevronRight className="size-3.5" aria-hidden />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* A picked news item: what happened there. */}
+      {story && !follow && !sat && !cam && !station && (
+        <div className={`absolute bottom-24 left-3 w-80 max-w-[calc(100%-1.5rem)] space-y-2 p-3 ${panel}`}>
+          <div className="flex items-start gap-2">
+            <span className="mt-1.5 size-2 shrink-0 rounded-full" style={{ background: String(story.properties.color ?? '#44adff') }} />
+            <p className="min-w-0 flex-1 text-sm font-semibold leading-snug">{String(story.properties.title ?? '')}</p>
+            <button type="button" onClick={() => setNewsPick(null)} className="text-white/60 hover:text-white" aria-label="Close">
+              <X className="size-4" aria-hidden />
+            </button>
+          </div>
+          {typeof story.properties.image === 'string' && story.properties.image.startsWith('https://') && <img src={story.properties.image} alt="" className="aspect-video w-full rounded-lg object-cover" />}
+          {story.properties.summary && <p className="line-clamp-4 text-[11px] text-white/75">{String(story.properties.summary)}</p>}
+          <p className="flex items-center gap-2 text-[10px] text-white/50">
+            <span className="flex-1">{[story.properties.source, story.properties.place].filter(Boolean).join(' · ')}</span>
+            {typeof story.properties.url === 'string' && (
+              <a href={story.properties.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                Read
+              </a>
+            )}
+          </p>
+        </div>
+      )}
+
       {/* A picked cable: what it links. */}
-      {cable && !follow && !sat && !cam && (
+      {cable && !follow && !sat && !cam && !station && !story && (
         <div className={`absolute bottom-24 left-3 w-80 max-w-[calc(100%-1.5rem)] space-y-2 p-3 ${panel}`}>
           <div className="flex items-start gap-2">
             <Cable className="mt-0.5 size-4 text-accent" aria-hidden />
@@ -1093,6 +1206,7 @@ export default function Globe3D({ start, onClose, controlRef }: { start: { lat: 
         {tier === 'google' ? 'Google Map Tiles' : tier === 'ion' ? 'Cesium ion · Esri World Imagery' : 'Esri World Imagery · Re:Earth terrain'} · CesiumJS · aircraft models CC BY 4.0 (see credits){layers.sats ? ' · CelesTrak' : ''}
         {layers.cables ? ' · Submarine Cable Map © TeleGeography' : ''}
         {layers.cameras ? ' · cameras from each agency’s open data' : ''}
+        {layers.radio ? ' · stations: Radio Browser' : ''}
       </p>
     </div>
   )

@@ -54,7 +54,7 @@ export interface Story {
 export const MAX_STORY_ITEMS = 20
 
 /** The 3D view's layers (its own rail), and what the assistant can do there. */
-export const GLOBE3D_LAYERS = ['flights', 'ships', 'sats', 'cameras', 'cables', 'celestial'] as const
+export const GLOBE3D_LAYERS = ['flights', 'ships', 'sats', 'cameras', 'news', 'radio', 'cables', 'celestial'] as const
 export type Globe3dLayer = (typeof GLOBE3D_LAYERS)[number]
 export const GLOBE3D_ACTIONS = ['open', 'close', 'layers', 'fly_with', 'next_contact', 'follow_sat', 'camera', 'orbit', 'stop', 'state'] as const
 export type Globe3dAction = (typeof GLOBE3D_ACTIONS)[number]
