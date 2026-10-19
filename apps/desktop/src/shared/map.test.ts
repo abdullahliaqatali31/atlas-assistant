@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { mapOpFromTool, MAX_PINS } from './map.ts'
+import { mapOpFromTool, MAX_PINS, type Map3dOp } from './map.ts'
 
 describe('mapOpFromTool', () => {
   it('builds a fly-to with style and globe', () => {
@@ -74,14 +74,14 @@ describe('mapOpFromTool', () => {
     expect(mapOpFromTool('map_3d', { action: 'open', lat: 47.6, lon: -122.3, zoom: 12, label: 'Seattle' })).toMatchObject({ kind: '3d', action: 'open', lat: 47.6, lon: -122.3, zoom: 12, label: 'Seattle', show: [], hide: [] })
     expect(mapOpFromTool('map_3d', { action: 'layers', show: ['cables', 'nope'], hide: ['cables', 'flights'] })).toMatchObject({ show: ['cables'], hide: ['flights'] })
     expect(mapOpFromTool('map_3d', { action: 'fly_with', query: 'PIA301', mode: 'cockpit' })).toMatchObject({ action: 'fly_with', query: 'PIA301', mode: 'cockpit' })
-    expect(mapOpFromTool('map_3d', { action: 'next_contact', previous: true }).direction).toBe(-1)
-    expect(mapOpFromTool('map_3d', { action: 'orbit', on: false }).direction).toBe(0)
+    expect((mapOpFromTool('map_3d', { action: 'next_contact', previous: true }) as Map3dOp).direction).toBe(-1)
+    expect((mapOpFromTool('map_3d', { action: 'orbit', on: false }) as Map3dOp).direction).toBe(0)
     expect(mapOpFromTool('map_3d', { action: 'follow_sat', query: 'ISS', mode: 'eye' })).toMatchObject({ query: 'ISS', mode: 'eye' })
     expect(() => mapOpFromTool('map_3d', { action: 'fly_to_mars' })).toThrow('Say the action')
     expect(() => mapOpFromTool('map_3d', { action: 'layers' })).toThrow('Name 3D layers')
     expect(() => mapOpFromTool('map_3d', { action: 'follow_sat' })).toThrow('Which satellite')
     expect(() => mapOpFromTool('map_3d', { action: 'open', lat: 10 })).toThrow('both lat and lon')
-    expect(mapOpFromTool('map_3d', { action: 'camera', mode: 'sideways' }).mode).toBeUndefined()
+    expect((mapOpFromTool('map_3d', { action: 'camera', mode: 'sideways' }) as Map3dOp).mode).toBeUndefined()
   })
 
   it('rejects tools it does not know', () => {
