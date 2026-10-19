@@ -53,6 +53,7 @@ export class PresenceWidget {
   private initiative: { item: InitiativeItem; until: number } | null = null
   private mainInView = true
   private lastSent = ''
+  private dragging: { timer: NodeJS.Timeout; dx: number; dy: number; until: number } | null = null
 
   constructor(
     private readonly deps: {
@@ -207,12 +208,6 @@ export class PresenceWidget {
       this.push()
       if (widgetVisible(this.saved.when, this.mainInView)) win.showInactive()
     })
-    win.on('moved', () => {
-      const b = win.getBounds()
-      const d = screen.getDisplayMatching(b)
-      this.saved.at = { ...this.saved.at, [String(d.id)]: { x: b.x, y: b.y } }
-      this.save()
-    })
     win.on('closed', () => {
       if (this.win === win) this.win = null
     })
@@ -226,6 +221,42 @@ export class PresenceWidget {
     if (prev.width === size.width && prev.height === size.height) return
     const area = screen.getDisplayMatching(prev).workArea
     win.setBounds(growFrom(prev, size, area) as Rectangle)
+  }
+
+/** Follow the cursor until the page says the button is up (or 20 s pass, should that message be lost). */
+  private dragStart() {
+    const win = this.win
+    if (!win || win.isDestroyed() || this.dragging) return
+    const c = screen.getCursorScreenPoint()
+    const b = win.getBounds()
+    const timer = setInterval(() => {
+      const d = this.dragging
+      if (!d || win.isDestroyed() || Date.now() > d.until) return this.dragEnd()
+      const p = screen.getCursorScreenPoint()
+      const { width, height } = win.getBounds()
+      win.setBounds({ x: p.x - d.dx, y: p.y - d.dy, width, height })
+    }, 16)
+    this.dragging = { timer, dx: c.x - b.x, dy: c.y - b.y, until: Date.now() + 20_000 }
+  }
+
+  private dragEnd() {
+    if (!this.dragging) return
+    clearInterval(this.dragging.timer)
+    this.dragging = null
+    const win = this.win
+    if (!win || win.isDestroyed()) return
+    // Keep it fully on the screen it was dropped on, and remember the spot there.
+    const b = win.getBounds()
+    const d = screen.getDisplayMatching(b)
+    const fitted = growFrom(b, { width: b.width, height: b.height }, d.workArea)
+    win.setBounds(fitted)
+    this.saved.at = { ...this.saved.at, [String(d.id)]: { x: fitted.x, y: fitted.y } }
+    this.save()
+  }
+
+  /** Where the widget is now (for placing the glass panel beside it), or null when hidden. */
+  bounds(): Rectangle | null {
+    return this.win && !this.win.isDestroyed() && this.win.isVisible() ? this.win.getBounds() : null
   }
 
   private menu() {
@@ -271,6 +302,8 @@ export class PresenceWidget {
     on(PRS.talk, () => this.talk())
     on(PRS.open, () => this.deps.openMain())
     on(PRS.menu, () => this.menu())
+    on(PRS.dragStart, () => this.dragStart())
+    on(PRS.dragEnd, () => this.dragEnd())
     on(PRS.resize, (w, h) => {
       const size = parseWidgetSize(w, h)
       if (size) this.resize(size)

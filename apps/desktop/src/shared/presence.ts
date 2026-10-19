@@ -58,6 +58,9 @@ export const PRS = {
   menu: 'presence:menu',
   initiative: 'presence:initiative',
   approval: 'presence:approval',
+  /** Widget → main: the owner pressed and moved; main moves the window with the cursor until released. */
+  dragStart: 'presence:drag-start',
+  dragEnd: 'presence:drag-end',
 } as const
 
 export type PresenceCommand = 'stop' | 'talk'
@@ -72,6 +75,8 @@ export interface PresenceBridge {
   resize(width: number, height: number): Promise<void>
   approval(id: string, approved: boolean): Promise<void>
   initiative(id: string, action: 'snooze' | 'mute' | 'dismiss'): Promise<void>
+  dragStart(): Promise<void>
+  dragEnd(): Promise<void>
 }
 
 /** The main window's side (window.presenceHost): report what the conversation does, hear the widget's asks, the setting. */
