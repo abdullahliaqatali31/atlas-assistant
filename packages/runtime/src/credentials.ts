@@ -26,6 +26,9 @@ export const SECRET_NAMES = [
   // Map data.
   'AISSTREAM_API_KEY',
   'WINDY_WEBCAMS_API_KEY',
+  // The 3D World view: photorealistic cities (Google) and world terrain + buildings (Cesium ion).
+  'GOOGLE_MAPS_API_KEY',
+  'CESIUM_ION_TOKEN',
 ] as const
 export type SecretName = (typeof SECRET_NAMES)[number]
 

@@ -545,6 +545,7 @@ export const WLD = {
   launches: 'world:launches',
   radio: 'world:radio',
   rain: 'world:rain',
+  map3dKeys: 'world:map3d-keys',
   satellites: 'world:satellites',
   ships: 'world:ships',
   shipsKey: 'world:ships-key',
@@ -572,6 +573,8 @@ export interface WorldBridge {
   radio(): Promise<RadioStation[]>
   /** The newest global rain frame (NASA IMERG, 30-minute) as a GIBS time; null: use yesterday's daily. */
   rain(): Promise<string | null>
+  /** Keys for the 3D view (browser-side by nature): Google photorealistic tiles, Cesium ion. */
+  map3dKeys(): Promise<{ google: string | null; ion: string | null }>
   /** The ISS, stations and the brightest satellites. */
   satellites(): Promise<SatelliteElements[]>
   /** Ships in the area on screen (needs the owner's free AISStream key). */

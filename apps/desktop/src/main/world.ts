@@ -9,7 +9,7 @@ import { osCredentialStore } from '@assistant/runtime'
 
 import { EMPTY_WORLD, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
 import { CameraDirectory } from './cameras.ts'
-import { FlightSweep, RouteBook } from './flights.ts'
+import { AdsbFeed, FlightSweep, RouteBook } from './flights.ts'
 import { ShipFeed } from './ships.ts'
 import { WebcamService } from './webcams.ts'
 
@@ -54,7 +54,8 @@ export class WorldService {
   private satellites: { at: number; list: SatelliteElements[] } | null = null
   private readonly cams = new CameraDirectory((level, message) => this.deps.log?.(level, message))
   readonly webcams = new WebcamService({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
-  private readonly sweep = new FlightSweep({ getJson, log: (level, message) => this.deps.log?.(level, message) })
+  private readonly adsb = new AdsbFeed(getJson)
+  private readonly sweep = new FlightSweep({ getJson, feed: this.adsb, log: (level, message) => this.deps.log?.(level, message) })
   private readonly routes = new RouteBook({ getJson })
   readonly ships = new ShipFeed({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
 
@@ -125,7 +126,7 @@ export class WorldService {
     this.lastFlightCall = now
     let raw: unknown
     try {
-      raw = await getJson(`https://api.adsb.lol/v2/lat/${lat.toFixed(3)}/lon/${lon.toFixed(3)}/dist/${radius}`)
+      raw = await this.adsb.point(lat, lon, radius)
     } catch (e) {
       if (/HTTP (420|429)/.test(e instanceof Error ? e.message : '')) this.flightsPausedUntil = Date.now() + FLIGHTS_BACKOFF
       if (hit || this.lastFlights.length || military.length || fill) return merge(hit?.flights ?? this.lastFlights)
@@ -170,14 +171,12 @@ export class WorldService {
   private async military(): Promise<Flight[]> {
     const now = Date.now()
     if (this.militaryCache && now - this.militaryCache.at < MILITARY_TTL) return this.militaryCache.flights
-    if (now < this.flightsPausedUntil) return this.militaryCache?.flights ?? []
     try {
-      const flights = parseFlights(await getJson('https://api.adsb.lol/v2/mil')).map(f => ({ ...f, military: true }))
+      const flights = parseFlights(await this.adsb.military()).map(f => ({ ...f, military: true }))
       this.militaryCache = { at: now, flights }
       return flights
-    } catch (e) {
-      if (/HTTP (420|429)/.test(e instanceof Error ? e.message : '')) this.flightsPausedUntil = Date.now() + FLIGHTS_BACKOFF
-      // Try again in a minute either way, keeping what we had.
+    } catch {
+      // Both feeds failed: try again in a minute, keeping what we had. (Never pauses the regional flights.)
       this.militaryCache = { at: now, flights: this.militaryCache?.flights ?? [] }
       return this.militaryCache.flights
     }
@@ -307,6 +306,11 @@ export class WorldService {
     handle(WLD.launches, () => this.launches())
     handle(WLD.radio, () => this.radio())
     handle(WLD.rain, () => this.rain())
+    // Only the owner's own window, and only while unlocked, gets the 3D keys.
+    handle(WLD.map3dKeys, owner(() => {
+      const store = osCredentialStore()
+      return { google: store.get('GOOGLE_MAPS_API_KEY') ?? null, ion: store.get('CESIUM_ION_TOKEN') ?? null }
+    }))
     handle(WLD.ships, raw => {
       const b = raw as { south?: unknown; west?: unknown; north?: unknown; east?: unknown } | null
       const ok = (v: unknown, max: number) => typeof v === 'number' && Math.abs(v) <= max

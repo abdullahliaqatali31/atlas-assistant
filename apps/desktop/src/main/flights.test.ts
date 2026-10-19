@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { kmBetween, parseAdsbdbRoute, sweepCells, SWEEP_RADIUS_NM } from '../shared/world.ts'
-import { FlightSweep, RouteBook } from './flights.ts'
+import { AdsbFeed, FlightSweep, RouteBook } from './flights.ts'
 
 const WORLD = { south: -90, west: -180, north: 90, east: 180 }
 
@@ -73,7 +73,7 @@ describe('FlightSweep', () => {
     sweep.stop()
   })
 
-  it('pauses for a minute when adsb.lol says slow down, and stops when the map stops asking', async () => {
+  it('pauses for a minute when adsb.lol and adsb.fi both say slow down, and stops when the map stops asking', async () => {
     vi.useFakeTimers()
     const getJson = vi.fn(async () => {
       throw new Error('HTTP 429')
@@ -81,10 +81,49 @@ describe('FlightSweep', () => {
     const sweep = new FlightSweep({ getJson })
     sweep.view({ south: 35, west: -10, north: 60, east: 30 })
     await vi.advanceTimersByTimeAsync(20_000)
-    expect(getJson).toHaveBeenCalledTimes(1)
+    // One try at each feed, then the pause.
+    expect(getJson).toHaveBeenCalledTimes(2)
     await vi.advanceTimersByTimeAsync(60_000)
     // Nobody asked for 30 s: the sweep has stopped rather than retrying forever.
-    expect(getJson).toHaveBeenCalledTimes(1)
+    expect(getJson).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('AdsbFeed', () => {
+  it('uses adsb.fi while adsb.lol is throttling, in the same shape, then goes back to adsb.lol', async () => {
+    vi.useFakeTimers()
+    const urls: string[] = []
+    const getJson = vi.fn(async (url: string) => {
+      urls.push(url)
+      if (url.includes('adsb.lol') && urls.length === 1) throw new Error('HTTP 429')
+      return url.includes('adsb.fi') ? { now: 1, aircraft: [aircraft('fi1', 51, 0)] } : { ac: [aircraft('lol1', 51, 0)] }
+    })
+    const feed = new AdsbFeed(getJson)
+    expect(await feed.point(51, 0, 1000)).toEqual({ ac: [aircraft('fi1', 51, 0)] })
+    // adsb.fi answers at most 250 nm.
+    expect(urls[1]).toBe('https://opendata.adsb.fi/api/v2/lat/51.000/lon/0.000/dist/250')
+    // Still throttled: straight to adsb.fi, no second knock on adsb.lol.
+    await feed.point(51, 0, 100)
+    expect(urls[2]).toBe('https://opendata.adsb.fi/api/v2/lat/51.000/lon/0.000/dist/100')
+    await vi.advanceTimersByTimeAsync(61_000)
+    expect(await feed.point(51, 0, 100)).toEqual({ ac: [aircraft('lol1', 51, 0)] })
+  })
+
+  it('switches on any adsb.lol failure, and reports the adsb.fi error when both fail', async () => {
+    const getJson = vi.fn(async (url: string) => {
+      throw new Error(url.includes('adsb.lol') ? 'HTTP 403' : 'HTTP 503')
+    })
+    await expect(new AdsbFeed(getJson).point(0, 0, 100)).rejects.toThrow('HTTP 503')
+    expect(getJson).toHaveBeenCalledTimes(2)
+  })
+
+  it('falls back for military aircraft too', async () => {
+    const getJson = vi.fn(async (url: string) => {
+      if (url.includes('adsb.lol')) throw new Error('HTTP 429')
+      return { ac: [aircraft('mil1', 30, 30)] }
+    })
+    expect(await new AdsbFeed(getJson).military()).toEqual({ ac: [aircraft('mil1', 30, 30)] })
+    expect(getJson).toHaveBeenLastCalledWith('https://opendata.adsb.fi/api/v2/mil')
   })
 })
 

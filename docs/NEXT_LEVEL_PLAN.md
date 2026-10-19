@@ -287,3 +287,21 @@ Order chosen for value per effort; each phase ends with tests and a commit.
 | J | 3D globe / cockpit (Cesium or deck.gl), only if wanted after D–E | L | Google or Cesium key |
 
 Phase A starts now.
+
+---
+
+## Part 5 — God's Eye View's signature features, one by one (added 2026-10-20)
+
+The owner asked for every GEV feature, not only the layers. What GEV does,
+and how Atlas gets it:
+
+| # | Feature | GEV | Atlas plan |
+|---|---|---|---|
+| J1 | **3D globe** | CesiumJS; keyless = Esri World Imagery + Re:Earth terrain; Google key = photorealistic 3D cities; Cesium ion token (free) = world terrain + 3D buildings | A **3D view** on the World page (CesiumJS, loaded only when opened), same three tiers; Google and Cesium ion rows in Power up |
+| J2 | **Live planes in 3D** | billboards everywhere, real glTF models (787, ATR 72, Cessna, Citation, Bell 206, MQ-9, ship) within 150 km, true altitude, gliding | Same: models (CC BY 4.0, credited) near the camera, icons elsewhere, at real altitude, gliding between polls |
+| J3 | **Plane view (cockpit)** | camera rides the aircraft; speed/altitude rims, compass tape, horizon; FROM→TO flight plan; PREV/NEXT targets | **Fly with it**: chase and cockpit cameras, HUD with speed, altitude, heading tape and vertical speed, route card with progress, prev/next aircraft |
+| J4 | **Plane navigation** | track, follow, orbit, fly-to, search, nearest | Track and orbit a plane, jump to the next nearby one, by click, keys or voice ("PIA301 ke saath udo") |
+| J5 | **Satellite services** | ~840 sats in groups (stations, visual, GPS, GLONASS, Galileo, GEO), Starlink dense mode, orbits, follow camera | Same groups and filters, Starlink on demand, orbit paths at true height in 3D, follow a satellite |
+| J6 | **Camera services** | ~20 keyless city/DOT packs; cameras as 3D frustums with the live frame projected | More keyless packs; in 3D, each camera's view cone with its latest frame |
+
+Order: J1 → J2 → J3/J4 → J5 → J6. Each ends with tests and a commit.

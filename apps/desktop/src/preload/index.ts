@@ -276,6 +276,7 @@ const world: WorldBridge = {
   launches: () => ipcRenderer.invoke(WLD.launches),
   radio: () => ipcRenderer.invoke(WLD.radio),
   rain: () => ipcRenderer.invoke(WLD.rain),
+  map3dKeys: () => ipcRenderer.invoke(WLD.map3dKeys),
   satellites: () => ipcRenderer.invoke(WLD.satellites),
   ships: box => ipcRenderer.invoke(WLD.ships, box),
   setShipsKey: key => ipcRenderer.invoke(WLD.shipsKey, key),

@@ -7,6 +7,10 @@
  * are refreshed after 45 s, empty ones (open ocean) after 10 minutes, and a
  * "slow down" from adsb.lol pauses the sweep for a minute.
  *
+ * When adsb.lol fails or throttles, adsb.fi (same community data, same
+ * format, up to 250 nm) answers for a minute instead; only when both refuse
+ * does anything pause.
+ *
  * Routes come from adsbdb.com by callsign (free, no key), cached 30 minutes,
  * "no route known" included.
  */
@@ -24,6 +28,39 @@ const MAX_ROUTES = 500
 
 type GetJson = (url: string) => Promise<unknown>
 
+const SLOW = /HTTP (420|429)/
+const ADSBFI_MAX_NM = 250
+
+/** Aircraft around a point (adsb.lol's v2 shape): adsb.lol, or adsb.fi for a minute after adsb.lol fails. Throws adsb.fi's error when both fail. */
+export class AdsbFeed {
+  private lolPausedUntil = 0
+
+  constructor(private readonly getJson: GetJson) {}
+
+  point(lat: number, lon: number, nm: number): Promise<unknown> {
+    const at = `lat/${lat.toFixed(3)}/lon/${lon.toFixed(3)}/dist/`
+    return this.get(`https://api.adsb.lol/v2/${at}${nm}`, `https://opendata.adsb.fi/api/v2/${at}${Math.min(ADSBFI_MAX_NM, nm)}`)
+  }
+
+  /** Military aircraft worldwide. */
+  military(): Promise<unknown> {
+    return this.get('https://api.adsb.lol/v2/mil', 'https://opendata.adsb.fi/api/v2/mil')
+  }
+
+  private async get(lol: string, fi: string): Promise<unknown> {
+    if (Date.now() >= this.lolPausedUntil)
+      try {
+        return await this.getJson(lol)
+      } catch {
+        // Refused, throttled or down: adsb.fi for a minute.
+        this.lolPausedUntil = Date.now() + BACKOFF_MS
+      }
+    // adsb.fi names the list "aircraft" on point queries and "ac" on /mil.
+    const j = (await this.getJson(fi)) as { ac?: unknown[]; aircraft?: unknown[] }
+    return { ac: j?.ac ?? j?.aircraft ?? [] }
+  }
+}
+
 const inBox = (f: { lat: number; lon: number }, b: GeoBox) => f.lat >= b.south && f.lat <= b.north && f.lon >= b.west && f.lon <= b.east
 
 export class FlightSweep {
@@ -33,8 +70,11 @@ export class FlightSweep {
   private timer: NodeJS.Timeout | null = null
   private busy = false
   private pausedUntil = 0
+  private readonly feed: AdsbFeed
 
-  constructor(private readonly deps: { getJson: GetJson; log?: (level: 'info' | 'warn', message: string) => void }) {}
+  constructor(private readonly deps: { getJson: GetJson; feed?: AdsbFeed; log?: (level: 'info' | 'warn', message: string) => void }) {
+    this.feed = deps.feed ?? new AdsbFeed(deps.getJson)
+  }
 
   /** What is known for this view now; keeps the sweep going while the map keeps asking. */
   view(box: GeoBox): FlightsArea {
@@ -79,13 +119,13 @@ export class FlightSweep {
     if (!next) return
     this.busy = true
     try {
-      const raw = await this.deps.getJson(`https://api.adsb.lol/v2/lat/${next.lat.toFixed(3)}/lon/${next.lon.toFixed(3)}/dist/${SWEEP_RADIUS_NM}`)
+      const raw = await this.feed.point(next.lat, next.lon, SWEEP_RADIUS_NM)
       this.cells.set(next.id, { at: Date.now(), flights: parseFlights(raw) })
     } catch (e) {
       const msg = e instanceof Error ? e.message : ''
-      if (/HTTP (420|429)/.test(msg)) {
+      if (SLOW.test(msg)) {
         this.pausedUntil = Date.now() + BACKOFF_MS
-        this.deps.log?.('info', 'Flights: adsb.lol asked to slow down; the sweep pauses a minute.')
+        this.deps.log?.('info', 'Flights: adsb.lol and adsb.fi asked to slow down; the sweep pauses a minute.')
       } else {
         // Try this area again later, keeping what it showed before.
         const prev = this.cells.get(next.id)

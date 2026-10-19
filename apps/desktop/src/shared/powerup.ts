@@ -98,6 +98,28 @@ export const POWER_PROVIDERS: readonly PowerProvider[] = Object.freeze([
     manageUrl: 'https://api.windy.com/keys',
     without: 'Official city traffic cameras (London, California, Finland…) still work.',
   },
+  {
+    id: 'cesium-ion',
+    title: 'Cesium ion',
+    group: 'world',
+    unlocks: 'The 3D World view in full: real mountains (world terrain) and 3D buildings in every city.',
+    secret: 'CESIUM_ION_TOKEN',
+    tier: 'free',
+    getUrl: 'https://ion.cesium.com/signup',
+    manageUrl: 'https://ion.cesium.com/tokens',
+    without: 'The 3D view still works with free satellite imagery and basic terrain.',
+  },
+  {
+    id: 'google-maps',
+    title: 'Google Maps 3D',
+    group: 'world',
+    unlocks: 'Photorealistic 3D cities in the 3D World view (the Map Tiles API). Used from the page, so restrict the key to the Map Tiles API in Google Cloud.',
+    secret: 'GOOGLE_MAPS_API_KEY',
+    tier: 'metered',
+    getUrl: 'https://developers.google.com/maps/documentation/tile/get-api-key',
+    manageUrl: 'https://console.cloud.google.com/google/maps-apis/credentials',
+    without: 'The 3D view uses Cesium ion or free imagery instead.',
+  },
 ])
 
 export const powerProvider = (id: string) => POWER_PROVIDERS.find(p => p.id === id)

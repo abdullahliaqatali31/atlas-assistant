@@ -121,6 +121,14 @@ export class PowerUp {
       }
       case 'aisstream':
         return this.checkAis(key)
+      case 'cesium-ion': {
+        const s = await fetchStatus('https://api.cesium.com/v1/me', { headers: { Authorization: `Bearer ${key}` } })
+        return s === 200 ? { ok: true, message: 'Works.' } : { ok: false, message: bad(s) }
+      }
+      case 'google-maps': {
+        const s = await fetchStatus(`https://tile.googleapis.com/v1/3dtiles/root.json?key=${encodeURIComponent(key)}`, {})
+        return s === 200 ? { ok: true, message: 'Works · photorealistic 3D tiles on.' } : { ok: false, message: s === 403 ? 'Google refused it: enable the Map Tiles API for this key and project.' : bad(s) }
+      }
     }
     return { ok: false, message: 'No test for this service.' }
   }

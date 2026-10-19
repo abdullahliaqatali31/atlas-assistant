@@ -5,10 +5,10 @@
  */
 import 'maplibre-gl/dist/maplibre-gl.css'
 
-import { ArrowLeft, Globe2, Layers, Map as MapIcon, ScanEye } from 'lucide-react'
+import { ArrowLeft, Box, Globe2, Layers, Map as MapIcon, ScanEye } from 'lucide-react'
 import maplibregl, { type FilterSpecification, type GeoJSONSource, type Map as MapLibre, type RasterTileSource, type StyleSpecification } from 'maplibre-gl'
 import * as satellite from 'satellite.js'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { MAX_PINS, type MapOp, type Pin, type Story } from '../../../shared/map.ts'
 import type { NewsResult } from '../../../shared/news.ts'
@@ -28,6 +28,28 @@ import { layerFilter, readFilters, saveFilters } from './panels.ts'
 import { pickAt } from './pick.ts'
 import { DisplayDefs, DisplayFx, TacticalHud } from './Display.tsx'
 import { DISPLAY_MODES, MODE_FILTER, MODE_LABEL, readDisplay, saveDisplay, type DisplayPrefs } from './hud.ts'
+// CesiumJS is large: the 3D view loads only when opened.
+const Globe3D = lazy(() => import('./Globe3D.tsx'))
+/** If the 3D view fails (no WebGL, a bad driver), say so and keep the 2D map working. */
+class Guard3D extends Component<{ onClose: () => void; children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null }
+  static getDerivedStateFromError(e: unknown) {
+    return { error: e instanceof Error ? e.message.slice(0, 160) : 'unknown error' }
+  }
+  render() {
+    if (!this.state.error) return this.props.children
+    return (
+      <div className="absolute inset-0 z-30 grid place-items-center bg-black/85 p-6 text-center text-xs text-muted">
+        <div className="space-y-2">
+          <p>The 3D view could not start on this PC: {this.state.error}</p>
+          <button type="button" onClick={this.props.onClose} className="map-chip mx-auto">
+            Back to 2D
+          </button>
+        </div>
+      </div>
+    )
+  }
+}
 import { BASE_URL, carryOverlays, composeStyle, creditLine, STYLES, type CreditPart, type StyleId } from './styles.ts'
 
 export interface MapPrefs {
@@ -106,6 +128,8 @@ export function MapView({
   /** Where aircraft and ships have been since the map opened. */
   const trails = useRef(new Trails())
   const [open, setOpen] = useState<'layers' | 'style' | 'display' | null>(null)
+  /** The 3D view (terrain, buildings, aircraft at real altitude), opened where the map is. */
+  const [threeD, setThreeD] = useState<{ lat: number; lon: number; zoom: number } | null>(null)
   // Visual mode, tactical HUD and scope (keys 1-5, H).
   const [display, setDisplay] = useState<DisplayPrefs>(readDisplay)
   useEffect(() => saveDisplay(display), [display])
@@ -984,6 +1008,19 @@ export function MapView({
         <Globe2 className="size-3.5" aria-hidden />
         <span className="hidden @[640px]:inline">{globe ? 'Globe' : '2D'}</span>
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          const m = map.current
+          if (m) setThreeD({ lat: m.getCenter().lat, lon: m.getCenter().lng, zoom: m.getZoom() })
+        }}
+        className="map-chip px-2"
+        title="3D view: terrain, buildings, live aircraft at their real altitude, fly with a plane"
+        aria-label="Open the 3D view"
+      >
+        <Box className="size-3.5" aria-hidden />
+        <span className="hidden @[640px]:inline">3D</span>
+      </button>
       <button type="button" onClick={() => toggle('display')} aria-expanded={open === 'display'} className={`map-chip px-2 ${open === 'display' || display.mode !== 'normal' || display.hud ? 'border-accent text-accent' : ''}`} title="Display: night vision, thermal, CRT, HUD (keys 1-5, H)">
         <ScanEye className="size-3.5" aria-hidden />
         <span className="hidden @[760px]:inline">{display.mode === 'normal' ? 'Display' : MODE_LABEL[display.mode]}</span>
@@ -1052,7 +1089,14 @@ export function MapView({
           }}
         />
       )}
-      {toolbar(controls)}
+      {!threeD && toolbar(controls)}
+      {threeD && (
+        <Guard3D onClose={() => setThreeD(null)}>
+        <Suspense fallback={<div className="absolute inset-0 z-30 grid place-items-center bg-black/80 text-xs text-muted">Loading the 3D world…</div>}>
+          <Globe3D start={threeD} onClose={() => setThreeD(null)} />
+        </Suspense>
+        </Guard3D>
+      )}
       <MapCredit
         parts={creditLine(prefs.style, LAYERS.filter(l => layers[l.id]).map(l => l.id), [
           ...(layers.cameras && webcamState.inView ? [{ text: 'Webcams Windy.com', href: 'https://www.windy.com/webcams' }] : []),
