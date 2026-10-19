@@ -56,6 +56,7 @@ export function VoiceMode({
   onEnd,
   onKeyboard,
   onStop,
+  note,
 }: {
   phase: VoicePhase
   level: number
@@ -70,6 +71,8 @@ export function VoiceMode({
   onKeyboard: () => void
   /** Cut the reply short and listen again (like talking over it). */
   onStop: () => void
+  /** A small line under the controls (e.g. live voice cost). */
+  note?: string
 }) {
   const orb = useOrbSize()
   const [now, setNow] = useState(Date.now())
@@ -139,7 +142,8 @@ export function VoiceMode({
           <X className="size-4" aria-hidden /> End
         </button>
       </div>
-      {orb.height > 260 && <p className="mt-1.5 shrink-0 text-center text-[11px] text-muted">Say “bas” or “that’s all” to finish · Esc ends · it stops after 30 s of silence</p>}
+      {note && <p className="mt-1.5 shrink-0 text-center font-mono text-[10px] text-muted">{note}</p>}
+      {!note && orb.height > 260 && <p className="mt-1.5 shrink-0 text-center text-[11px] text-muted">Say “bas” or “that’s all” to finish · Esc ends · it stops after 30 s of silence</p>}
     </div>
   )
 }

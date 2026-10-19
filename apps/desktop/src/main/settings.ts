@@ -11,6 +11,7 @@ import { isLlmProvider, type LlmProviderId } from '@assistant/providers/llm-pres
 import { app } from 'electron'
 
 import { VOICE_PROVIDERS, type SetupInput, type SetupSummary, type VoiceProviderChoice } from '../shared/ipc.ts'
+import { DEFAULT_LIVE_VOICE, parseLiveVoice, type LiveVoiceSettings } from '../shared/livevoice.ts'
 
 interface Stored {
   ownerName: string
@@ -32,16 +33,19 @@ interface Stored {
   llmQuickModel: string
   /** 'main' turns the quick model off. */
   llmRouting: 'auto' | 'main'
+  /** Live voice (OpenAI Realtime): on/off, tier, voice, per-conversation cost cap. */
+  liveVoice: LiveVoiceSettings
 }
 
-const DEFAULTS: Stored = { ownerName: '', voiceId: '', voiceProvider: '', azureRegion: '', azureVoice: '', speakReplies: true, llmProvider: '', llmModel: '', llmBaseUrl: '', llmBackgroundModel: '', llmQuickModel: '', llmRouting: 'auto' }
+const DEFAULTS: Stored = { ownerName: '', voiceId: '', voiceProvider: '', azureRegion: '', azureVoice: '', speakReplies: true, llmProvider: '', llmModel: '', llmBaseUrl: '', llmBackgroundModel: '', llmQuickModel: '', llmRouting: 'auto', liveVoice: DEFAULT_LIVE_VOICE }
 const DEFAULT_AZURE_VOICE = 'ur-PK-UzmaNeural'
 const AZURE_VOICE = /^[a-z]{2,3}-[A-Z]{2,4}-[A-Za-z0-9]+Neural$/
 const file = () => join(app.getPath('userData'), 'setup.json')
 
 export const readSetup = (): Stored => {
   try {
-    return { ...DEFAULTS, ...(JSON.parse(readFileSync(file(), 'utf8')) as Partial<Stored>) }
+    const raw = JSON.parse(readFileSync(file(), 'utf8')) as Partial<Stored>
+    return { ...DEFAULTS, ...raw, liveVoice: parseLiveVoice(raw.liveVoice) }
   } catch {
     return { ...DEFAULTS }
   }
@@ -84,6 +88,7 @@ export const saveSetup = (input: SetupInput, provider: VoiceProviderChoice) => {
 }
 
 export const saveSpeakReplies = (speakReplies: boolean) => write({ ...readSetup(), speakReplies })
+export const saveLiveVoice = (liveVoice: LiveVoiceSettings) => write({ ...readSetup(), liveVoice })
 
 const RUNTIME_VARS = /^(ASSISTANT_|ELEVENLABS_|AZURE_SPEECH_)|^(ANTHROPIC|OPENAI|GEMINI|OPENROUTER|GROQ|DEEPSEEK|MISTRAL|XAI|LLM)_API_KEY$/
 

@@ -10,6 +10,7 @@ import type { ActivityHostEvent, ActivityHostRequest } from './activity.ts'
 import type { CodeOp, CodeProjectView, RunView } from './code.ts'
 import type { DesktopOp } from './desktop.ts'
 import type { FileOp } from './files.ts'
+import type { LiveSession, LiveTier, LiveVoiceSettings } from './livevoice.ts'
 import type { SystemChange, SystemSnapshot } from './system.ts'
 import type { UiOp, UiState } from './ui.ts'
 import type { WorldOp, WorldSnapshot } from './world.ts'
@@ -42,7 +43,7 @@ export interface RuntimeStatus {
   /** Tool calls waiting for the owner's yes or no, oldest first. */
   approvals: ApprovalRequest[]
   /** available: a voice provider is configured; enabled: the owner wants replies spoken. */
-  speech: { available: boolean; enabled: boolean }
+  speech: { available: boolean; enabled: boolean; live: { available: boolean; enabled: boolean; tier: LiveTier; voice: string; capUsd: number } }
   /** Things the assistant held back or only notified about, newest last. */
   later: InitiativeItem[]
 }
@@ -256,6 +257,8 @@ export const CH = {
   interrupt: 'assistant:interrupt',
   chatModel: 'assistant:chat-model',
   setChatModel: 'assistant:set-chat-model',
+  liveSession: 'assistant:live-session',
+  setLiveVoice: 'assistant:set-live-voice',
 } as const
 
 /** The API the preload exposes as `window.assistant`. */
@@ -307,6 +310,9 @@ export interface AssistantBridge {
   /** The chat model chip: what is picked now, and pick another (applies from the next message). */
   chatModel(): Promise<{ choice: ChatModelChoice; provider: LlmProviderId; main: string; quick: string }>
   setChatModel(choice: ChatModelChoice): Promise<{ choice: ChatModelChoice; provider: LlmProviderId; main: string; quick: string }>
+  /** Live voice: a short-lived session minted by main (the key never comes here). */
+  liveSession(assistantName: string): Promise<LiveSession>
+  setLiveVoice(settings: LiveVoiceSettings): Promise<void>
 }
 
 // ── validation (main process side) ──────────────────────────

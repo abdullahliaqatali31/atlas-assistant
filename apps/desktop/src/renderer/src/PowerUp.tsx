@@ -1,6 +1,8 @@
 import { ArrowUpRight, Brain, Check, Globe2, Loader2, Mic, X, Zap } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
+import { LIVE_MODELS, LIVE_TIERS, LIVE_VOICES, type LiveTier, type LiveVoiceName } from '../../shared/livevoice.ts'
+import type { RuntimeStatus } from '../../shared/ipc.ts'
 import { POWER_PROVIDERS, TIER_LABEL, keyProblem, type PowerGroup, type PowerProvider, type PowerRow } from '../../shared/powerup.ts'
 
 const GROUPS: { id: PowerGroup; title: string; icon: ReactNode; hint: string }[] = [
@@ -55,6 +57,7 @@ export function PowerUpPage() {
               <span className="text-accent">{g.icon}</span> {g.title}
             </h3>
             <p className="text-[11px] text-muted">{g.hint}</p>
+            {g.id === 'voice' && <LiveVoiceCard />}
             {POWER_PROVIDERS.filter(p => p.group === g.id).map(p => (
               <KeyRow key={p.id} p={p} row={byId.get(p.id)!} onRows={setRows} />
             ))}
@@ -152,6 +155,78 @@ function KeyRow({ p, row, onRows }: { p: PowerProvider; row: PowerRow; onRows: (
             </>
           )}
         </form>
+      )}
+      {error && <p className="text-[11px] text-danger">{error}</p>}
+    </div>
+  )
+}
+
+/**
+ * Live voice: OpenAI Realtime answers by voice in well under a second, far
+ * cheaper than a separate speech service. It is only the voice: everything
+ * real still goes through Atlas's own brain and permissions.
+ */
+function LiveVoiceCard() {
+  const [live, setLive] = useState<RuntimeStatus['speech']['live'] | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    void window.assistant.status().then(s => setLive(s.speech.live), () => undefined)
+    return window.assistant.onStatus(s => setLive(s.speech.live))
+  }, [])
+  if (!live) return null
+  const save = (patch: Partial<{ enabled: boolean; tier: LiveTier; voice: LiveVoiceName; capUsd: number }>) => {
+    setError('')
+    const next = { enabled: live.enabled, tier: live.tier, voice: live.voice as LiveVoiceName, capUsd: live.capUsd, ...patch }
+    setLive({ ...live, ...next })
+    void window.assistant.setLiveVoice(next).catch(e => setError(clean(e)))
+  }
+  const rates = LIVE_MODELS[live.tier].rates
+  // A spoken minute is roughly 600 audio tokens each way.
+  const perMinute = ((600 * rates.audioInput + 600 * rates.audioOutput) / 1_000_000).toFixed(2)
+
+  return (
+    <div className={`tile space-y-2 p-3 ${live.enabled && live.available ? 'border-accent/50 shadow-[0_0_16px_var(--accent-soft)]' : ''}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Zap className="size-4 text-accent" aria-hidden />
+        <span className="font-mono text-[13px] font-semibold uppercase tracking-wider">Live voice</span>
+        <span className="rounded border border-accent/50 px-1.5 font-mono text-[10px] uppercase tracking-wider text-accent">OpenAI Realtime</span>
+        <label className="ml-auto flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={live.enabled} disabled={!live.available} onChange={e => save({ enabled: e.target.checked })} />
+          {live.enabled ? 'On' : 'Off'}
+        </label>
+      </div>
+      <p className="text-xs text-muted">
+        Talk and get an answer in under a second, in a natural voice that follows your language. It is only the voice: questions and every action still go through Atlas’s brain and its permissions. About ${perMinute} a spoken minute on {live.tier === 'mini' ? 'Mini' : 'Standard'}; you set the most one conversation may cost.
+      </p>
+      {!live.available ? (
+        <p className="text-[11px] text-warm">Needs an OpenAI key — add it under Brain › OpenAI below (it does not have to be your brain).</p>
+      ) : (
+        <div className="grid gap-2 @md:grid-cols-3">
+          <label className="text-[11px] text-muted">
+            Model
+            <select className="field mt-0.5 w-full py-1 text-xs" value={live.tier} onChange={e => save({ tier: e.target.value as LiveTier })}>
+              {LIVE_TIERS.map(t => (
+                <option key={t} value={t}>
+                  {LIVE_MODELS[t].label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-[11px] text-muted">
+            Voice
+            <select className="field mt-0.5 w-full py-1 text-xs capitalize" value={live.voice} onChange={e => save({ voice: e.target.value as LiveVoiceName })}>
+              {LIVE_VOICES.map(v => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-[11px] text-muted">
+            Most per conversation ($)
+            <input type="number" min={0.25} max={50} step={0.25} className="field mt-0.5 w-full py-1 text-xs" value={live.capUsd} onChange={e => Number.isFinite(e.target.valueAsNumber) && save({ capUsd: e.target.valueAsNumber })} />
+          </label>
+        </div>
       )}
       {error && <p className="text-[11px] text-danger">{error}</p>}
     </div>

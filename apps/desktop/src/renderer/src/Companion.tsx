@@ -13,6 +13,7 @@ import type { Presence } from './Jarvis.tsx'
 import { ChatList } from './ChatList.tsx'
 import { ChatMenu } from './ChatMenu.tsx'
 import { ModelChip } from './ModelChip.tsx'
+import { useLiveVoice } from './voice/useLiveVoice.ts'
 import { chatViewVars, readChatView, saveChatView, type ChatView } from './chatview.ts'
 import { Onboarding } from './Onboarding.tsx'
 import { Markdown } from './ui/Markdown.tsx'
@@ -203,6 +204,20 @@ export function Companion({
 
   // ── first-run onboarding: scripted questions in this conversation ──
   const [personality, setPersonality] = useState<PersonalityView | null>(null)
+  // Live voice (OpenAI Realtime): the voice is live, Atlas stays the mind (ask_atlas runs as an ordinary message).
+  const statusRef = useRef(status)
+  statusRef.current = status
+  const live = useLiveVoice({
+    assistantName: personality?.profile.assistantName ?? 'Atlas',
+    show: (id, text) => begin(id, text),
+    approvals: () => statusRef.current.approvals,
+  })
+  const liveRef = useRef(live)
+  liveRef.current = live
+  const liveOnRef = useRef(false)
+  liveOnRef.current = status.speech.live.enabled && status.speech.live.available
+  /** Talking works with a classic voice provider or with Live voice. */
+  const canTalk = voice || liveOnRef.current
   const promptRef = useRef<string | null>(null)
   const onboarding = ready && personality !== null && !personality.onboarded
   useEffect(() => {
@@ -343,6 +358,11 @@ export function Companion({
   endConversationRef.current = endConversation
 
   const beginConversation = useCallback(() => {
+    // Live voice on: one live call instead of the listen–transcribe–speak loop.
+    if (liveOnRef.current) {
+      if (ready && !onboarding && !liveRef.current.active) void liveRef.current.start()
+      return
+    }
     if (!ready || !voice || onboarding) return
     conversationRef.current = true
     endAfterReplyRef.current = false
@@ -383,7 +403,7 @@ export function Companion({
   }, [conversation, speaking, interrupt])
 
   // The mic button starts a conversation, or ends one.
-  const toggleMic = () => (conversationRef.current ? endConversation() : beginConversation())
+  const toggleMic = () => (liveRef.current.active ? liveRef.current.stop() : conversationRef.current ? endConversation() : beginConversation())
 
   // ── wake word: say the assistant's name to start talking ──
   const [ownerLocked, setOwnerLocked] = useState(false)
@@ -470,7 +490,8 @@ export function Companion({
         e.preventDefault()
         toggleMic()
       } else if (e.key === 'Escape') {
-        if (conversationRef.current) {
+        if (liveRef.current.active) liveRef.current.stop()
+        else if (conversationRef.current) {
           endConversation()
           interrupt()
         } else if (recordingRef.current) recordingRef.current.stop(false)
@@ -503,7 +524,7 @@ export function Companion({
     return { you: owner === '🎤 …' ? '' : owner, assistant: reply?.text ?? '' }
   })()
   const state = listening ? 'Listening' : transcribing ? 'Transcribing' : speaking ? 'Speaking' : replyId ? 'Thinking' : PHASE_TEXT[status.phase]
-  const presence: Presence['state'] = listening ? 'listening' : speaking ? 'speaking' : replyId || transcribing ? 'thinking' : 'idle'
+  const presence: Presence['state'] = live.active ? (live.phase === 'speaking' ? 'speaking' : live.phase === 'listening' ? 'listening' : 'thinking') : listening ? 'listening' : speaking ? 'speaking' : replyId || transcribing ? 'thinking' : 'idle'
   useEffect(() => onPresence?.({ state: presence, level: listening ? level : 0 }), [onPresence, presence, level, listening])
 
   // The desktop widget mirrors this: what Atlas is doing and its newest words, at most four times a second.
@@ -525,6 +546,10 @@ export function Companion({
   // The widget's Stop and Talk act here, where the microphone and the speech are.
   const widgetAsks = useRef<(c: 'stop' | 'talk') => void>(() => undefined)
   widgetAsks.current = c => {
+    if (liveRef.current.active) {
+      if (c === 'stop') liveRef.current.phase === 'speaking' ? liveRef.current.cancel() : liveRef.current.stop()
+      return
+    }
     if (c === 'talk') {
       if (!conversationRef.current) beginConversation()
       return
@@ -613,7 +638,23 @@ export function Companion({
         </ToggleGroup.Root>
       </header>
 
-      {conversation && (
+      {live.active && (
+        <div className="min-h-0 flex-1">
+          <VoiceMode
+            phase={live.phase === 'connecting' ? 'thinking' : live.phase}
+            level={live.level}
+            you={live.heard}
+            assistant={live.said}
+            idleUntil={0}
+            name={personality?.profile.assistantName ?? ''}
+            note={`Live voice · ${status.speech.live.tier === 'mini' ? 'Mini' : 'Standard'} · ~${live.cost.toFixed(live.cost < 0.1 ? 3 : 2)} of ${status.speech.live.capUsd.toFixed(2)}${live.phase === 'connecting' ? ' · connecting…' : ''}`}
+            onEnd={live.stop}
+            onKeyboard={live.stop}
+            onStop={live.cancel}
+          />
+        </div>
+      )}
+      {conversation && !live.active && (
         <div className="min-h-0 flex-1">
           <VoiceMode
             phase={voicePhase}
@@ -632,7 +673,7 @@ export function Companion({
           />
         </div>
       )}
-      <main className={`flex flex-1 flex-col gap-[var(--chat-gap)] overflow-y-auto px-3 py-3 @[480px]:px-4 ${conversation ? 'hidden' : ''}`} aria-live="polite">
+      <main className={`flex flex-1 flex-col gap-[var(--chat-gap)] overflow-y-auto px-3 py-3 @[480px]:px-4 ${conversation || live.active ? 'hidden' : ''}`} aria-live="polite">
         {lines.length === 0 && (
           <p className="pt-16 text-center text-sm text-muted">
             {!ready ? `${PHASE_TEXT[status.phase]}…` : voice ? 'Type, or tap the mic (Ctrl+Space) and talk.' : 'Type to start talking.'}
@@ -741,7 +782,7 @@ export function Companion({
               className="field max-h-32 min-h-9 flex-1 resize-none py-1.5"
             />
           )}
-          {voice && !draft.trim() && (
+          {canTalk && !draft.trim() && (
             <button
               type="button"
               onClick={toggleMic}
@@ -758,7 +799,7 @@ export function Companion({
               Stop
             </button>
           ) : (
-            (draft.trim() || !voice) && (
+            (draft.trim() || !canTalk) && (
               <button type="submit" disabled={!ready || !draft.trim()} className="btn btn-primary h-9">
                 Send
               </button>

@@ -16,6 +16,9 @@ import { PWC } from '../shared/powerup.ts'
 export const OWNER_ONLY: ReadonlySet<string> = new Set([
   // Provider, key and server address: a swap would send conversations elsewhere.
   CH.saveSetup,
+  // Live voice spends money on the owner's OpenAI key.
+  CH.liveSession,
+  CH.setLiveVoice,
   // Past conversations are the owner's.
   CH.chats,
   CH.listModels,

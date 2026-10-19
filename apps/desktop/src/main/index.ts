@@ -44,12 +44,14 @@ import { modelSchemePrivileges, WakeService } from './wake.ts'
 import { registerDataIpc } from './data.ts'
 import { registerPersonalityIpc } from './personality.ts'
 import { watchSession } from './session.ts'
-import { providerFor, readSetup, runtimeEnv, saveSetup, saveSpeakReplies, setupSummary as readSetupSummary } from './settings.ts'
+import { providerFor, readSetup, runtimeEnv, saveSetup, saveSpeakReplies, setupSummary as readSetupSummary, saveLiveVoice } from './settings.ts'
 import { RuntimeSupervisor } from './supervisor.ts'
 import { PresenceWidget } from './presence.ts'
 import { GlassPanel } from './glass.ts'
 import { SystemService } from './system/service.ts'
 import { PowerUp } from './powerup.ts'
+import { LiveVoice } from './livevoice.ts'
+import { parseLiveVoice } from '../shared/livevoice.ts'
 import { osCredentialStore } from '@assistant/runtime'
 import { PWC } from '../shared/powerup.ts'
 import { SystemMapService } from './system/sysmap.ts'
@@ -84,7 +86,11 @@ const setupSummary = () => readSetupSummary(runtimeEnv(devEnvFile), keys)
 let voiceReady = false
 /** Latest cost meter totals from the runtime. */
 let usage: UsageView | null = null
-const speech = () => ({ available: voiceReady, enabled: readSetup().speakReplies })
+const speech = () => {
+  const s = readSetup()
+  const live = s.liveVoice
+  return { available: voiceReady, enabled: s.speakReplies, live: { available: Boolean(osCredentialStore().get('OPENAI_API_KEY') ?? runtimeEnv(devEnvFile).OPENAI_API_KEY), enabled: live.enabled, tier: live.tier, voice: live.voice, capUsd: live.capUsd } }
+}
 let status: RuntimeStatus = { phase: 'starting', problems: [], warnings: [], mode: 'companion', setup: setupSummary(), approvals: [], speech: speech(), later: [] }
 let sessionWatch: ReturnType<typeof watchSession> | null = null
 
@@ -630,6 +636,23 @@ const powerUp = new PowerUp({
   },
 })
 handle(PWC.state, () => powerUp.rows())
+
+// Live voice (OpenAI Realtime): main mints each session; the key stays here.
+let liveName = 'Atlas'
+const liveVoice = new LiveVoice({
+  key: () => osCredentialStore().get('OPENAI_API_KEY') ?? runtimeEnv(devEnvFile).OPENAI_API_KEY,
+  settings: () => readSetup().liveVoice,
+  names: () => ({ assistant: liveName, owner: setupSummary().ownerName }),
+})
+handle(CH.liveSession, name => {
+  // The assistant's own name, as the owner set it in Personality (cleaned again when the session is built).
+  liveName = typeof name === 'string' && name.trim() ? name.slice(0, 40) : 'Atlas'
+  return liveVoice.mint()
+})
+handle(CH.setLiveVoice, raw => {
+  saveLiveVoice(parseLiveVoice(raw))
+  publish({ speech: speech() })
+})
 handle(PWC.save, (id, key) => powerUp.save(id, key))
 handle(PWC.remove, id => powerUp.remove(id))
 handle(PWC.test, id => powerUp.test(id))
