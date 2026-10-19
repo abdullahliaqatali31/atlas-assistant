@@ -5,22 +5,31 @@
  * key = photorealistic 3D cities. Live aircraft at their real altitude (3D
  * models near the camera, icons elsewhere), ships, satellites at their real
  * height. Pick a plane and "Fly with it": a chase or cockpit camera riding it,
- * a flight HUD, its route, and the next aircraft around it.
+ * a flight HUD, its route, and the next aircraft around it. Satellites by
+ * group with orbit rings, follow and a look-down "satellite's eye"; the
+ * world's submarine cables; the celestial ring (Sun, Moon, day and night).
+ *
+ * Light on the machine: Cesium draws a frame only when something changed
+ * (the camera moved, tiles or data arrived), continuously only while riding
+ * a plane or a satellite, and not at all while the window is hidden.
  */
 import '@cesium/engine/Source/Widget/CesiumWidget.css'
 
 // The engine alone: the full "cesium" package's widgets evaluate code from strings, which the page's security policy forbids.
 import * as Cesium from '@cesium/engine'
 import { Cartesian2, FixedFrameTransforms as Transforms } from '@cesium/core'
-import * as satellite from 'satellite.js'
-import { ArrowLeftRight, Box, ChevronLeft, ChevronRight, Eye, Plane, Video, X } from 'lucide-react'
+import { ArrowLeftRight, Box, Cable, ChevronLeft, ChevronRight, Crosshair, Eye, Orbit, Plane, Satellite, Ship as ShipIcon, Sparkles, Video, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { kmBetween, type Flight, type FlightRoute, type Ship } from '../../../shared/world.ts'
 import { aircraftName } from '../../../shared/aircraft.ts'
+import { satGroup, SAT_GROUPS, type CableDetail, type SatGroupId } from '../../../shared/space.ts'
+import { Cables3D } from './cables3d.ts'
+import { CelestialRing } from './CelestialRing.tsx'
 import { deadReckon, flightLabel, planeIcon, shipIcon } from './geo.ts'
 import { MODEL_HEADING_OFFSET, headingTape, heightForZoom, modelFor, type ModelId } from './models3d.ts'
-import { orbitFacts } from './passes.ts'
+import { Satellites3D } from './sats3d.ts'
+import { latLonLabel } from './sky.ts'
 
 ;(window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = './cesium/'
 
@@ -47,6 +56,32 @@ interface Follow {
   mode: 'chase' | 'cockpit'
 }
 
+type LayerKey = 'flights' | 'ships' | 'sats' | 'cables' | 'celestial'
+type Layers = Record<LayerKey, boolean> & { hiddenSats: SatGroupId[] }
+const LAYERS_KEY = 'atlas.globe3d.layers'
+const DEFAULT_LAYERS: Layers = { flights: true, ships: true, sats: true, cables: false, celestial: false, hiddenSats: [] }
+const readLayers = (): Layers => {
+  try {
+    return { ...DEFAULT_LAYERS, ...(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '{}') as Partial<Layers>) }
+  } catch {
+    return DEFAULT_LAYERS
+  }
+}
+
+type Counts = { flights: number; ships: number; sats: number; cables: number }
+const RAIL: { k: LayerKey; label: string; icon: typeof Plane; count: (c: Counts) => string }[] = [
+  { k: 'flights', label: 'Flights', icon: Plane, count: c => String(c.flights) },
+  { k: 'ships', label: 'Ships', icon: ShipIcon, count: c => String(c.ships) },
+  { k: 'sats', label: 'Satellites', icon: Satellite, count: c => String(c.sats) },
+  { k: 'cables', label: 'Sea cables', icon: Cable, count: c => (c.cables ? String(c.cables) : '') },
+  { k: 'celestial', label: 'Celestial', icon: Sparkles, count: () => '' },
+]
+
+interface SatRide {
+  i: number
+  mode: 'follow' | 'eye'
+}
+
 export default function Globe3D({ start, onClose }: { start: { lat: number; lon: number; zoom: number }; onClose: () => void }) {
   const box = useRef<HTMLDivElement>(null)
   const credits = useRef<HTMLDivElement>(null)
@@ -59,19 +94,38 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
   const [follow, setFollow] = useState<Follow | null>(null)
   const [route, setRoute] = useState<FlightRoute | null>(null)
   const [, tick] = useState(0)
-  const [counts, setCounts] = useState({ flights: 0, ships: 0, sats: 0 })
+  const [counts, setCounts] = useState({ flights: 0, ships: 0, sats: 0, cables: 0 })
   followRef.current = follow
+  const [layers, setLayers] = useState(readLayers)
+  const layersRef = useRef(layers)
+  layersRef.current = layers
+  const [widget, setWidget] = useState<Cesium.CesiumWidget | null>(null)
+  const parts = useRef<{ bills: Cesium.BillboardCollection; shipBills: Cesium.BillboardCollection; sats: Satellites3D; cables: Cables3D } | null>(null)
+  const [satPick, setSatPick] = useState<number | null>(null)
+  const [satRide, setSatRide] = useState<SatRide | null>(null)
+  const satRideRef = useRef<SatRide | null>(null)
+  satRideRef.current = satRide
+  const [satCounts, setSatCounts] = useState<Partial<Record<SatGroupId, number>>>({})
+  const [cable, setCable] = useState<{ id: string; name: string; detail: CableDetail | null } | null>(null)
+  const [landing, setLanding] = useState<string | null>(null)
 
   useEffect(() => {
     let disposed = false
     const timers: ReturnType<typeof setInterval>[] = []
+    const cleanups: (() => void)[] = []
     let viewer: Cesium.CesiumWidget | null = null
     void (async () => {
       const keys = await window.world.map3dKeys().catch(() => ({ google: null, ion: null }))
       if (disposed || !box.current) return
       if (keys.ion) Cesium.Ion.defaultAccessToken = keys.ion
-      viewer = new Cesium.CesiumWidget(box.current, { baseLayer: false, creditContainer: credits.current ?? undefined, msaaSamples: 4 })
+      viewer = new Cesium.CesiumWidget(box.current, { baseLayer: false, creditContainer: credits.current ?? undefined, msaaSamples: 4, requestRenderMode: true, maximumRenderTimeChange: Infinity })
       viewerRef.current = viewer
+      // Nothing is drawn while the window is hidden or minimised.
+      const onVisible = () => {
+        if (viewer && !viewer.isDestroyed()) viewer.useDefaultRenderLoop = !document.hidden
+      }
+      document.addEventListener('visibilitychange', onVisible)
+      cleanups.push(() => document.removeEventListener('visibilitychange', onVisible))
       // A handle for driving the view from the debugger, on the dev server only.
       if (location.protocol === 'http:') (window as unknown as { __globe3d?: unknown }).__globe3d = { viewer, Cesium }
       const scene = viewer.scene
@@ -100,7 +154,9 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
         setTier(t => t ?? 'keyless')
       }
       if (disposed || viewer.isDestroyed()) return
-      viewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(start.lon, start.lat - Math.min(8, 30 / 2 ** start.zoom), heightForZoom(start.zoom, start.lat)), orientation: { heading: 0, pitch: Cesium.Math.toRadians(-55), roll: 0 } })
+      // A continent or the world: look straight down at it. A region: a tilted view, as from a plane.
+      const wide = start.zoom < 5
+      viewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(start.lon, wide ? Cesium.Math.clamp(start.lat, -60, 60) : start.lat - Math.min(8, 30 / 2 ** start.zoom), Math.min(22_000_000, heightForZoom(start.zoom, start.lat))), orientation: { heading: 0, pitch: Cesium.Math.toRadians(wide ? -90 : -55), roll: 0 } })
 
       // ── aircraft: icons everywhere, models near the camera ──
       const planeImg = iconCanvas(planeIcon())
@@ -113,6 +169,10 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
 
       const placeAll = () => {
         if (!viewer || viewer.isDestroyed()) return
+        if (!layersRef.current.flights) {
+          for (const m of models.values()) m.model.show = false
+          return
+        }
         const { list, at } = flights.current
         const dt = (Date.now() - at) / 1000
         const cam = viewer.camera.positionCartographic
@@ -164,11 +224,13 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
                 if (!viewer || viewer.isDestroyed() || !want.has(n.f.hex)) return model.destroy()
                 scene.primitives.add(model)
                 models.set(n.f.hex, { model, id })
+                scene.requestRender()
               },
               () => loading.delete(n.f.hex),
             )
           }
         }
+        scene.requestRender()
       }
 
       // ── ships ──
@@ -178,6 +240,7 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
         for (const s of list.slice(0, 3000))
           shipBills.add({ position: Cesium.Cartesian3.fromDegrees(s.lon, s.lat, 0), image: shipImg, width: 14, height: 14, color: Cesium.Color.fromCssColorString('#34d399'), rotation: -Cesium.Math.toRadians(s.heading ?? s.course), alignedAxis: Cesium.Cartesian3.UNIT_Z, scaleByDistance: new Cesium.NearFarScalar(1e4, 1, 5e6, 0.4), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, id: { kind: 'ship', name: s.name } })
         setCounts(x => ({ ...x, ships: list.length }))
+        scene.requestRender()
       }
 
       const poll = async () => {
@@ -186,7 +249,8 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
         const c = viewer.camera.positionCartographic
         const lat = Cesium.Math.toDegrees(c.latitude)
         const lon = Cesium.Math.toDegrees(c.longitude)
-        try {
+        if (layersRef.current.flights)
+          try {
           let list: Flight[]
           if (rect && Cesium.Math.toDegrees(rect.north - rect.south) > 18) {
             const r = await window.world.flightsArea({ south: Cesium.Math.toDegrees(rect.south), north: Cesium.Math.toDegrees(rect.north), west: Cesium.Math.toDegrees(rect.west), east: Cesium.Math.toDegrees(rect.east) })
@@ -203,7 +267,8 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
         } catch {
           // Next poll.
         }
-        try {
+        if (layersRef.current.ships)
+          try {
           if (rect) {
             const r = await window.world.ships({ south: Math.max(-90, Cesium.Math.toDegrees(rect.south)), north: Math.min(90, Cesium.Math.toDegrees(rect.north)), west: Math.max(-180, Cesium.Math.toDegrees(rect.west)), east: Math.min(180, Cesium.Math.toDegrees(rect.east)) })
             drawShips(r.ships)
@@ -213,37 +278,45 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
         }
       }
 
-      // ── satellites at their real height ──
-      const satPoints = scene.primitives.add(new Cesium.PointPrimitiveCollection()) as Cesium.PointPrimitiveCollection
-      let sats: { name: string; rec: satellite.SatRec; point: Cesium.PointPrimitive }[] = []
-      void window.world.satellites().then(
-        listSats => {
+      // ── satellites by group, and the cables (loaded when first shown) ──
+      const sats = new Satellites3D(scene)
+      const cables = new Cables3D(scene)
+      parts.current = { bills, shipBills, sats, cables }
+      setWidget(viewer)
+      void window.world.satellites('all').then(
+        list => {
           if (!viewer || viewer.isDestroyed()) return
-          sats = listSats.flatMap(s => {
-            try {
-              const rec = satellite.json2satrec(s as unknown as satellite.OMMJsonObject)
-              const name = String(s.OBJECT_NAME ?? '')
-              return [{ name, rec, point: satPoints.add({ pixelSize: /ISS \(ZARYA\)/.test(name) ? 9 : 4, color: Cesium.Color.fromCssColorString(/ISS/.test(name) ? '#f0abfc' : '#c084fc'), id: { kind: 'sat', name } }) }]
-            } catch {
-              return []
-            }
-          })
-          setCounts(x => ({ ...x, sats: sats.length }))
+          sats.load(list)
+          for (const g of layersRef.current.hiddenSats) sats.setGroupHidden(g, true)
+          sats.setVisible(layersRef.current.sats)
+          setCounts(x => ({ ...x, sats: sats.list.length }))
+          setSatCounts(sats.counts())
+          scene.requestRender()
         },
         () => undefined,
       )
       const moveSats = () => {
-        const now = new Date()
-        for (const s of sats) {
-          const f = orbitFacts(s.rec, now)
-          if (f) s.point.position = Cesium.Cartesian3.fromDegrees(f.lon, f.lat, f.altKm * 1000)
-        }
+        if (!layersRef.current.sats || document.hidden) return
+        sats.move(new Date())
+        scene.requestRender()
       }
 
       // ── fly with it: the camera rides the followed aircraft every frame ──
       const enu = new Cesium.Matrix4()
       const scratch = new Cesium.Cartesian3()
       scene.preRender.addEventListener(() => {
+        // Riding a satellite: follow it (the camera keeps its offset, so it can still be turned), or look straight down from it.
+        const ride = satRideRef.current
+        const rs = ride ? sats.list[ride.i] : undefined
+        if (ride && rs && viewer) {
+          const w = sats.where(rs)
+          if (!w) return
+          const pos = Cesium.Cartesian3.fromDegrees(w.lon, w.lat, w.altM)
+          rs.point.position = pos
+          if (ride.mode === 'eye') viewer.camera.setView({ destination: pos, orientation: { heading: Cesium.Math.toRadians(w.heading), pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 } })
+          else viewer.camera.lookAtTransform(Transforms.eastNorthUpToFixedFrame(pos, Cesium.Ellipsoid.WGS84, enu))
+          return
+        }
         const fol = followRef.current
         if (!fol || !viewer) return
         const raw = flights.current.byHex.get(fol.hex)
@@ -262,9 +335,22 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
       // ── picking ──
       const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas)
       handler.setInputAction((click: { position: Cartesian2 }) => {
-        const hit = scene.pick(click.position) as { id?: { kind?: string; hex?: string } } | undefined
-        const hex = hit?.id?.kind === 'flight' ? hit.id.hex : undefined
+        const hit = scene.pick(click.position) as { id?: { kind?: string; hex?: string; i?: number; id?: string; name?: string } } | undefined
+        const id = hit?.id
+        const hex = id?.kind === 'flight' ? id.hex : undefined
         setPicked(hex ? (flights.current.byHex.get(hex) ?? null) : null)
+        if (satRideRef.current) return
+        setSatPick(id?.kind === 'sat' && typeof id.i === 'number' ? id.i : null)
+        setLanding(id?.kind === 'landing' ? (id.name ?? null) : null)
+        const cableId = id?.kind === 'cable' ? id.id : undefined
+        cables.highlight(cableId ?? null)
+        scene.requestRender()
+        if (!cableId) return setCable(null)
+        setCable({ id: cableId, name: cables.names.get(cableId) ?? cableId, detail: null })
+        void window.world.cable(cableId).then(
+          detail => setCable(c => (c?.id === cableId ? { ...c, detail } : c)),
+          () => undefined,
+        )
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
       void poll()
@@ -277,6 +363,8 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
     return () => {
       disposed = true
       for (const t of timers) clearInterval(t)
+      for (const c of cleanups) c()
+      parts.current = null
       if (viewer && !viewer.isDestroyed()) viewer.destroy()
       viewerRef.current = null
     }
@@ -299,6 +387,106 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
       gone = true
     }
   }, [routeHex])
+
+  // Layers: remembered on this PC, and applied to the scene.
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAYERS_KEY, JSON.stringify(layers))
+    } catch {
+      // A private window: not remembered.
+    }
+    const pt = parts.current
+    if (!widget || !pt || widget.isDestroyed()) return
+    pt.bills.show = layers.flights
+    pt.shipBills.show = layers.ships
+    pt.sats.setVisible(layers.sats)
+    for (const g of SAT_GROUPS) pt.sats.setGroupHidden(g.id, layers.hiddenSats.includes(g.id))
+    pt.cables.setVisible(layers.cables)
+    if (layers.cables && !pt.cables.loaded)
+      void window.world.cables().then(
+        data => {
+          if (!data || widget.isDestroyed()) return
+          pt.cables.load(data)
+          pt.cables.setVisible(layersRef.current.cables)
+          setCounts(x => ({ ...x, cables: data.cables.length }))
+          widget.scene.requestRender()
+        },
+        () => undefined,
+      )
+    // Real day and night only with the celestial ring (otherwise a black night side reads as broken).
+    widget.scene.globe.enableLighting = layers.celestial
+    widget.scene.requestRender()
+  }, [widget, layers])
+
+  // Continuous frames only while the camera rides something.
+  useEffect(() => {
+    if (!widget || widget.isDestroyed()) return
+    widget.scene.requestRenderMode = !(follow || satRide)
+    widget.scene.requestRender()
+  }, [widget, follow, satRide])
+
+  // The picked satellite's orbit ring.
+  useEffect(() => {
+    const pt = parts.current
+    if (!widget || !pt || widget.isDestroyed()) return
+    pt.sats.showOrbit(satPick === null ? null : (pt.sats.list[satPick] ?? null))
+    widget.scene.requestRender()
+  }, [widget, satPick])
+
+  // Start or stop riding a satellite.
+  useEffect(() => {
+    const pt = parts.current
+    if (!widget || !pt || widget.isDestroyed()) return
+    const cam = widget.camera
+    cam.lookAtTransform(Cesium.Matrix4.IDENTITY)
+    const sat = satRide ? pt.sats.list[satRide.i] : undefined
+    const w = sat ? pt.sats.where(sat) : null
+    if (satRide?.mode === 'follow' && w) cam.lookAt(Cesium.Cartesian3.fromDegrees(w.lon, w.lat, w.altM), new Cesium.HeadingPitchRange(0, -0.6, w.altM > 2_000_000 ? 4_000_000 : 900_000))
+    widget.scene.requestRender()
+  }, [widget, satRide])
+
+  // Escape steps back: stop riding, then close what is open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (satRideRef.current) return setSatRide(null)
+      if (followRef.current) return setFollow(null)
+      setPicked(null)
+      setSatPick(null)
+      setCable(null)
+      setLanding(null)
+      parts.current?.cables.highlight(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const toggle = (k: LayerKey) => {
+    const on = !layers[k]
+    setLayers(l => ({ ...l, [k]: on }))
+    // The ring needs the whole globe in view.
+    if (k === 'celestial' && on && widget) {
+      const c = widget.camera.positionCartographic
+      widget.camera.flyTo({ destination: Cesium.Cartesian3.fromRadians(c.longitude, Cesium.Math.clamp(c.latitude, -0.5, 0.5), 22_000_000), duration: 2.4 })
+    }
+    if (k === 'sats' && !on) (setSatPick(null), setSatRide(null))
+    if (k === 'cables' && !on) (setCable(null), setLanding(null))
+  }
+
+  const closeCable = () => {
+    setCable(null)
+    parts.current?.cables.highlight(null)
+    widget?.scene.requestRender()
+  }
+  const flyOverCable = (id: string) => {
+    const c = parts.current?.cables.centre(id)
+    if (!c || !widget) return
+    const g = Cesium.Cartographic.fromCartesian(c)
+    widget.camera.flyTo({ destination: Cesium.Cartesian3.fromRadians(g.longitude, g.latitude, 4_500_000), duration: 1.8 })
+  }
+
+  const sat = satPick !== null ? parts.current?.sats.list[satPick] : undefined
+  const satNow = sat ? parts.current?.sats.facts(sat) : null
 
   const startFollow = (hex: string, mode: Follow['mode']) => {
     setFollow({ hex, mode })
@@ -340,6 +528,7 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
     <div className="absolute inset-0 z-30 bg-black">
       <div ref={box} className="absolute inset-0" />
       <div ref={credits} className="hidden" />
+      {layers.celestial && widget && !follow && !satRide && <CelestialRing widget={widget} />}
       {/* Top bar: tier, counts, back to 2D. */}
       <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2">
         <span className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] ${panel}`}>
@@ -347,6 +536,7 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
         </span>
         <span className={`rounded-full px-3 py-1 text-[10px] text-accent/80 ${panel} ${mono}`}>
           FLT {counts.flights} · SHIP {counts.ships} · SAT {counts.sats}
+          {layers.cables && counts.cables ? ` · CBL ${counts.cables}` : ''}
         </span>
         {tier === 'keyless' && <span className="rounded-full bg-black/60 px-2.5 py-1 text-[10px] text-white/60">Add a Cesium ion or Google key in Setup › Power up for 3D buildings and cities</span>}
       </div>
@@ -354,6 +544,120 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
         <ArrowLeftRight className="size-3.5" aria-hidden /> Back to 2D
       </button>
       {error && <p className="absolute left-3 top-12 max-w-md rounded-lg bg-black/70 px-2 py-1 text-[11px] text-warm">{error}</p>}
+
+      {/* Data layers (God's Eye View's left rail): what the globe shows, with satellite groups. */}
+      {!follow && !satRide && (
+        <div className={`absolute left-3 top-14 w-48 space-y-0.5 p-2 ${panel}`}>
+          <p className={`px-1 pb-0.5 text-[10px] text-accent/80 ${mono}`}>Data layers</p>
+          {RAIL.map(r => (
+            <button key={r.k} type="button" onClick={() => toggle(r.k)} aria-pressed={layers[r.k]} className={`flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs hover:bg-white/10 ${layers[r.k] ? 'text-white' : 'text-white/40'}`}>
+              <r.icon className={`size-3.5 ${layers[r.k] ? 'text-accent' : ''}`} aria-hidden />
+              <span className="flex-1">{r.label}</span>
+              <span className="font-mono text-[10px] text-white/50">{layers[r.k] ? r.count(counts) : 'off'}</span>
+            </button>
+          ))}
+          {layers.sats && (
+            <div className="flex flex-wrap gap-1 px-1 pt-1">
+              {SAT_GROUPS.map(g => {
+                const off = layers.hiddenSats.includes(g.id)
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    title={`${g.label}: ${satCounts[g.id] ?? 0}`}
+                    aria-pressed={!off}
+                    onClick={() => setLayers(l => ({ ...l, hiddenSats: off ? l.hiddenSats.filter(x => x !== g.id) : [...l.hiddenSats, g.id] }))}
+                    className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] ${off ? 'border-white/10 text-white/35' : 'border-white/20 text-white/80'}`}
+                  >
+                    <span className="size-1.5 rounded-full" style={{ background: off ? 'transparent' : g.color, border: `1px solid ${g.color}` }} />
+                    {g.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* A picked satellite: its orbit, and ride it. */}
+      {sat && !follow && (
+        <div className={`absolute bottom-24 left-3 w-72 max-w-[calc(100%-1.5rem)] space-y-2 p-3 ${panel}`}>
+          <div className="flex items-start gap-2">
+            <Satellite className="mt-0.5 size-4" style={{ color: satGroup(sat.group).color }} aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">{sat.name}</p>
+              <p className="text-[11px] text-white/60">
+                {satGroup(sat.group).label} · NORAD {sat.norad}
+              </p>
+            </div>
+            <button type="button" onClick={() => (setSatRide(null), setSatPick(null))} className="text-white/60 hover:text-white" aria-label="Close">
+              <X className="size-4" aria-hidden />
+            </button>
+          </div>
+          {satNow && (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+              <dt className="text-white/50">Altitude</dt>
+              <dd className="font-mono">{Math.round(satNow.altKm).toLocaleString()} km</dd>
+              <dt className="text-white/50">Speed</dt>
+              <dd className="font-mono">{satNow.speedKms.toFixed(2)} km/s</dd>
+              <dt className="text-white/50">Orbit</dt>
+              <dd className="font-mono">
+                {satNow.periodMin < 200 ? `${satNow.periodMin.toFixed(0)} min` : `${(satNow.periodMin / 60).toFixed(1)} h`} · {satNow.inclination.toFixed(1)}° tilt
+              </dd>
+              <dt className="text-white/50">Over</dt>
+              <dd className="font-mono">{latLonLabel(satNow)}</dd>
+            </dl>
+          )}
+          <div className="flex gap-1.5">
+            <button type="button" onClick={() => setSatRide(r => (r?.mode === 'follow' ? null : { i: sat.i, mode: 'follow' }))} aria-pressed={satRide?.mode === 'follow'} className={`flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs ${satRide?.mode === 'follow' ? 'bg-accent/90 text-accent-fg' : 'border border-accent/50 text-accent hover:bg-accent/10'}`}>
+              <Crosshair className="size-3.5" aria-hidden /> {satRide?.mode === 'follow' ? 'Following' : 'Follow'}
+            </button>
+            <button type="button" onClick={() => setSatRide(r => (r?.mode === 'eye' ? null : { i: sat.i, mode: 'eye' }))} aria-pressed={satRide?.mode === 'eye'} className={`flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs ${satRide?.mode === 'eye' ? 'bg-accent/90 text-accent-fg' : 'border border-accent/50 text-accent hover:bg-accent/10'}`}>
+              <Eye className="size-3.5" aria-hidden /> Satellite’s eye
+            </button>
+          </div>
+          <p className="flex items-center gap-1 text-[10px] text-white/45">
+            <Orbit className="size-3" aria-hidden /> {satRide?.mode === 'eye' ? 'Looking straight down from it, as it flies. Esc to stop.' : 'The ring is its orbit: one full revolution.'}
+          </p>
+        </div>
+      )}
+
+      {/* A picked cable: what it links. */}
+      {cable && !follow && !sat && (
+        <div className={`absolute bottom-24 left-3 w-80 max-w-[calc(100%-1.5rem)] space-y-2 p-3 ${panel}`}>
+          <div className="flex items-start gap-2">
+            <Cable className="mt-0.5 size-4 text-accent" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">{cable.name}</p>
+              {cable.detail && (
+                <p className="text-[11px] text-white/60">
+                  {[cable.detail.length, cable.detail.rfs ? `${cable.detail.planned ? 'planned for' : 'in service since'} ${cable.detail.rfs}` : ''].filter(Boolean).join(' · ')}
+                </p>
+              )}
+            </div>
+            <button type="button" onClick={closeCable} className="text-white/60 hover:text-white" aria-label="Close">
+              <X className="size-4" aria-hidden />
+            </button>
+          </div>
+          {cable.detail ? (
+            <>
+              {cable.detail.owners && <p className="line-clamp-2 text-[11px] text-white/70">Owned by {cable.detail.owners}</p>}
+              {cable.detail.landings.length > 0 && (
+                <p className="text-[11px] text-white/70">
+                  Lands at {cable.detail.landings.slice(0, 8).map(l => l.name).join(' · ')}
+                  {cable.detail.landings.length > 8 ? ` · +${cable.detail.landings.length - 8} more` : ''}
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-[11px] text-white/45">Loading the cable’s card…</p>
+          )}
+          <button type="button" onClick={() => flyOverCable(cable.id)} className="rounded-full border border-accent/50 px-3 py-1 text-xs text-accent hover:bg-accent/10">
+            Fly over it
+          </button>
+        </div>
+      )}
+      {landing && !cable && !sat && !follow && <p className={`absolute bottom-24 left-3 px-3 py-1.5 text-[11px] ${panel}`}>Cable landing · {landing}</p>}
 
       {/* A picked aircraft: what it is, and fly with it. */}
       {picked && !follow && (
@@ -469,7 +773,8 @@ export default function Globe3D({ start, onClose }: { start: { lat: number; lon:
         </>
       )}
       <p className="pointer-events-none absolute bottom-1 right-2 text-[9px] text-white/40">
-        {tier === 'google' ? 'Google Map Tiles' : tier === 'ion' ? 'Cesium ion · Esri World Imagery' : 'Esri World Imagery · Re:Earth terrain'} · CesiumJS · aircraft models CC BY 4.0 (see credits)
+        {tier === 'google' ? 'Google Map Tiles' : tier === 'ion' ? 'Cesium ion · Esri World Imagery' : 'Esri World Imagery · Re:Earth terrain'} · CesiumJS · aircraft models CC BY 4.0 (see credits){layers.sats ? ' · CelesTrak' : ''}
+        {layers.cables ? ' · Submarine Cable Map © TeleGeography' : ''}
       </p>
     </div>
   )

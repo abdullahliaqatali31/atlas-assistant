@@ -8,6 +8,7 @@ import type { HostEvent, HostRequest } from '../shared/ipc.ts'
 import { osCredentialStore } from '@assistant/runtime'
 
 import { EMPTY_WORLD, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
+import { isCableId, parseCableDetail, parseCables, parseLandings, SAT_GROUPS, type CableDetail, type CablesResult } from '../shared/space.ts'
 import { CameraDirectory } from './cameras.ts'
 import { AdsbFeed, FlightSweep, RouteBook } from './flights.ts'
 import { ShipFeed } from './ships.ts'
@@ -15,6 +16,7 @@ import { WebcamService } from './webcams.ts'
 
 const TIMEOUT_MS = 60_000
 const FLIGHTS_TTL = 15_000
+const CABLES_TTL = 24 * 3600_000
 const FLIGHTS_GAP = 5_000
 const FLIGHTS_BACKOFF = 60_000
 /** adsb.lol answers for up to 1000 nautical miles around a point. */
@@ -52,6 +54,9 @@ export class WorldService {
   private openSkyDay = { day: '', calls: 0 }
   private openSkyPausedUntil = 0
   private satellites: { at: number; list: SatelliteElements[] } | null = null
+  private satellitesAll: { at: number; list: SatelliteElements[] } | null = null
+  private cablesCache: { at: number; data: CablesResult } | null = null
+  private cableCards = new Map<string, CableDetail | null>()
   private readonly cams = new CameraDirectory((level, message) => this.deps.log?.(level, message))
   readonly webcams = new WebcamService({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
   private readonly adsb = new AdsbFeed(getJson)
@@ -195,6 +200,38 @@ export class WorldService {
     return list
   }
 
+  /** Every group the 3D view shows (about 900 objects), each tagged with its group, every 6 hours. */
+  async satelliteListAll(): Promise<SatelliteElements[]> {
+    if (this.satellitesAll && Date.now() - this.satellitesAll.at < SATELLITES_TTL) return this.satellitesAll.list
+    const groups = await Promise.all(SAT_GROUPS.map(g => getJson(`https://celestrak.org/NORAD/elements/gp.php?GROUP=${g.id}&FORMAT=json`).then(list => ({ id: g.id, list }), () => ({ id: g.id, list: [] }))))
+    const seen = new Set<unknown>()
+    const list = groups.flatMap(g => (Array.isArray(g.list) ? (g.list as SatelliteElements[]) : []).filter(s => !seen.has(s.NORAD_CAT_ID) && seen.add(s.NORAD_CAT_ID)).map(s => ({ ...s, _group: g.id })))
+    if (list.length) this.satellitesAll = { at: Date.now(), list }
+    return list
+  }
+
+  /** Submarine cables and landing points from TeleGeography's public map, once a day. */
+  async cables(): Promise<CablesResult | null> {
+    if (this.cablesCache && Date.now() - this.cablesCache.at < CABLES_TTL) return this.cablesCache.data
+    try {
+      const [c, l] = await Promise.all([getJson('https://www.submarinecablemap.com/api/v3/cable/cable-geo.json'), getJson('https://www.submarinecablemap.com/api/v3/landing-point/landing-point-geo.json')])
+      const data = { cables: parseCables(c), landings: parseLandings(l) }
+      if (data.cables.length) this.cablesCache = { at: Date.now(), data }
+      return data
+    } catch {
+      return this.cablesCache?.data ?? null
+    }
+  }
+
+  async cable(id: unknown): Promise<CableDetail | null> {
+    if (!isCableId(id)) return null
+    if (this.cableCards.has(id)) return this.cableCards.get(id) ?? null
+    const card = parseCableDetail(await getJson(`https://www.submarinecablemap.com/api/v3/cable/${id}.json`).catch(() => null))
+    if (this.cableCards.size > 300) this.cableCards.delete(this.cableCards.keys().next().value!)
+    this.cableCards.set(id, card)
+    return card
+  }
+
   /** Every aircraft over a wide view (swept area by area), plus military worldwide. */
   async flightsArea(box: GeoBox): Promise<FlightsArea> {
     const area = this.sweep.view(box)
@@ -302,7 +339,9 @@ export class WorldService {
     handle(WLD.flights, (lat, lon, dist, fill) => this.flights(lat, lon, typeof dist === 'number' && Number.isFinite(dist) ? dist : 250, fill === true))
     handle(WLD.flightsArea, raw => this.flightsArea(toBox(raw)))
     handle(WLD.flightRoute, callsign => (typeof callsign === 'string' ? this.routes.get(callsign) : null))
-    handle(WLD.satellites, () => this.satelliteList())
+    handle(WLD.satellites, which => (which === 'all' ? this.satelliteListAll() : this.satelliteList()))
+    handle(WLD.cables, () => this.cables())
+    handle(WLD.cable, id => this.cable(id))
     handle(WLD.launches, () => this.launches())
     handle(WLD.radio, () => this.radio())
     handle(WLD.rain, () => this.rain())

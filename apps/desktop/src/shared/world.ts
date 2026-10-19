@@ -5,6 +5,8 @@
  * fetches and raises alerts), main and the World page.
  */
 
+import type { CableDetail, CablesResult } from './space.ts'
+
 export interface Place {
   id: string
   name: string
@@ -547,6 +549,8 @@ export const WLD = {
   rain: 'world:rain',
   map3dKeys: 'world:map3d-keys',
   satellites: 'world:satellites',
+  cables: 'world:cables',
+  cable: 'world:cable',
   ships: 'world:ships',
   shipsKey: 'world:ships-key',
   cameras: 'world:cameras',
@@ -576,7 +580,12 @@ export interface WorldBridge {
   /** Keys for the 3D view (browser-side by nature): Google photorealistic tiles, Cesium ion. */
   map3dKeys(): Promise<{ google: string | null; ion: string | null }>
   /** The ISS, stations and the brightest satellites. */
-  satellites(): Promise<SatelliteElements[]>
+  /** Orbit elements: space stations and the brightest; 'all' adds navigation, weather and geostationary groups (each tagged _group). */
+  satellites(which?: 'all'): Promise<SatelliteElements[]>
+  /** The world's submarine cables and landing points (TeleGeography, fetched daily); null when unreachable. */
+  cables(): Promise<CablesResult | null>
+  /** One cable's card: length, owners, landings, ready-for-service year. */
+  cable(id: string): Promise<CableDetail | null>
   /** Ships in the area on screen (needs the owner's free AISStream key). */
   ships(box: { south: number; west: number; north: number; east: number }): Promise<ShipsResult>
   /** Saves the AISStream key in the Windows credential store (null removes it). */
