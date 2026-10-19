@@ -315,6 +315,13 @@ export class RuntimeSupervisor {
     return true
   }
 
+  /** The PC's state, kept for a restarted runtime too. */
+  private lastSystem: Extract<HostRequest, { type: 'system-snapshot' }> | null = null
+  system(snapshot: Extract<HostRequest, { type: 'system-snapshot' }>['snapshot'], changes: Extract<HostRequest, { type: 'system-snapshot' }>['changes']) {
+    this.lastSystem = { type: 'system-snapshot', snapshot, changes: [] }
+    if (this.child) this.post({ type: 'system-snapshot', snapshot, changes })
+  }
+
   /** Atlas's own window, kept for a restarted runtime too. */
   ui(state: Extract<HostRequest, { type: 'ui-snapshot' }>['state']) {
     this.lastUi = state
@@ -370,6 +377,7 @@ export class RuntimeSupervisor {
           this.post({ type: 'set-speech', enabled: this.speech })
           if (this.lastNews.length) this.post({ type: 'news-snapshot', headlines: this.lastNews })
           if (this.lastUi) this.post({ type: 'ui-snapshot', state: this.lastUi })
+          if (this.lastSystem) this.post(this.lastSystem)
         }
         this.deps.onStatus(e)
         break

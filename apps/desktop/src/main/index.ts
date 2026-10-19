@@ -48,6 +48,7 @@ import { providerFor, readSetup, runtimeEnv, saveSetup, saveSpeakReplies, setupS
 import { RuntimeSupervisor } from './supervisor.ts'
 import { PresenceWidget } from './presence.ts'
 import { GlassPanel } from './glass.ts'
+import { SystemService } from './system/service.ts'
 import { PRS, WIDGET_WHEN, type WidgetWhen } from '../shared/presence.ts'
 
 // Privileged scheme for the local speech model must be declared before 'ready'.
@@ -270,6 +271,13 @@ const glass = new GlassPanel({
 })
 glass.register()
 
+/** The PC itself: Wi-Fi, Bluetooth, battery, VPN, read every 45 s and on network or power changes. */
+const pcSystem = new SystemService({
+  dir: join(app.getPath('userData'), 'system'),
+  log: (level, message) => log(level, message),
+  onSnapshot: (s, changes) => supervisor.system(s, changes),
+})
+
 /** The app opens on exactly what the glass panel was showing; the panel folds away. */
 const handOffGlass = () => {
   const v = glass.current
@@ -471,6 +479,7 @@ const ui = new UiService({
   requireOwner: () => requireOwner(),
   onChange: state => supervisor.ui(state),
   glass: op => glass.handle(op),
+  system: op => pcSystem.handle(op),
 })
 ui.register()
 /** The live world at the owner's places, for the World page. */
@@ -732,6 +741,7 @@ if (!app.requestSingleInstanceLock()) {
       heldReturn = { signal: 'unlock', idleMs: 0 }
     }
     supervisor.start()
+    pcSystem.start()
     // The glass panel loads hidden in the background, so it opens at once when asked.
     setTimeout(() => glass.prewarm(), 4_000).unref?.()
     // Started by Windows at login: stay in the tray until the owner opens Atlas (the widget shows meanwhile).
@@ -750,6 +760,7 @@ if (!app.requestSingleInstanceLock()) {
     world.ships.stop()
     presence.stop()
     glass.stop()
+    pcSystem.stop()
     void supervisor.stop().finally(() => {
       tray?.destroy()
       app.quit()

@@ -45,6 +45,7 @@ import { CODE_RULES, HostCode } from './code.ts'
 import { DESKTOP_RULES, HostDesktop } from './desktop.ts'
 import { FILE_RULES, HostFiles } from './files.ts'
 import { HostUi, UI_RULES } from './ui.ts'
+import { HostSystem, SYSTEM_RULES } from './system.ts'
 import { IMPROVEMENT_RULES, Improvements } from './improvements.ts'
 import { WORLD_RULES, WorldWatch } from './world.ts'
 import { HostNews, NEWS_RULES } from './news.ts'
@@ -88,13 +89,14 @@ const code = new HostCode({ post: e => post(e), now: () => systemClock.now() })
 const files = new HostFiles({ post: e => post(e) })
 const desktop = new HostDesktop({ post: e => post(e) })
 const ui = new HostUi({ post: e => post(e), geocode: name => (world ? world.geocode(name) : Promise.reject(new Error('The assistant is not ready yet.'))) })
+const system = new HostSystem({ request: (op, signal) => ui.ask({ kind: 'system', op }, signal), now: () => Date.now() })
 const news = new HostNews()
 const controls = new HostControls({
   post: e => post(e),
   log: (level, message) => log(level, message),
   now: () => systemClock.now(),
   extensionToken: () => store.get('PLAYWRIGHT_MCP_EXTENSION_TOKEN'),
-  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...IMPROVEMENT_RULES, ...WORLD_RULES, ...CONVERSATION_RULES],
+  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...SYSTEM_RULES, ...IMPROVEMENT_RULES, ...WORLD_RULES, ...CONVERSATION_RULES],
 })
 let voice: VoiceProvider | null = null
 let speechEnabled = true
@@ -231,7 +233,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
     summarize: llmSummarizer(meterLlm(createLlm(config.llm, 'background'), { purpose: 'background', memory, clock: systemClock, utcOffsetMin: offset, onRecord: () => schedulePush() })),
     memory,
     // What Atlas learned and taught tasks, plus one line on its own window.
-    learning: { observeOwner: text => learning?.observeOwner(text), contextLines: () => [...(learning?.contextLines() ?? []), ...ui.contextLines()] },
+    learning: { observeOwner: text => learning?.observeOwner(text), contextLines: () => [...(learning?.contextLines() ?? []), ...ui.contextLines(), ...system.contextLines()] },
     clock: systemClock,
     owner: config.owner,
     prefs: { ...DEFAULT_PREFS, utcOffsetMin: config.owner.utcOffsetMin, quietHours: parseQuietHours(merged.ASSISTANT_QUIET_HOURS) },
@@ -245,7 +247,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   })
   // Local tools now; MCP servers start in the background and join when ready.
   // Answers to its own questions (project status, learning suggestions) go through these.
-  void controls.attach(assistant, [...localTools(memory, systemClock), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
+  void controls.attach(assistant, [...localTools(memory, systemClock), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...system.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
   const agendaMemory = memory
   const wrapUpMinute = parseClock(merged.ASSISTANT_WRAP_UP) ?? 18 * 60
   initiative = new InitiativeService(
@@ -584,6 +586,9 @@ port.on('message', ({ data }: { data: HostRequest }) => {
       break
     case 'ui-snapshot':
       ui.setSnapshot(data.state)
+      break
+    case 'system-snapshot':
+      system.setSnapshot(data.snapshot, data.changes)
       break
     case 'world-op': {
       const { requestId, op } = data

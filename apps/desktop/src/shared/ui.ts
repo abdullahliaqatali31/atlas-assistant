@@ -5,6 +5,7 @@
  */
 import type { GlassOp } from './glass.ts'
 import type { MapOp } from './map.ts'
+import type { SystemOp } from './system.ts'
 
 export const VIEWS = ['home', 'world', 'alerts', 'today', 'news', 'projects', 'files', 'apps', 'learning', 'controls', 'setup'] as const
 export type View = (typeof VIEWS)[number]
@@ -63,7 +64,7 @@ export interface UiChange {
 }
 
 /** The model's window tools; map ops drive the World map (shared/map.ts). */
-export type UiOp = { kind: 'state' } | { kind: 'set'; change: UiChange } | { kind: 'map'; op: MapOp } | { kind: 'glass'; op: GlassOp }
+export type UiOp = { kind: 'state' } | { kind: 'set'; change: UiChange } | { kind: 'map'; op: MapOp } | { kind: 'glass'; op: GlassOp } | { kind: 'system'; op: SystemOp }
 
 /** Page-side commands main sends (view, chat, compact). */
 export interface PageCommand {

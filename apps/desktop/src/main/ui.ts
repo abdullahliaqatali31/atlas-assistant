@@ -11,6 +11,7 @@ import { ipcMain, screen, type BrowserWindow, type Rectangle } from 'electron'
 import { MC, type MapOp } from '../shared/map.ts'
 import { describeUi, layoutFor, parseUiChange, UC, isView, type PageCommand, type PageUi, type UiChange, type UiOp, type UiState } from '../shared/ui.ts'
 import type { GlassOp } from '../shared/glass.ts'
+import type { SystemOp } from '../shared/system.ts'
 
 const COMPACT = { width: 400, height: 640 }
 const NORMAL = { width: 1180, height: 760 }
@@ -41,6 +42,8 @@ export class UiService {
       onChange: (s: UiState) => void
       /** The glass panel beside the desktop widget. */
       glass?: (op: GlassOp) => Promise<string>
+      /** The PC itself: status, Settings pages, and (later) opening and making things. */
+      system?: (op: SystemOp) => Promise<string>
     },
   ) {}
 
@@ -175,6 +178,10 @@ export class UiService {
   async handleOp(op: UiOp): Promise<string> {
     if (op.kind === 'state') return describeUi(this.state())
     if (op.kind === 'map') return this.mapOp(op.op)
+    if (op.kind === 'system') {
+      if (!this.deps.system) throw new Error('PC control is not available.')
+      return this.deps.system(op.op)
+    }
     if (op.kind === 'glass') {
       if (!this.deps.glass) throw new Error('The glass panel is not available.')
       return this.deps.glass(op.op)

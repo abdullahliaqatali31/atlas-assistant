@@ -263,6 +263,11 @@ export class HostUi {
     this.pending.delete(requestId)
   }
 
+  /** Other runtime parts (the PC tools) send their requests through the window's channel. */
+  ask(op: UiOp, signal?: AbortSignal): Promise<string> {
+    return this.request(op, signal)
+  }
+
   private request(op: UiOp, signal?: AbortSignal): Promise<string> {
     const requestId = randomUUID()
     return new Promise((resolve, reject) => {

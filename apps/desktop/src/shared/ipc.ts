@@ -10,6 +10,7 @@ import type { ActivityHostEvent, ActivityHostRequest } from './activity.ts'
 import type { CodeOp, CodeProjectView, RunView } from './code.ts'
 import type { DesktopOp } from './desktop.ts'
 import type { FileOp } from './files.ts'
+import type { SystemChange, SystemSnapshot } from './system.ts'
 import type { UiOp, UiState } from './ui.ts'
 import type { WorldOp, WorldSnapshot } from './world.ts'
 import type { ControlHostEvent, ControlHostRequest } from './control.ts'
@@ -391,6 +392,8 @@ export type HostRequest =
   | { type: 'world-op'; requestId: string; op: WorldOp }
   /** Atlas's own window, pushed by main whenever it changes. */
   | { type: 'ui-snapshot'; state: UiState }
+  /** The PC's Wi-Fi, Bluetooth and battery, pushed by main with what changed. */
+  | { type: 'system-snapshot'; snapshot: SystemSnapshot; changes: SystemChange[] }
   /** Answer to a window tool's request. */
   | { type: 'ui-result'; requestId: string; result?: string | undefined; error?: string | undefined }
   /** Answer to a desktop-app tool's request. */
