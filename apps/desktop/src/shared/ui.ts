@@ -68,6 +68,8 @@ export interface PageCommand {
   view?: View | undefined
   chat?: boolean | undefined
   compact?: boolean | undefined
+  /** Open the News page on this tab, scrolled to this story (from the glass panel). */
+  news?: { tab: string; focus: string | null } | undefined
 }
 
 export const UC = {

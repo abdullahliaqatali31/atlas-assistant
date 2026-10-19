@@ -72,6 +72,12 @@ export class UiService {
     win.on('closed', () => this.deps.onChange(this.state()))
   }
 
+/** Open the News page on a tab, scrolled to one story (the glass panel handing over). */
+  async showNews(tab: string, focus: string | null) {
+    await this.apply({ view: 'news' })
+    this.command({ news: { tab, focus } })
+  }
+
   private command(c: PageCommand) {
     this.deps.toRenderer(UC.command, c)
   }

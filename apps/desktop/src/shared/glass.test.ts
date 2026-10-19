@@ -32,7 +32,7 @@ describe('glass panel', () => {
   })
 
   it('tells the model a numbered list, so it can say "detail of 2"', () => {
-    expect(describeGlass({ kind: 'news', title: 'Pakistan', items: pickNews(ALL, 'pakistan', '') })).toContain('1. New metro line opens in Lahore (Dawn) 2. Floods in Sindh')
+    expect(describeGlass({ kind: 'news', title: 'Pakistan', items: pickNews(ALL, 'pakistan', ''), category: 'pakistan' })).toContain('1. New metro line opens in Lahore (Dawn) 2. Floods in Sindh')
     expect(describeGlass(null)).toMatch(/closed/)
   })
 

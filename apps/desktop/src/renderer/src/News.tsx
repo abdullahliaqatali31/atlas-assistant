@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { CATEGORIES, CATEGORY_LABEL, type Category, type Headline, type NewsResult, type NewsSource, type SavedHeadline } from '../../shared/news.ts'
 import { ago, Empty, Panel, useNow } from './Jarvis.tsx'
+import { NEWS_FOCUS_EVENT, takeNewsFocus } from './shell/live.ts'
 
 /** News, loaded once and shared by the home canvas and the News page. */
 export const useNews = () => {
@@ -40,11 +41,11 @@ const useSaved = () => {
 }
 
 /** One story: picture, title, summary, source and time, and save. */
-export function NewsCard({ h, saved, onToggle, compact = false }: { h: Headline; saved: boolean; onToggle: () => void; compact?: boolean }) {
+export function NewsCard({ h, saved, onToggle, compact = false, focused = false }: { h: Headline; saved: boolean; onToggle: () => void; compact?: boolean; focused?: boolean }) {
   const now = useNow(60_000)
   const [broken, setBroken] = useState(false)
   return (
-    <article className="tile rise-in group flex min-w-0 flex-col overflow-hidden">
+    <article id={`news-${h.id}`} className={`tile rise-in group flex min-w-0 flex-col overflow-hidden transition-shadow duration-500 ${focused ? 'border-accent ring-2 ring-accent/60 shadow-[0_0_24px_var(--accent-soft)]' : ''}`}>
       <a href={h.link} target="_blank" rel="noreferrer" className="block" title="Open the article">
         {h.image && !broken ? (
           <img src={h.image} alt="" loading="lazy" onError={() => setBroken(true)} className={`aspect-[16/8] w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]`} />
@@ -124,6 +125,19 @@ export function NewsPage() {
     }
   })
   const [sources, setSources] = useState<NewsSource[] | null>(null)
+  // A story handed over from the glass panel: its tab, scrolled into view and lit for a few seconds.
+  const [focus, setFocus] = useState<string | null>(null)
+  useEffect(() => {
+    const take = () => {
+      const r = takeNewsFocus()
+      if (!r) return
+      if (r.tab === 'all' || r.tab === 'saved' || CATEGORIES.includes(r.tab as Category)) setTab(r.tab as Tab)
+      setFocus(r.focus)
+    }
+    take()
+    window.addEventListener(NEWS_FOCUS_EVENT, take)
+    return () => window.removeEventListener(NEWS_FOCUS_EVENT, take)
+  }, [])
   const [showSources, setShowSources] = useState(false)
   useEffect(() => {
     void window.news.sources().then(setSources, () => undefined)
@@ -137,6 +151,14 @@ export function NewsPage() {
     }
   }
   const list: Headline[] = tab === 'saved' ? saved : (news?.headlines ?? []).filter(h => tab === 'all' || h.category === tab)
+  useEffect(() => {
+    if (!focus) return
+    const el = document.getElementById(`news-${focus}`)
+    if (!el) return
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    const t = setTimeout(() => setFocus(null), 6_000)
+    return () => clearTimeout(t)
+  }, [focus, list.length])
   const toggleSource = async (id: string) => {
     if (!sources) return
     const next = sources.map(s => (s.id === id ? { ...s, enabled: !s.enabled } : s))
@@ -192,7 +214,7 @@ export function NewsPage() {
         )}
         <div className="grid gap-2.5 @md:grid-cols-2 @3xl:grid-cols-3 @5xl:grid-cols-4">
           {list.map(h => (
-            <NewsCard key={h.id} h={h} saved={isSaved(h.id)} onToggle={() => void toggle(h)} />
+            <NewsCard key={h.id} h={h} saved={isSaved(h.id)} onToggle={() => void toggle(h)} focused={h.id === focus} />
           ))}
         </div>
         {news && news.failed.length > 0 && tab !== 'saved' && <p className="mt-3 text-[11px] text-muted">Unavailable right now: {news.failed.join(', ')}</p>}

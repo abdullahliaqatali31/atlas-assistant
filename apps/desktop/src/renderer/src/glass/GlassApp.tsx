@@ -4,9 +4,11 @@ import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'rea
 import type { GlassAlign, GlassView } from '../../../shared/glass.ts'
 import { CATEGORY_LABEL, type Headline } from '../../../shared/news.ts'
 import { Markdown } from '../ui/Markdown.tsx'
+import { BASE_URL } from '../world/styles.ts'
 
-// The map library is big: only loaded when a map is asked for.
-const MiniMap = lazy(() => import('./MiniMap.tsx'))
+// The map library is big: loaded in the background soon after the panel starts, so the first map opens quickly.
+const loadMap = () => import('./MiniMap.tsx')
+const MiniMap = lazy(loadMap)
 
 /**
  * Smoky card behind text: dense enough that whatever window is behind never
@@ -38,6 +40,19 @@ const Rise = ({ i, children, className = '' }: { i: number; children: ReactNode;
 export function GlassApp() {
   const [view, setView] = useState<GlassView | null>(null)
   const [align, setAlign] = useState<GlassAlign>('bottom')
+  // Once made, the map stays (hidden while another view shows): the next map just flies there.
+  const [lastMap, setLastMap] = useState<Extract<GlassView, { kind: 'map' }> | null>(null)
+  useEffect(() => {
+    if (view?.kind === 'map') setLastMap(view)
+  }, [view])
+  // Warm up while idle: the map code, and the map style in the HTTP cache.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void loadMap().catch(() => undefined)
+      void fetch(BASE_URL.dark).catch(() => undefined)
+    }, 1_500)
+    return () => clearTimeout(t)
+  }, [])
   const solid = useRef(false)
 
   useEffect(
@@ -90,19 +105,12 @@ export function GlassApp() {
               </button>
             </header>
           </Rise>
-          <main key={`${view.kind}:${view.kind === 'story' ? view.item.id : ''}`} className={`glass-scroll -mx-3 -my-2 min-h-0 overflow-y-auto px-3 py-2 ${view.kind === 'map' ? 'flex-1' : ''}`}>
+          {view.kind !== 'map' && (
+          <main key={`${view.kind}:${view.kind === 'story' ? view.item.id : ''}`} className="glass-scroll -mx-3 -my-2 min-h-0 overflow-y-auto px-3 py-2">
             {view.kind === 'news' ? (
               <NewsList items={view.items} />
             ) : view.kind === 'story' ? (
               <Story item={view.item} />
-            ) : view.kind === 'map' ? (
-              <Rise i={1} className="h-full">
-                <div data-solid className="neon-glass frame h-full overflow-hidden rounded-2xl">
-                  <Suspense fallback={<div className={`grid h-full place-items-center text-xs text-white/70 ${SMOKE}`}>Loading the map…</div>}>
-                    <MiniMap lat={view.lat} lon={view.lon} zoom={view.zoom} pins={view.pins} />
-                  </Suspense>
-                </div>
-              </Rise>
             ) : (
               <Rise i={1}>
                 <div data-solid className={`rounded-2xl p-4 text-sm leading-relaxed ${SMOKE}`}>
@@ -111,7 +119,17 @@ export function GlassApp() {
               </Rise>
             )}
           </main>
+          )}
         </>
+      )}
+      {lastMap && (
+        <div className={view?.kind === 'map' ? 'rise-in min-h-0 flex-1' : 'hidden'}>
+          <div data-solid className="neon-glass frame h-full overflow-hidden rounded-2xl">
+            <Suspense fallback={<div className={`grid h-full place-items-center text-xs text-white/70 ${SMOKE}`}>Loading the map…</div>}>
+              <MiniMap lat={lastMap.lat} lon={lastMap.lon} zoom={lastMap.zoom} pins={lastMap.pins} visible={view?.kind === 'map'} />
+            </Suspense>
+          </div>
+        </div>
       )}
     </div>
   )

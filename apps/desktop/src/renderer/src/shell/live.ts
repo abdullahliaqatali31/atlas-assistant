@@ -39,3 +39,20 @@ export const useLive = () => useSyncExternalStore(subscribe, () => current)
 
 /** Stop Atlas from anywhere in the window (the presence pill): the conversation decides what stopping means now. */
 export const STOP_EVENT = 'atlas:stop'
+
+/**
+ * "Open the News page on this tab, at this story" (the glass panel handing
+ * over to the app). The page loads on demand, so the request waits here
+ * until it is ready to take it.
+ */
+export const NEWS_FOCUS_EVENT = 'atlas:news-focus'
+let pendingNews: { tab: string; focus: string | null } | null = null
+export const requestNewsFocus = (r: { tab: string; focus: string | null }) => {
+  pendingNews = r
+  window.dispatchEvent(new Event(NEWS_FOCUS_EVENT))
+}
+export const takeNewsFocus = () => {
+  const r = pendingNews
+  pendingNews = null
+  return r
+}

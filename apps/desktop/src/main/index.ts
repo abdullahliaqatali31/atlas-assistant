@@ -267,6 +267,28 @@ const glass = new GlassPanel({
 })
 glass.register()
 
+/** The app opens on exactly what the glass panel was showing; the panel folds away. */
+const handOffGlass = () => {
+  const v = glass.current
+  if (!v) return
+  glass.close()
+  const done = (p: Promise<unknown>) => void p.catch(e => log('warn', `Glass hand-off: ${e instanceof Error ? e.message : String(e)}`))
+  switch (v.kind) {
+    case 'news':
+      return done(ui.showNews(v.category ?? 'all', null))
+    case 'story':
+      return done(ui.showNews(v.item.category, v.item.id))
+    case 'map':
+      return done(
+        ui
+          .handleOp({ kind: 'map', op: { kind: 'view', lat: v.lat, lon: v.lon, zoom: v.zoom, label: v.title || undefined } })
+          .then(() => (v.pins.length ? ui.handleOp({ kind: 'map', op: { kind: 'pins', add: v.pins.map(p => ({ lat: p.lat, lon: p.lon, label: p.label })), clear: true } }) : '')),
+      )
+    case 'note':
+      return done(ui.apply({ chat: true }))
+  }
+}
+
 // ── window ──────────────────────────────────────────────────
 
 const createWindow = ({ inactive = false } = {}) => {
@@ -303,7 +325,12 @@ const createWindow = ({ inactive = false } = {}) => {
   ui.watch(win)
   win.on('focus', () => win?.flashFrame(false))
   // The desktop widget steps in while Atlas's window is out of sight or behind other apps.
-  const seen = () => presence.mainWindow(Boolean(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused()))
+  const seen = () => {
+    const inView = Boolean(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused())
+    presence.mainWindow(inView)
+    // Coming to the front with something on the glass panel: the app takes it over, the widget goes compact.
+    if (inView) handOffGlass()
+  }
   for (const ev of ['show', 'hide', 'minimize', 'restore', 'focus', 'blur'] as const) win.on(ev as 'show', seen)
   // Closing the window destroys the renderer (keeping idle RAM low); the tray and runtime stay up.
   win.on('closed', () => {
@@ -696,6 +723,8 @@ if (!app.requestSingleInstanceLock()) {
       heldReturn = { signal: 'unlock', idleMs: 0 }
     }
     supervisor.start()
+    // The glass panel loads hidden in the background, so it opens at once when asked.
+    setTimeout(() => glass.prewarm(), 4_000).unref?.()
     // Started by Windows at login: stay in the tray until the owner opens Atlas (the widget shows meanwhile).
     if (!startedHidden()) createWindow()
     else presence.mainWindow(false)

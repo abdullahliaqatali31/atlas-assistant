@@ -21,7 +21,7 @@ export interface GlassPin {
 }
 
 export type GlassView =
-  | { kind: 'news'; title: string; items: Headline[] }
+  | { kind: 'news'; title: string; items: Headline[]; category: Category | null }
   | { kind: 'story'; item: Headline; n: number | null; of: number | null }
   | { kind: 'map'; title: string; lat: number; lon: number; zoom: number; pins: GlassPin[] }
   | { kind: 'note'; title: string; text: string }

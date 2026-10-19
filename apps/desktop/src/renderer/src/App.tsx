@@ -55,7 +55,7 @@ import {
   type Command,
   type CommandSource,
 } from "./shell/CommandPalette.tsx";
-import { ASK_EVENT, FOCUS_ASK_EVENT } from "./shell/live.ts";
+import { ASK_EVENT, FOCUS_ASK_EVENT, requestNewsFocus } from "./shell/live.ts";
 import { Peek, type PeekKind } from "./shell/Peek.tsx";
 import {
   changeAppearance,
@@ -239,6 +239,10 @@ export function App() {
         goStage(c.view);
         setDrawer((d) => (d === "chat" ? d : null));
       } else if (c.view) open(c.view as DrawerId);
+      if (c.news) {
+        open("news");
+        requestNewsFocus(c.news);
+      }
       if (c.chat === true) open("chat");
       else if (c.chat === false) setDrawer((d) => (d === "chat" ? null : d));
     });

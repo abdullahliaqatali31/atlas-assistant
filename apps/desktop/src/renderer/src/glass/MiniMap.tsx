@@ -34,7 +34,7 @@ const cameraFeatures = (list: Camera[]): FC => ({
  * (flights, ships, quakes, disasters, places, cameras, satellites), with
  * the same icons and colours. Click anything for a short card.
  */
-export default function MiniMap({ lat, lon, zoom, pins }: { lat: number; lon: number; zoom: number; pins: GlassPin[] }) {
+export default function MiniMap({ lat, lon, zoom, pins, visible = true }: { lat: number; lon: number; zoom: number; pins: GlassPin[]; visible?: boolean }) {
   const box = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const world = useRef<WorldSnapshot>(EMPTY_WORLD)
@@ -98,10 +98,15 @@ export default function MiniMap({ lat, lon, zoom, pins }: { lat: number; lon: nu
     } else m.flyTo({ center: [lon, lat], zoom, duration: 800 })
   }, [ready, lat, lon, zoom, pins])
 
-  // The live layers, refreshed like the app's map does.
+  // Shown again after another view: the map's box may have changed size.
+  useEffect(() => {
+    if (visible) map.current?.resize()
+  }, [visible])
+
+  // The live layers, refreshed like the app's map does; paused while another view shows.
   useEffect(() => {
     const m = map.current
-    if (!m || !ready) return
+    if (!m || !ready || !visible) return
     const put = (id: string, fc: FC): void => void (m.getSource(id) as GeoJSONSource | undefined)?.setData(fc)
     const area = () => {
       const b = m.getBounds()
@@ -141,7 +146,7 @@ export default function MiniMap({ lat, lon, zoom, pins }: { lat: number; lon: nu
       stopped = true
       for (const t of timers) clearInterval(t)
     }
-  }, [ready, on])
+  }, [ready, on, visible])
 
   return (
     <div className="relative h-full min-h-[300px] w-full">

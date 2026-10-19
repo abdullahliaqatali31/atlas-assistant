@@ -12,7 +12,7 @@
 import { BrowserWindow, ipcMain, screen, shell, type IpcMainInvokeEvent } from 'electron'
 
 import { describeGlass, GLASS_SIZE, GLS, panelBounds, pickNews, pickStory, type GlassAlign, type GlassOp, type GlassView } from '../shared/glass.ts'
-import { CATEGORY_LABEL, type Headline } from '../shared/news.ts'
+import { CATEGORY_LABEL, type Category, type Headline } from '../shared/news.ts'
 import { mainWebPreferences } from './window-prefs.ts'
 
 export class GlassPanel {
@@ -21,6 +21,7 @@ export class GlassPanel {
   /** The last news list shown, so "number 2" means what the owner sees. */
   private list: Headline[] = []
   private listTitle = ''
+  private listCategory: Category | null = null
   private ready = false
   private align: GlassAlign = 'bottom'
 
@@ -56,7 +57,8 @@ export class GlassPanel {
         const title = [op.category ? CATEGORY_LABEL[op.category] : 'Today’s news', op.query ? `· ${op.query}` : ''].filter(Boolean).join(' ')
         this.list = items
         this.listTitle = title
-        view = { kind: 'news', title, items }
+        this.listCategory = op.category
+        view = { kind: 'news', title, items, category: op.category }
         break
       }
       case 'story': {
@@ -83,6 +85,11 @@ export class GlassPanel {
     this.align = widget && b.y > widget.y ? 'top' : 'bottom'
     if (this.ready) win.webContents.send(GLS.view, { view, align: this.align })
     win.showInactive()
+  }
+
+  /** Load the (hidden) panel ahead of time, so the first "dikhao" opens at once with the map code already in. */
+  prewarm() {
+    this.ensure()
   }
 
   close() {
@@ -146,7 +153,7 @@ export class GlassPanel {
       else this.win.setIgnoreMouseEvents(true, { forward: true })
     })
     on(GLS.back, () => {
-      if (this.list.length) this.show({ kind: 'news', title: this.listTitle, items: this.list })
+      if (this.list.length) this.show({ kind: 'news', title: this.listTitle, items: this.list, category: this.listCategory })
     })
     on(GLS.story, n => {
       if (typeof n !== 'number' || !this.list[n - 1]) throw new Error('No such story.')
