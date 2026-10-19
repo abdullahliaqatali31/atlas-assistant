@@ -58,6 +58,8 @@ export interface UiChange {
   chat?: boolean | undefined
   size?: WindowSize | undefined
   pinned?: boolean | undefined
+  /** Bring the window to the front, over other apps. */
+  front?: boolean | undefined
 }
 
 /** The model's window tools; map ops drive the World map (shared/map.ts). */
@@ -106,6 +108,10 @@ export const parseUiChange = (v: unknown): UiChange | null => {
   if (o.size !== undefined) {
     if (!isWindowSize(o.size)) return null
     change.size = o.size
+  }
+  if (o.front !== undefined) {
+    if (typeof o.front !== 'boolean') return null
+    change.front = o.front
   }
   if (o.pinned !== undefined) {
     if (typeof o.pinned !== 'boolean') return null

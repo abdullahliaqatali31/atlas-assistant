@@ -38,6 +38,8 @@ import { mainWebPreferences } from './window-prefs.ts'
 /** An initiative card stays this long unless the owner answers it sooner. */
 const CARD_MS = 3 * 60_000
 const DOT = { width: 64, height: 64 }
+/** The page's zoom for each size (PresenceApp's ZOOM). */
+const ORB_ZOOM: Record<WidgetScale, number> = { s: 0.85, m: 1, l: 1.2 }
 
 interface Saved {
   when: WidgetWhen
@@ -53,6 +55,7 @@ export class PresenceWidget {
   private initiative: { item: InitiativeItem; until: number } | null = null
   private mainInView = true
   private lastSent = ''
+  private glassOpen = false
   private dragging: { timer: NodeJS.Timeout; dx: number; dy: number; until: number } | null = null
 
   constructor(
@@ -127,6 +130,12 @@ export class PresenceWidget {
     this.push()
   }
 
+  /** The glass panel opened or closed beside the widget. */
+  glass(open: boolean) {
+    this.glassOpen = open
+    this.push()
+  }
+
   /** Approvals or the owner check changed. */
   refresh() {
     this.push()
@@ -152,6 +161,7 @@ export class PresenceWidget {
       card: this.card(),
       name: this.deps.name(),
       scale: this.saved.scale,
+      glass: this.glassOpen,
     }
   }
 
@@ -254,9 +264,17 @@ export class PresenceWidget {
     this.save()
   }
 
-  /** Where the widget is now (for placing the glass panel beside it), or null when hidden. */
+  /**
+   * Where the widget's orb sits (for placing the glass panel beside it), or
+   * null when hidden. While it is a pill or a card it is wider than the orb it
+   * shrinks back to at its corner, and the glass panel keeps it an orb, so the
+   * panel is placed by the orb.
+   */
   bounds(): Rectangle | null {
-    return this.win && !this.win.isDestroyed() && this.win.isVisible() ? this.win.getBounds() : null
+    if (!this.win || this.win.isDestroyed() || !this.win.isVisible()) return null
+    const b = this.win.getBounds()
+    const side = Math.round(DOT.width * ORB_ZOOM[this.saved.scale])
+    return growFrom(b, { width: Math.min(b.width, side), height: Math.min(b.height, side) }, screen.getDisplayMatching(b).workArea)
   }
 
   private menu() {

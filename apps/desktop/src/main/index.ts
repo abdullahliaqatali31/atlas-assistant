@@ -64,6 +64,8 @@ const isDev = !app.isPackaged && Boolean(process.env.ELECTRON_RENDERER_URL)
 // In development the repo root's .env feeds setup, like `pnpm chat`.
 const devEnvFile = app.isPackaged ? null : join(app.getAppPath(), '../../.env')
 const ACCENT = { r: 0x14, g: 0xb8, b: 0xa6 }
+/** Brings Atlas to the front from anywhere. */
+const SUMMON_HOTKEY = 'CommandOrControl+Alt+A'
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -264,6 +266,7 @@ const glass = new GlassPanel({
   widget: () => presence.bounds(),
   locked: () => identity.locked,
   world: (kind, box) => world.glassData(kind, box),
+  onShown: shown => presence.glass(shown),
 })
 glass.register()
 
@@ -693,6 +696,12 @@ if (!app.requestSingleInstanceLock()) {
     tray = new Tray(trayIcon())
     tray.on('click', () => createWindow())
     controls.registerHotkey()
+    // Ctrl+Alt+A brings Atlas forward from anywhere (opens it if closed).
+    try {
+      if (!globalShortcut.register(SUMMON_HOTKEY, () => void ui.apply({ front: true }).catch(() => createWindow()))) log('warn', `The hotkey ${SUMMON_HOTKEY} is taken by another app; use the widget or the tray.`)
+    } catch {
+      log('warn', `The hotkey ${SUMMON_HOTKEY} could not be registered.`)
+    }
     updateTray()
     sessionWatch = watchSession(change => {
       if (change.signal === 'lock' || change.signal === 'suspend') {

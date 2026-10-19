@@ -125,28 +125,40 @@ export const GLASS_SIZE: Record<GlassView['kind'], { width: number; height: numb
 type Rect = { x: number; y: number; width: number; height: number }
 
 /**
- * Where the panel goes: stacked above the widget (below it, when the widget
- * sits in the top half), lined up with the widget's corner edge, the one that
- * stays put as the widget changes from orb to pill. Beside the widget when
- * there is no room above or below; the bottom-right corner when there is no
- * widget. Always inside the work area, shrinking if the screen is small.
+ * Where the panel goes: beside the widget, on the side toward the middle of
+ * the screen (a widget at the top right shows things to its left), lined up
+ * with the widget's top edge in the top half of the screen and its bottom
+ * edge in the bottom half. The panel narrows to the room on that side; only
+ * when a side is too tight does it stack above or below the widget instead.
+ * Without a widget: the bottom-right corner. Always inside the work area.
  */
 export const panelBounds = (widget: Rect | null, size: { width: number; height: number }, area: Rect, gap = 12): Rect => {
-  const width = Math.min(size.width, area.width - 2 * gap)
   const height = Math.min(size.height, area.height - 2 * gap)
-  const clampX = (x: number) => Math.max(area.x + gap, Math.min(area.x + area.width - width - gap, x))
-  const clampY = (y: number) => Math.max(area.y + gap, Math.min(area.y + area.height - height - gap, y))
-  if (!widget) return { x: clampX(area.x + area.width - width - gap), y: clampY(area.y + area.height - height - gap), width, height }
+  const clampY = (y: number, h: number) => Math.max(area.y + gap, Math.min(area.y + area.height - h - gap, y))
+  const clampX = (x: number, w: number) => Math.max(area.x + gap, Math.min(area.x + area.width - w - gap, x))
+  if (!widget) {
+    const width = Math.min(size.width, area.width - 2 * gap)
+    return { x: clampX(area.x + area.width - width - gap, width), y: clampY(area.y + area.height - height - gap, height), width, height }
+  }
   const rightHalf = widget.x + widget.width / 2 > area.x + area.width / 2
   const bottomHalf = widget.y + widget.height / 2 > area.y + area.height / 2
-  const x = rightHalf ? widget.x + widget.width - width : widget.x
-  const y = bottomHalf ? widget.y - gap - height : widget.y + widget.height + gap
-  if (y >= area.y && y + height <= area.y + area.height) return { x: clampX(x), y, width, height }
-  // No room above or below: beside it, toward the middle of the screen.
-  const sx = rightHalf ? widget.x - width - gap : widget.x + widget.width + gap
-  const sy = bottomHalf ? widget.y + widget.height - height : widget.y
-  return { x: clampX(sx), y: clampY(sy), width, height }
+  const room = rightHalf ? widget.x - gap - (area.x + gap) : area.x + area.width - gap - (widget.x + widget.width + gap)
+  const width = Math.min(size.width, room)
+  if (width >= Math.min(size.width, 320)) {
+    const x = rightHalf ? widget.x - gap - width : widget.x + widget.width + gap
+    const y = bottomHalf ? widget.y + widget.height - height : widget.y
+    return { x, y: clampY(y, height), width, height }
+  }
+  // Too tight beside it: above it (bottom half) or below it (top half), on its corner edge.
+  const w = Math.min(size.width, area.width - 2 * gap)
+  const h = Math.max(200, Math.min(height, bottomHalf ? widget.y - gap - (area.y + gap) : area.y + area.height - gap - (widget.y + widget.height + gap)))
+  const x = rightHalf ? widget.x + widget.width - w : widget.x
+  const y = bottomHalf ? widget.y - gap - h : widget.y + widget.height + gap
+  return { x: clampX(x, w), y: clampY(y, h), width: w, height: h }
 }
+
+/** The panel's content hugs the edge nearest the widget: its top in the top half of the screen. */
+export const panelAlign = (widget: Rect | null, area: Rect): GlassAlign => (widget && widget.y + widget.height / 2 < area.y + area.height / 2 ? 'top' : 'bottom')
 
 export const GLS = {
   /** Main → panel: what to show. */

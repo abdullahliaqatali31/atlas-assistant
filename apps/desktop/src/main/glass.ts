@@ -11,7 +11,7 @@
  */
 import { BrowserWindow, ipcMain, screen, shell, type IpcMainInvokeEvent } from 'electron'
 
-import { describeGlass, GLASS_SIZE, GLS, panelBounds, pickNews, pickStory, type GlassAlign, type GlassOp, type GlassView } from '../shared/glass.ts'
+import { describeGlass, GLASS_SIZE, GLS, panelAlign, panelBounds, pickNews, pickStory, type GlassAlign, type GlassOp, type GlassView } from '../shared/glass.ts'
 import { CATEGORY_LABEL, type Category, type Headline } from '../shared/news.ts'
 import { mainWebPreferences } from './window-prefs.ts'
 
@@ -34,6 +34,8 @@ export class GlassPanel {
       /** The desktop widget's bounds, to sit beside it; null when it is hidden. */
       widget: () => Electron.Rectangle | null
       locked: () => boolean
+      /** The panel opened or went away (the widget stays a compact orb while it shows). */
+      onShown?: (shown: boolean) => void
       /** The World map's live layers (read-only). */
       world: (kind: unknown, box: unknown) => Promise<unknown>
     },
@@ -82,9 +84,10 @@ export class GlassPanel {
     const b = panelBounds(widget, GLASS_SIZE[view.kind], area)
     win.setBounds(b)
     // Content hugs the edge nearest the widget, so a short list sits right by it.
-    this.align = widget && b.y > widget.y ? 'top' : 'bottom'
+    this.align = panelAlign(widget, area)
     if (this.ready) win.webContents.send(GLS.view, { view, align: this.align })
     win.showInactive()
+    this.deps.onShown?.(true)
   }
 
   /** Load the (hidden) panel ahead of time, so the first "dikhao" opens at once with the map code already in. */
@@ -95,6 +98,7 @@ export class GlassPanel {
   close() {
     this.view = null
     if (this.win && !this.win.isDestroyed()) this.win.hide()
+    this.deps.onShown?.(false)
   }
 
   private ensure(): BrowserWindow {

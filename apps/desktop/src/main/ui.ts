@@ -72,7 +72,22 @@ export class UiService {
     win.on('closed', () => this.deps.onChange(this.state()))
   }
 
-/** Open the News page on a tab, scrolled to one story (the glass panel handing over). */
+  /**
+   * Windows lets a background app only flash its taskbar button, not come
+   * forward: a moment on top, then focus, then back to the owner's own
+   * keep-on-top choice.
+   */
+  raise(win: BrowserWindow) {
+    if (win.isMinimized()) win.restore()
+    if (!win.isVisible()) win.show()
+    const pinned = win.isAlwaysOnTop()
+    win.setAlwaysOnTop(true, 'screen-saver')
+    win.moveTop()
+    win.focus()
+    setTimeout(() => !win.isDestroyed() && win.setAlwaysOnTop(pinned, 'floating'), 300)
+  }
+
+  /** Open the News page on a tab, scrolled to one story (the glass panel handing over). */
   async showNews(tab: string, focus: string | null) {
     await this.apply({ view: 'news' })
     this.command({ news: { tab, focus } })
@@ -147,6 +162,8 @@ export class UiService {
     // Going to a page means the full window.
     if (change.view && this.page.compact) this.leaveCompact(win)
     if (change.pinned !== undefined) win.setAlwaysOnTop(change.pinned, 'floating')
+    // The owner asked for it: over whatever app is in front, not just restored behind it.
+    this.raise(win)
     if (change.view !== undefined || change.chat !== undefined) this.command({ view: change.view, chat: change.chat })
     if (change.view !== undefined || change.chat !== undefined || change.size === 'compact' || change.size === 'normal' || change.size === 'large' || change.size === 'maximized') await this.settle()
     const s = this.state()

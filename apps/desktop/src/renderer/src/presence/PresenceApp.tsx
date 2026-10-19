@@ -57,7 +57,8 @@ const tail = (text: string, max = 140) => {
 export function PresenceApp() {
   const [s, setS] = useState<PresenceState | null>(null)
   const root = useRef<HTMLDivElement>(null)
-  const talkDrag = useDrag(() => void window.presence.talk())
+  // The orb talks when Atlas is quiet and stops it when busy (the pill's Stop, while the glass panel keeps the widget compact).
+  const talkDrag = useDrag(() => void (s && s.activity !== 'idle' ? window.presence.stop() : window.presence.talk()))
   const openDrag = useDrag(() => void window.presence.open())
   const plainDrag = useDrag()
 
@@ -82,7 +83,7 @@ export function PresenceApp() {
     void window.presence.menu()
   }
 
-  const shape = !s ? 'dot' : s.card ? 'card' : s.activity !== 'idle' ? 'pill' : 'dot'
+  const shape = !s ? 'dot' : s.card ? 'card' : s.activity !== 'idle' && !s.glass ? 'pill' : 'dot'
   const busy = s?.activity === 'thinking' || s?.activity === 'speaking'
 
   return (
@@ -95,10 +96,10 @@ export function PresenceApp() {
           tabIndex={0}
           onKeyDown={e => e.key === 'Enter' && void window.presence.talk()}
           className="grid size-14 cursor-grab touch-none select-none place-items-center rounded-full border border-border bg-solid/95 shadow-lg transition-shadow hover:shadow-[0_0_18px_var(--accent-soft)] active:cursor-grabbing"
-          title="Click to talk · drag to move · right-click for options"
+          title={s && s.activity !== 'idle' ? 'Click to stop · drag to move' : 'Click to talk · drag to move · right-click for options'}
           aria-label="Talk to Atlas"
         >
-          <Orb state="idle" size={44} />
+          <Orb state={ORB[s?.activity ?? 'idle']} level={s?.level ?? 0} size={44} />
         </div>
       ) : shape === 'pill' && s ? (
         <div {...openDrag} className="flex w-[340px] cursor-grab touch-none select-none items-center gap-2 rounded-full border border-border bg-solid/95 py-1 pl-1 pr-1.5 shadow-lg active:cursor-grabbing" title="Click to open the conversation · drag to move">

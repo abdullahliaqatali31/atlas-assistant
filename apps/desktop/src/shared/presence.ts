@@ -31,6 +31,8 @@ export interface PresenceState {
   card: PresenceCard | null
   name: string
   scale: WidgetScale
+  /** The glass panel is open beside it: stay a compact orb (it shows what Atlas is doing). */
+  glass: boolean
 }
 
 /** What the main window's conversation reports; main adds the card, name and scale. */

@@ -299,7 +299,7 @@ export class HostUi {
       {
         name: 'ui_control',
         description:
-          'Change your own Atlas window when the owner asks ("compact ho jao", "news dikhao", "chat band karo", "bari window kar do", "upar rakho"), or after offering it and hearing yes. Do not rearrange it on your own. view: which page; chat: show or hide the conversation; size: compact (small chat-only window in the corner), normal, large, maximized or minimized; pinned: keep above other windows. Opening a page leaves compact mode.',
+          'Change your own Atlas window when the owner asks ("compact ho jao", "news dikhao", "chat band karo", "bari window kar do", "upar rakho"), or after offering it and hearing yes. Do not rearrange it on your own. front: bring your window forward over the owner\u2019s other apps ("app kholo", "samne aao", "Atlas ko aage lao"), also when it is minimised. view: which page; chat: show or hide the conversation; size: compact (small chat-only window in the corner), normal, large, maximized or minimized; pinned: keep above other windows. Opening a page leaves compact mode.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -307,6 +307,7 @@ export class HostUi {
             chat: { type: 'boolean' },
             size: { type: 'string', enum: [...WINDOW_SIZES] },
             pinned: { type: 'boolean' },
+            front: { type: 'boolean' },
           },
           additionalProperties: false,
         },
@@ -318,8 +319,9 @@ export class HostUi {
             chat: typeof input.chat === 'boolean' ? input.chat : undefined,
             size: typeof input.size === 'string' ? (input.size as UiChange['size']) : undefined,
             pinned: typeof input.pinned === 'boolean' ? input.pinned : undefined,
+            front: input.front === true ? true : undefined,
           }
-          if (Object.values(change).every(v => v === undefined)) return Promise.reject(new Error('Say what to change: view, chat, size or pinned.'))
+          if (Object.values(change).every(v => v === undefined)) return Promise.reject(new Error('Say what to change: front, view, chat, size or pinned.'))
           return this.request({ kind: 'set', change }, signal)
         },
       },

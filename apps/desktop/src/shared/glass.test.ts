@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { describeGlass, panelBounds, parseGlassShow, pickNews, pickStory } from './glass.ts'
+import { describeGlass, panelAlign, panelBounds, parseGlassShow, pickNews, pickStory } from './glass.ts'
 import type { Headline } from './news.ts'
 
 const h = (id: string, title: string, category: Headline['category'], at: number): Headline => ({ id, title, link: `https://example.com/${id}`, source: 'Dawn', category, publishedAt: at, summary: `${title} summary`, image: null })
@@ -36,18 +36,28 @@ describe('glass panel', () => {
     expect(describeGlass(null)).toMatch(/closed/)
   })
 
-  it('stacks above the widget on its corner edge, beside it when there is no room, never off screen', () => {
-    // Bottom-right orb: the panel sits above it, right edges lined up.
-    const orb = { x: 1840, y: 960, width: 64, height: 64 }
-    const p = panelBounds(orb, { width: 400, height: 560 }, AREA)
-    expect(p).toEqual({ x: 1504, y: 388, width: 400, height: 560 })
-    // The same corner as a pill (wider to the left): the panel does not move sideways.
-    expect(panelBounds({ x: 1556, y: 952, width: 348, height: 72 }, { width: 400, height: 560 }, AREA).x).toBe(1504)
-    // Top-left: below it, left edges lined up.
-    expect(panelBounds({ x: 20, y: 20, width: 64, height: 64 }, { width: 400, height: 560 }, AREA)).toMatchObject({ x: 20, y: 96 })
-    // Mid-height on a short screen: no room above or below, so beside it.
-    const side = panelBounds({ x: 1840, y: 500, width: 64, height: 64 }, { width: 400, height: 560 }, { x: 0, y: 0, width: 1920, height: 900 })
-    expect(side.x + side.width).toBeLessThanOrEqual(1840)
+  it('opens beside the widget toward the middle of the screen, on its edge, narrowing to fit', () => {
+    // Top-right orb: the panel to its left, tops lined up; content hugs the top.
+    const topRight = { x: 1840, y: 20, width: 64, height: 64 }
+    expect(panelBounds(topRight, { width: 432, height: 600 }, AREA)).toEqual({ x: 1396, y: 20, width: 432, height: 600 })
+    expect(panelAlign(topRight, AREA)).toBe('top')
+    // Bottom-right: to its left, bottoms lined up; content hugs the bottom.
+    const br = panelBounds({ x: 1840, y: 960, width: 64, height: 64 }, { width: 432, height: 600 }, AREA)
+    expect(br.x + br.width).toBe(1828)
+    expect(br.y + br.height).toBe(1024)
+    expect(panelAlign({ x: 1840, y: 960, width: 64, height: 64 }, AREA)).toBe('bottom')
+    // Top-left: to its right.
+    expect(panelBounds({ x: 20, y: 20, width: 64, height: 64 }, { width: 432, height: 600 }, AREA)).toMatchObject({ x: 96, y: 20 })
+    // A narrow screen: the panel narrows to the room beside the widget.
+    const narrow = { x: 0, y: 0, width: 800, height: 1040 }
+    const n = panelBounds({ x: 420, y: 20, width: 64, height: 64 }, { width: 432, height: 600 }, narrow)
+    expect(n.width).toBeLessThan(432)
+    expect(n.x + n.width).toBe(408)
+    // Too tight on both sides: stacked below it instead, inside the screen.
+    const tiny = { x: 0, y: 0, width: 500, height: 1040 }
+    const s = panelBounds({ x: 218, y: 20, width: 64, height: 64 }, { width: 432, height: 600 }, tiny)
+    expect(s.y).toBe(96)
+    expect(s.x + s.width).toBeLessThanOrEqual(500)
     const none = panelBounds(null, { width: 560, height: 2000 }, AREA)
     expect(none.height).toBe(1040 - 24)
     expect(none.x + none.width).toBe(1920 - 12)
