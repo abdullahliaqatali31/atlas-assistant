@@ -10,7 +10,7 @@ import type { NearbyItem, Props } from './hover.ts'
 import { layerDef, LAYERS, type LayerId } from './layers.ts'
 
 /** How close to fly for each kind: a camera wants streets, a satellite the region. */
-export const ZOOM_FOR: Record<LayerId, number> = { places: 9, quakes: 7, events: 8, flights: 8, ships: 10, satellites: 4, cameras: 13, pins: 9, story: 6, disasters: 6, news: 7 }
+export const ZOOM_FOR: Record<LayerId, number> = { places: 9, quakes: 7, events: 8, flights: 8, ships: 10, satellites: 4, cameras: 13, pins: 9, story: 6, disasters: 6, news: 7, rain: 3, launches: 8, radio: 9 }
 
 const label = (p: Props) => [p.title, p.name, p.callsign, p.label].filter(v => typeof v === 'string' && v).join(' ')
 

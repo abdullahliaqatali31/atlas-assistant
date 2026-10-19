@@ -6,14 +6,14 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 import { ArrowLeft, Globe2, Layers, Map as MapIcon } from 'lucide-react'
-import maplibregl, { type FilterSpecification, type GeoJSONSource, type Map as MapLibre, type StyleSpecification } from 'maplibre-gl'
+import maplibregl, { type FilterSpecification, type GeoJSONSource, type Map as MapLibre, type RasterTileSource, type StyleSpecification } from 'maplibre-gl'
 import * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { MAX_PINS, type MapOp, type Pin, type Story } from '../../../shared/map.ts'
 import type { NewsResult } from '../../../shared/news.ts'
 import { CAMERA_COVERAGE, kmBetween, type Camera, type Flight, type FlightRoute, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
-import { cleanError, flightFeatures, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
+import { cleanError, deadReckon, flightFeatures, launchFeatures, radioFeatures, rainTiles, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
 import { nearbyItems, type NearbyItem } from './hover.ts'
 import { HoverCard } from './HoverCard.tsx'
 import type { Selected } from './Inspector.tsx'
@@ -99,6 +99,8 @@ export function MapView({
   filtersNow.current = filters
   /** Orbit elements of the tracked satellites, for the rail's "above you" panel. */
   const satsRef = useRef<{ name: string; rec: satellite.SatRec }[]>([])
+  /** The last flights and when they came, for gliding between polls. */
+  const glide = useRef<{ list: Flight[]; at: number } | null>(null)
   /** Where aircraft and ships have been since the map opened. */
   const trails = useRef(new Trails())
   const [open, setOpen] = useState<'layers' | 'style' | null>(null)
@@ -144,7 +146,10 @@ export function MapView({
       const d = dataRef.current
       const empty: FC = { type: 'FeatureCollection', features: [] }
       const initial: Record<string, FC> = { quakes: d.quakes, events: d.events, places: d.places }
-      for (const l of LAYERS) for (const id of [l.source, ...(l.extraSources ?? [])]) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: initial[id] ?? empty, ...(id === l.source ? l.sourceOptions : {}) })
+      for (const l of LAYERS)
+        for (const id of [l.source, ...(l.extraSources ?? [])])
+          if (!m.getSource(id))
+            m.addSource(id, l.raster ? { type: 'raster', tiles: [rainTiles(null)], tileSize: 256, maxzoom: l.raster.maxzoom, attribution: l.raster.attribution } : { type: 'geojson', data: initial[id] ?? empty, ...(id === l.source ? l.sourceOptions : {}) })
       for (const id of ['selected', 'trail', 'route']) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: empty })
       for (const l of LAYERS) for (const spec of l.draw) if (!m.getLayer(spec.id)) m.addLayer(spec)
       for (const spec of ROUTE_LAYERS) if (!m.getLayer(spec.id)) m.addLayer(spec)
@@ -162,6 +167,15 @@ export function MapView({
         const id = f?.properties?.cluster_id
         if (!f || typeof id !== 'number') return
         void (m.getSource('news') as GeoJSONSource).getClusterExpansionZoom(id).then(zoom =>
+          m.easeTo({ center: (f.geometry as unknown as { coordinates: [number, number] }).coordinates, zoom: Math.min(zoom + 0.5, 12), duration: isLite() ? 0 : 600 }),
+        )
+      })
+      // A radio bubble opens up the same way.
+      m.on('click', 'radio-clusters', e => {
+        const f = e.features?.[0]
+        const id = f?.properties?.cluster_id
+        if (!f || typeof id !== 'number') return
+        void (m.getSource('radio') as GeoJSONSource).getClusterExpansionZoom(id).then(zoom =>
           m.easeTo({ center: (f.geometry as unknown as { coordinates: [number, number] }).coordinates, zoom: Math.min(zoom + 0.5, 12), duration: isLite() ? 0 : 600 }),
         )
       })
@@ -595,6 +609,62 @@ export function MapView({
     }
   }, [layers, ready])
 
+  // Space launches: the next 30 days and the last 7, refreshed every 5 minutes (main caches 15).
+  useEffect(() => {
+    if (!ready || !layers.launches) return
+    let stopped = false
+    const load = () =>
+      void window.world.launches().then(
+        list => {
+          if (stopped) return
+          put('launches', launchFeatures(list, Date.now()))
+          setCounts(c => ({ ...c, launches: list.filter(l => l.at > Date.now()).length }))
+        },
+        () => undefined,
+      )
+    load()
+    const t = setInterval(load, 5 * 60_000)
+    return () => {
+      stopped = true
+      clearInterval(t)
+    }
+  }, [ready, layers.launches])
+
+  // World radio: the most-played stations with a place, once.
+  useEffect(() => {
+    if (!ready || !layers.radio) return
+    let stopped = false
+    void window.world.radio().then(
+      list => {
+        if (stopped) return
+        put('radio', radioFeatures(list))
+        setCounts(c => ({ ...c, radio: list.length }))
+      },
+      () => undefined,
+    )
+    return () => {
+      stopped = true
+    }
+  }, [ready, layers.radio])
+
+  // Rain: the newest half-hour NASA has published, looked for every 20 minutes.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !layers.rain) return
+    let stopped = false
+    const load = () =>
+      void window.world.rain().then(
+        t => !stopped && (m.getSource('rain') as RasterTileSource | undefined)?.setTiles([rainTiles(t)]),
+        () => undefined,
+      )
+    load()
+    const i = setInterval(load, 20 * 60_000)
+    return () => {
+      stopped = true
+      clearInterval(i)
+    }
+  }, [ready, layers.rain])
+
   // Live flights: a region (up to 1000 nm across) in one call; a wider view is swept area by area. When the map stops and every 20 s (every 4 s while the sweep fills in).
   useEffect(() => {
     const m = map.current
@@ -611,7 +681,8 @@ export function MapView({
         const nm = kmBetween({ lat: c.lat, lon: c.lng }, { lat: corner.lat, lon: corner.lng }) / 1.852
         const show = (flights: Flight[]) => {
           trails.current.add(flights.map(f => ({ id: `f:${f.hex}`, lon: f.lon, lat: f.lat })))
-          put('flights', flightFeatures(flights))
+          glide.current = { list: flights, at: Date.now() }
+          put('flights', flightFeatures(flights.map(f => deadReckon(f, f.seen))))
           setCounts(x => ({ ...x, flights: flights.length }))
         }
         try {
@@ -635,6 +706,15 @@ export function MapView({
       if (!stopped) timer = setTimeout(() => void load(), again)
     }
     void load()
+    // Between polls, planes glide on along their track (not in Lite mode, not for a crowded sky).
+    const glider = isLite()
+      ? null
+      : setInterval(() => {
+          const g = glide.current
+          if (!g || stopped || document.hidden || g.list.length > 6000) return
+          const dt = (Date.now() - g.at) / 1000
+          put('flights', flightFeatures(g.list.map(f => deadReckon(f, f.seen + dt))))
+        }, 1000)
     let debounce: ReturnType<typeof setTimeout> | null = null
     const onMove = () => {
       if (debounce) clearTimeout(debounce)
@@ -643,6 +723,7 @@ export function MapView({
     m.on('moveend', onMove)
     return () => {
       stopped = true
+      if (glider) clearInterval(glider)
       m.off('moveend', onMove)
       if (timer) clearTimeout(timer)
       if (debounce) clearTimeout(debounce)

@@ -456,6 +456,84 @@ export const windyBox = (b: { south: number; west: number; north: number; east: 
 
 export type WorldOp = { kind: 'add'; name: string } | { kind: 'remove'; id: string } | { kind: 'refresh' }
 
+/** A space launch, upcoming or recent (Launch Library 2). */
+export interface Launch {
+  id: string
+  name: string
+  /** Epoch ms of the launch (NET: no earlier than). */
+  at: number
+  status: string
+  provider: string
+  rocket: string
+  mission: string
+  orbit: string
+  pad: string
+  location: string
+  lat: number
+  lon: number
+  webcast: boolean
+}
+
+export const parseLaunches = (j: unknown): Launch[] => {
+  const results = (j as { results?: unknown[] })?.results ?? []
+  const out: Launch[] = []
+  const str = (v: unknown, n = 120) => (typeof v === 'string' ? v.slice(0, n) : '')
+  for (const r of results) {
+    const o = (r ?? {}) as { id?: unknown; name?: unknown; net?: unknown; webcast_live?: unknown; status?: { abbrev?: unknown; name?: unknown }; launch_service_provider?: { name?: unknown }; rocket?: { configuration?: { name?: unknown } }; mission?: { name?: unknown; orbit?: { name?: unknown } }; pad?: { name?: unknown; latitude?: unknown; longitude?: unknown; location?: { name?: unknown } } }
+    const lat = Number(o.pad?.latitude)
+    const lon = Number(o.pad?.longitude)
+    const at = Date.parse(str(o.net, 40))
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180 || !Number.isFinite(at)) continue
+    out.push({
+      id: str(o.id, 60),
+      name: str(o.name),
+      at,
+      status: str(o.status?.abbrev ?? o.status?.name, 30),
+      provider: str(o.launch_service_provider?.name),
+      rocket: str(o.rocket?.configuration?.name),
+      mission: str(o.mission?.name),
+      orbit: str(o.mission?.orbit?.name, 60),
+      pad: str(o.pad?.name),
+      location: str(o.pad?.location?.name),
+      lat,
+      lon,
+      webcast: o.webcast_live === true,
+    })
+  }
+  return out
+}
+
+/** An internet radio station with a place (Radio Browser). */
+export interface RadioStation {
+  id: string
+  name: string
+  country: string
+  tags: string
+  codec: string
+  bitrate: number
+  /** https stream, played straight from the broadcaster. */
+  url: string
+  lat: number
+  lon: number
+}
+
+export const parseRadio = (j: unknown): RadioStation[] =>
+  (Array.isArray(j) ? j : [])
+    .map(r => (r ?? {}) as Record<string, unknown>)
+    .filter(r => typeof r.url_resolved === 'string' && /^https:\/\//.test(r.url_resolved) && r.lastcheckok !== 0 && Number.isFinite(Number(r.geo_lat)) && Number.isFinite(Number(r.geo_long)) && !(Number(r.geo_lat) === 0 && Number(r.geo_long) === 0))
+    .map(r => ({
+      id: String(r.stationuuid ?? '').slice(0, 60),
+      name: String(r.name ?? '').trim().slice(0, 80),
+      country: String(r.country ?? '').slice(0, 60),
+      tags: String(r.tags ?? '').split(',').slice(0, 4).join(', ').slice(0, 80),
+      codec: String(r.codec ?? '').slice(0, 12),
+      bitrate: Number(r.bitrate) || 0,
+      url: String(r.url_resolved).slice(0, 500),
+      lat: Number(r.geo_lat),
+      lon: Number(r.geo_long),
+    }))
+    .filter(r => r.id && r.name && Math.abs(r.lat) <= 90 && Math.abs(r.lon) <= 180)
+
 export const WLD = {
   state: 'world:state',
   add: 'world:add',
@@ -464,6 +542,9 @@ export const WLD = {
   flights: 'world:flights',
   flightsArea: 'world:flights-area',
   flightRoute: 'world:flight-route',
+  launches: 'world:launches',
+  radio: 'world:radio',
+  rain: 'world:rain',
   satellites: 'world:satellites',
   ships: 'world:ships',
   shipsKey: 'world:ships-key',
@@ -485,6 +566,12 @@ export interface WorldBridge {
   flightsArea(box: GeoBox): Promise<FlightsArea>
   /** Where a flight flies from and to, by callsign; null when no route is known. */
   flightRoute(callsign: string): Promise<FlightRoute | null>
+  /** Space launches: the next 30 days and the last 7 (Launch Library 2, keyless). */
+  launches(): Promise<Launch[]>
+  /** Internet radio stations with a place (Radio Browser, keyless). */
+  radio(): Promise<RadioStation[]>
+  /** The newest global rain frame (NASA IMERG, 30-minute) as a GIBS time; null: use yesterday's daily. */
+  rain(): Promise<string | null>
   /** The ISS, stations and the brightest satellites. */
   satellites(): Promise<SatelliteElements[]>
   /** Ships in the area on screen (needs the owner's free AISStream key). */

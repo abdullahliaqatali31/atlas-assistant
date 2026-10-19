@@ -5,7 +5,7 @@
  * "Now" (what is happening in that layer) and "Filters". A pin keeps the
  * panel open. Hidden on narrow windows, where the Layers button remains.
  */
-import { Activity, BookOpen, Flame, TriangleAlert, MapPin, Newspaper, Pin, PinOff, Plane, Satellite, Ship, Video, type LucideIcon } from 'lucide-react'
+import { Activity, BookOpen, CloudRain, Flame, TriangleAlert, MapPin, Newspaper, Pin, PinOff, Plane, Radio, Rocket, Satellite, Ship, Video, type LucideIcon } from 'lucide-react'
 import type * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
@@ -13,7 +13,7 @@ import { CAMERA_COVERAGE, kmBetween, type WorldSnapshot } from '../../../shared/
 import { CATEGORIES } from '../../../shared/news.ts'
 import { ago } from '../Jarvis.tsx'
 import { ASK_EVENT } from '../shell/live.ts'
-import { ALERT_COLOR, SHIP_COLOR, type FC } from './geo.ts'
+import { ALERT_COLOR, SHIP_COLOR, type FC, launchWhen } from './geo.ts'
 import { layerDef, type LayerId } from './layers.ts'
 import { CHOKEPOINTS, mixBy, passes as passesFilter, topBy, type MapFilters } from './panels.ts'
 import { aboveNow, nextPasses, type Observer } from './passes.ts'
@@ -32,6 +32,9 @@ export const RAIL: { id: LayerId; icon: LucideIcon; key: string }[] = [
   { id: 'quakes', icon: Activity, key: 'q' },
   { id: 'events', icon: Flame, key: 'e' },
   { id: 'disasters', icon: TriangleAlert, key: 'd' },
+  { id: 'launches', icon: Rocket, key: 'l' },
+  { id: 'radio', icon: Radio, key: 'r' },
+  { id: 'rain', icon: CloudRain, key: 'o' },
   { id: 'pins', icon: Pin, key: 'm' },
 ]
 
@@ -240,6 +243,32 @@ function NowTab({ id, ctx }: { id: LayerId; ctx: RailContext }) {
         <Empty>No current disaster alerts.</Empty>
       )
     }
+    case 'launches': {
+      const now = Date.now()
+      const next = [...all].filter(f => Number(f.properties.at) > now - 3_600_000).sort((a, b) => Number(a.properties.at) - Number(b.properties.at))
+      return next.length ? (
+        <>
+          <Label>Next launches</Label>
+          <ul>{next.slice(0, 10).map(f => <Row key={String(f.properties.id)} f={f} kind={id} right={launchWhen(Number(f.properties.at), now)} onFocus={ctx.onFocus} />)}</ul>
+        </>
+      ) : (
+        <Empty>No launches in the next 30 days yet.</Empty>
+      )
+    }
+    case 'radio':
+      return all.length ? (
+        <>
+          <p className="px-1.5 text-xs">
+            <span className="font-mono text-base">{all.length}</span> stations · click one to listen
+          </p>
+          <Label>Near the map centre</Label>
+          <ul>{nearest(12).map(f => <Row key={String(f.properties.id)} f={f} kind={id} right={String(f.properties.country ?? '')} onFocus={ctx.onFocus} />)}</ul>
+        </>
+      ) : (
+        <Empty>Finding stations…</Empty>
+      )
+    case 'rain':
+      return <p className="px-1.5 text-xs text-muted">Rain everywhere on Earth from NASA’s GPM satellites (IMERG), the newest half-hour NASA has published — usually 4 to 6 hours ago. Blue is light, yellow to red is heavy.</p>
     case 'pins':
       return all.length ? <ul>{all.map(f => <Row key={String(f.properties.id)} f={f} kind={id} onFocus={ctx.onFocus} />)}</ul> : <Empty>No pins. Atlas drops them when telling you about places.</Empty>
   }

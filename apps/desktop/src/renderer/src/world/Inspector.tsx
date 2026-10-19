@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PlaceStatus, WorldSnapshot } from '../../../shared/world.ts'
 import { ago } from '../Jarvis.tsx'
 import { ASK_EVENT } from '../shell/live.ts'
-import { FlightDetail, moreLinks, SatelliteDetail, ShipDetail } from './Details.tsx'
+import { FlightDetail, moreLinks, RadioDetail, SatelliteDetail, ShipDetail } from './Details.tsx'
 import { hoverInfo, type NearbyItem } from './hover.ts'
 import { layerDef, type LayerId } from './layers.ts'
 
@@ -272,6 +272,8 @@ export function Inspector({
           <ShipDetail p={p} />
         ) : sel.kind === 'satellites' ? (
           <SatelliteDetail p={p} />
+        ) : sel.kind === 'radio' ? (
+          <RadioDetail p={p} />
         ) : sel.kind === 'cameras' ? (
           <CameraDetail id={String(p.id)} source={String(p.source ?? '')} video={typeof p.video === 'string' ? p.video : undefined} videoKind={typeof p.videoKind === 'string' ? p.videoKind : undefined}
             player={typeof p.player === 'string' ? p.player : undefined}

@@ -66,6 +66,15 @@ export const hoverInfo = (kind: LayerId, props: Props, world: WorldSnapshot, now
       return { ...base, kind: `NEWS · ${str(props.n)}`, title, facts: [[str(props.place), str(props.source)].filter(Boolean).join(' · '), str(props.summary)].filter(Boolean) }
     case 'pins':
       return { ...base, title, facts: [str(props.note)].filter(Boolean) }
+    case 'launches': {
+      const at = typeof props.at === 'number' ? props.at : 0
+      const when = at ? (at > now ? `T−${shortAge(now - (at - now), now)}` : `${shortAge(at, now)} ago`) : ''
+      return { ...base, kind: `LAUNCH · ${str(props.status).toUpperCase()}`, title, facts: [[when, at ? new Date(at).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''].filter(Boolean).join(' · '), [str(props.rocket), str(props.provider)].filter(Boolean).join(' · '), str(props.location), [str(props.mission), str(props.orbit)].filter(Boolean).join(' → '), props.webcast === 1 ? 'Webcast live' : ''].filter(Boolean) }
+    }
+    case 'radio':
+      return { ...base, kind: 'RADIO · LIVE', title, facts: [str(props.country), str(props.tags), [str(props.codec), props.bitrate ? `${props.bitrate} kbps` : ''].filter(Boolean).join(' ')].filter(Boolean) }
+    case 'rain':
+      return { ...base, title: 'Rain', facts: ['NASA IMERG satellite rain estimate'] }
     case 'flights':
       return { ...base, title, facts: [str(props.routeFrom) && str(props.routeTo) ? `${str(props.routeFrom)} → ${str(props.routeTo)}${str(props.airline) ? ` · ${str(props.airline)}` : ''}` : '', str(props.detail), time && `Seen ${time} ago`].filter(Boolean) }
     case 'ships':

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 /**
  * The Inspector's rich cards for moving things: an aircraft (type,
  * registration, squawk, height, speed, climb, track), a ship (MMSI,
@@ -144,4 +145,55 @@ export const moreLinks = (kind: string, p: Props): { label: string; href: string
   if (kind === 'ships' && mmsi) return [{ label: 'Vessel', href: `https://www.marinetraffic.com/en/ais/details/ships/mmsi:${mmsi}` }]
   if (kind === 'satellites' && norad) return [{ label: 'Orbit data', href: `https://celestrak.org/satcat/table-satcat.php?CATNR=${encodeURIComponent(norad)}` }]
   return []
+}
+
+/** A radio station: play it live, straight from the broadcaster. */
+export function RadioDetail({ p }: { p: Props }) {
+  const [playing, setPlaying] = useState(false)
+  const [error, setError] = useState('')
+  const audio = useRef<HTMLAudioElement | null>(null)
+  const url = str(p.url)
+  useEffect(() => () => audio.current?.pause(), [])
+  const toggle = () => {
+    if (!url) return
+    if (!audio.current) {
+      audio.current = new Audio(url)
+      audio.current.addEventListener('error', () => {
+        setError('This station is not answering right now.')
+        setPlaying(false)
+      })
+    }
+    if (playing) {
+      audio.current.pause()
+      setPlaying(false)
+    } else {
+      setError('')
+      void audio.current.play().then(
+        () => setPlaying(true),
+        () => setError('This station could not be played.'),
+      )
+    }
+  }
+  return (
+    <div className="space-y-3">
+      <button type="button" onClick={toggle} className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${playing ? 'border-fuchsia-400/70 bg-fuchsia-500/10' : 'border-border hover:border-fuchsia-400/60'}`}>
+        <span className={`grid size-9 place-items-center rounded-full ${playing ? 'bg-fuchsia-500 text-white' : 'bg-surface text-fuchsia-300'}`}>{playing ? '❚❚' : '▶'}</span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-medium">{playing ? 'Playing live' : 'Listen live'}</span>
+          <span className="block truncate text-[11px] text-muted">{[str(p.country), str(p.tags)].filter(Boolean).join(' · ')}</span>
+        </span>
+        {playing && (
+          <span className="ml-auto flex h-4 items-end gap-0.5" aria-hidden>
+            {[0, 1, 2, 3].map(i => (
+              <span key={i} className="w-1 animate-pulse rounded-sm bg-fuchsia-400" style={{ height: `${40 + ((i * 23) % 60)}%`, animationDelay: `${i * 120}ms` }} />
+            ))}
+          </span>
+        )}
+      </button>
+      {error && <p className="text-xs text-warm">{error}</p>}
+      <p className="text-[10px] text-muted">
+        {[str(p.codec), num(p.bitrate) ? `${num(p.bitrate)} kbps` : null].filter(Boolean).join(' · ')} · streamed from the station itself; directory by Radio Browser.
+      </p>
+    </div>
+  )
 }

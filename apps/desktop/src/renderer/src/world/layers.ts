@@ -5,7 +5,7 @@
  */
 import type { GeoJSONSourceSpecification, LayerSpecification } from 'maplibre-gl'
 
-export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras' | 'pins' | 'story' | 'disasters' | 'news'
+export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras' | 'pins' | 'story' | 'disasters' | 'news' | 'rain' | 'launches' | 'radio'
 
 export interface LayerDef {
   id: LayerId
@@ -25,6 +25,8 @@ export interface LayerDef {
   pickLayer?: string
   /** More sources this layer draws from (e.g. the lines between story items). */
   extraSources?: string[]
+  /** A tiled image layer instead of GeoJSON (the tiles are set by the map). */
+  raster?: { maxzoom: number; attribution: string }
   /** Extra options for this layer's GeoJSON source, e.g. clustering. */
   sourceOptions?: Partial<GeoJSONSourceSpecification>
 }
@@ -33,6 +35,75 @@ const HALO = '#0b1020'
 
 /** Draw order, bottom to top. */
 export const LAYERS: LayerDef[] = [
+  {
+    // Drawn first, so every point sits on top of the rain.
+    id: 'rain',
+    label: 'Rain (NASA satellites)',
+    kind: 'Rain',
+    dot: '#38bdf8',
+    source: 'rain',
+    pickRank: 99,
+    raster: { maxzoom: 6, attribution: 'NASA GPM IMERG via GIBS' },
+    draw: [{ id: 'rain', type: 'raster', source: 'rain', paint: { 'raster-opacity': 0.72, 'raster-fade-duration': 300 } }],
+  },
+  {
+    id: 'radio',
+    label: 'World radio (live)',
+    kind: 'Radio station',
+    dot: '#e879f9',
+    source: 'radio',
+    pickRank: 6,
+    pickLayer: 'radio',
+    // Thousands of stations: they group into bubbles until zoomed in.
+    sourceOptions: { cluster: true, clusterRadius: 36, clusterMaxZoom: 8 },
+    draw: [
+      {
+        id: 'radio-clusters',
+        type: 'circle',
+        source: 'radio',
+        filter: ['has', 'point_count'],
+        paint: { 'circle-radius': ['step', ['get', 'point_count'], 9, 10, 12, 50, 16, 200, 21], 'circle-color': '#e879f9', 'circle-opacity': 0.55, 'circle-stroke-width': 1.5, 'circle-stroke-color': 'rgba(232,121,249,0.4)' },
+      },
+      {
+        id: 'radio-cluster-count',
+        type: 'symbol',
+        source: 'radio',
+        filter: ['has', 'point_count'],
+        layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 10, 'text-allow-overlap': true },
+        paint: { 'text-color': '#ffffff' },
+      },
+      { id: 'radio', type: 'circle', source: 'radio', filter: ['!', ['has', 'point_count']], paint: { 'circle-radius': 4.5, 'circle-color': '#e879f9', 'circle-stroke-width': 1.5, 'circle-stroke-color': HALO } },
+      {
+        id: 'radio-labels',
+        type: 'symbol',
+        source: 'radio',
+        filter: ['!', ['has', 'point_count']],
+        minzoom: 7,
+        layout: { 'text-field': ['get', 'title'], 'text-offset': [0, 1.1], 'text-size': 10, 'text-anchor': 'top', 'text-max-width': 12 },
+        paint: { 'text-color': '#f5d0fe', 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+      },
+    ],
+  },
+  {
+    id: 'launches',
+    label: 'Space launches (±30 days)',
+    kind: 'Space launch',
+    dot: '#a3e635',
+    source: 'launches',
+    pickRank: 3,
+    draw: [
+      { id: 'launches', type: 'circle', source: 'launches', paint: { 'circle-radius': ['case', ['==', ['get', 'upcoming'], 1], 7, 5], 'circle-color': ['get', 'color'], 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff', 'circle-stroke-opacity': 0.85 } },
+      {
+        id: 'launch-labels',
+        type: 'symbol',
+        source: 'launches',
+        minzoom: 2.5,
+        filter: ['==', ['get', 'next'], 1],
+        layout: { 'text-field': ['get', 'label'], 'text-offset': [0, 1.2], 'text-size': 10, 'text-anchor': 'top', 'text-max-width': 14 },
+        paint: { 'text-color': '#d9f99d', 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+      },
+    ],
+  },
   {
     id: 'quakes',
     label: 'Earthquakes (M4+)',
@@ -214,7 +285,7 @@ export const LAYERS: LayerDef[] = [
     id: 'flights',
     label: 'Flights (live)',
     kind: 'Flight',
-    dot: '#fbbf24',
+    dot: '#7dd3fc',
     source: 'flights',
     pickRank: 2,
     draw: [
@@ -222,16 +293,17 @@ export const LAYERS: LayerDef[] = [
         id: 'flights',
         type: 'symbol',
         source: 'flights',
-        layout: { 'icon-image': 'plane', 'icon-size': 0.55, 'icon-rotate': ['get', 'track'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true },
+        layout: { 'icon-image': 'plane', 'icon-size': ['case', ['<', ['get', 'rank'], 2], 0.68, 0.55], 'icon-rotate': ['get', 'track'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'symbol-sort-key': ['get', 'rank'] },
         paint: { 'icon-color': ['get', 'color'], 'icon-halo-color': HALO, 'icon-halo-width': 1 },
       },
       {
         id: 'flight-labels',
         type: 'symbol',
         source: 'flights',
-        minzoom: 6.5,
-        layout: { 'text-field': ['get', 'callsign'], 'text-offset': [0, 1.2], 'text-size': 10, 'text-anchor': 'top' },
-        paint: { 'text-color': '#fde68a', 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+        minzoom: 5,
+        // Labels compete for room (no overlap); emergencies and military win, so a busy sky never turns into a smear.
+        layout: { 'text-field': ['get', 'label'], 'text-offset': [0, 1.2], 'text-size': 10, 'text-anchor': 'top', 'symbol-sort-key': ['get', 'rank'], 'text-optional': true },
+        paint: { 'text-color': ['get', 'color'], 'text-halo-color': HALO, 'text-halo-width': 1.5 },
       },
     ],
   },
@@ -395,8 +467,12 @@ export const PICKABLE = [...LAYERS].sort((a, b) => a.pickRank - b.pickRank).map(
 
 export const layerDef = (id: LayerId) => LAYERS.find(l => l.id === id)!
 
+/** Layers that start switched off. */
+const DEFAULT_OFF: ReadonlySet<LayerId> = new Set(['rain', 'radio'])
+
 export const readLayers = (): Record<LayerId, boolean> => {
-  const all = Object.fromEntries(LAYERS.map(l => [l.id, true])) as Record<LayerId, boolean>
+  // Heavy or noisy layers start off; the owner turns them on with one key.
+  const all = Object.fromEntries(LAYERS.map(l => [l.id, !DEFAULT_OFF.has(l.id)])) as Record<LayerId, boolean>
   try {
     return { ...all, ...(JSON.parse(localStorage.getItem('world.layers') ?? '{}') as Partial<Record<LayerId, boolean>>) }
   } catch {

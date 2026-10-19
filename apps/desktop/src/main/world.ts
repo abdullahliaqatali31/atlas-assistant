@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import type { HostEvent, HostRequest } from '../shared/ipc.ts'
 import { osCredentialStore } from '@assistant/runtime'
 
-import { EMPTY_WORLD, parseFlights, parseOpenSky, WLD, type Flight, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
+import { EMPTY_WORLD, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
 import { CameraDirectory } from './cameras.ts'
 import { FlightSweep, RouteBook } from './flights.ts'
 import { ShipFeed } from './ships.ts'
@@ -225,6 +225,64 @@ export class WorldService {
     }
   }
 
+  private launchCache: { at: number; list: Launch[] } | null = null
+  private radioCache: { at: number; list: RadioStation[] } | null = null
+  private rainCache: { at: number; time: string | null } | null = null
+
+  /** The next 30 days of launches and the last 7, every 15 minutes at most (the keyless allowance is 15 calls an hour). */
+  async launches(): Promise<Launch[]> {
+    if (this.launchCache && Date.now() - this.launchCache.at < 15 * 60_000) return this.launchCache.list
+    const since = new Date(Date.now() - 7 * 86_400_000).toISOString()
+    const until = new Date(Date.now() + 30 * 86_400_000).toISOString()
+    try {
+      const [up, past] = await Promise.all([
+        getJson(`https://ll.thespacedevs.com/2.3.0/launches/upcoming/?limit=60&mode=normal&net__lte=${until}`),
+        getJson(`https://ll.thespacedevs.com/2.3.0/launches/previous/?limit=30&mode=normal&net__gte=${since}`),
+      ])
+      const list = [...parseLaunches(up), ...parseLaunches(past)]
+      this.launchCache = { at: Date.now(), list }
+      return list
+    } catch (e) {
+      if (this.launchCache) return this.launchCache.list
+      throw e
+    }
+  }
+
+  /** The most-played stations with a place and a working https stream, refreshed every 6 hours. */
+  async radio(): Promise<RadioStation[]> {
+    if (this.radioCache && Date.now() - this.radioCache.at < 6 * 3_600_000) return this.radioCache.list
+    for (const host of ['de1', 'de2', 'fi1', 'nl1']) {
+      try {
+        const list = parseRadio(await getJson(`https://${host}.api.radio-browser.info/json/stations/search?has_geo_info=true&is_https=true&hidebroken=true&order=clickcount&reverse=true&limit=3000`))
+        if (list.length) {
+          this.radioCache = { at: Date.now(), list }
+          return list
+        }
+      } catch {
+        // Next mirror.
+      }
+    }
+    return this.radioCache?.list ?? []
+  }
+
+  /** The newest 30-minute global rain frame NASA has published (usually 4-6 hours old), looked for every 20 minutes. */
+  async rain(): Promise<string | null> {
+    if (this.rainCache && Date.now() - this.rainCache.at < 20 * 60_000) return this.rainCache.time
+    let time: string | null = null
+    const start = Math.floor(Date.now() / 1_800_000) * 1_800_000
+    for (let i = 6; i <= 20 && !time; i++) {
+      const t = new Date(start - i * 1_800_000).toISOString().replace('.000Z', 'Z')
+      try {
+        const res = await fetch(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/IMERG_Precipitation_Rate_30min/default/${t}/GoogleMapsCompatible_Level6/2/1/2.png`, { signal: AbortSignal.timeout(8_000) })
+        if (res.ok) time = t
+      } catch {
+        break
+      }
+    }
+    this.rainCache = { at: Date.now(), time }
+    return time
+  }
+
   register() {
     const { handle } = this.deps
     const owner = <T>(fn: (a: unknown) => T | Promise<T>) => (a: unknown) => {
@@ -246,6 +304,9 @@ export class WorldService {
     handle(WLD.flightsArea, raw => this.flightsArea(toBox(raw)))
     handle(WLD.flightRoute, callsign => (typeof callsign === 'string' ? this.routes.get(callsign) : null))
     handle(WLD.satellites, () => this.satelliteList())
+    handle(WLD.launches, () => this.launches())
+    handle(WLD.radio, () => this.radio())
+    handle(WLD.rain, () => this.rain())
     handle(WLD.ships, raw => {
       const b = raw as { south?: unknown; west?: unknown; north?: unknown; east?: unknown } | null
       const ok = (v: unknown, max: number) => typeof v === 'number' && Math.abs(v) <= max
