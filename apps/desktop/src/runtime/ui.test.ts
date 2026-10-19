@@ -72,3 +72,29 @@ describe('map tools', () => {
     expect(tool('map_view').isUntrusted).toBe(false)
   })
 })
+
+describe('glass panel tools', () => {
+  it('shows news, a story by number, a map of a named place, and puts it away', async () => {
+    const { posted, tool } = setup(async name => (name === 'Karachi' ? { name: 'Karachi', country: 'Pakistan', lat: 24.86, lon: 67.0 } : name === 'Lahore' ? { name: 'Lahore', country: 'Pakistan', lat: 31.55, lon: 74.34 } : null))
+    await tool('glass_show').run({ view: 'news', category: 'pakistan' })
+    await tool('glass_show').run({ view: 'story', n: 2 })
+    await tool('glass_show').run({ view: 'map', place: 'Karachi', pins: [{ place: 'Lahore' }, { place: 'Atlantis' }] })
+    await tool('glass_close').run({})
+    expect(posted[0]).toEqual({ kind: 'glass', op: { kind: 'news', category: 'pakistan', query: '' } })
+    expect(posted[1]).toEqual({ kind: 'glass', op: { kind: 'story', n: 2, query: '' } })
+    expect(posted[2]).toMatchObject({ kind: 'glass', op: { kind: 'map', title: 'Karachi, Pakistan', lat: 24.86, lon: 67.0, zoom: 9, pins: [{ lat: 31.55, lon: 74.34, label: 'Lahore' }] } })
+    expect(posted[3]).toEqual({ kind: 'glass', op: { kind: 'close' } })
+  })
+
+  it('refuses half-asked views before bothering the window', async () => {
+    const { posted, tool } = setup(async () => null)
+    await expect(tool('glass_show').run({ view: 'story' })).rejects.toThrow(/which story/)
+    await expect(tool('glass_show').run({ view: 'map', place: 'Atlantis' })).rejects.toThrow(/Could not find/)
+    await expect(tool('glass_show').run({ view: 'poster' })).rejects.toThrow(/view must be/)
+    expect(posted).toEqual([])
+  })
+
+  it('runs without asking, even after reading the web: it only shows things on the owner’s screen', () => {
+    for (const name of ['glass_show', 'glass_close']) expect(evaluate({ tool: name, actionClass: 'observe', fromUntrustedSource: true }, UI_RULES, 0).effect).toBe('allow')
+  })
+})

@@ -24,7 +24,7 @@ export default defineConfig({
     build: {
       externalizeDeps: false,
       rollupOptions: {
-        input: { index: resolve('src/preload/index.ts'), presence: resolve('src/preload/presence.ts') },
+        input: { index: resolve('src/preload/index.ts'), presence: resolve('src/preload/presence.ts'), glass: resolve('src/preload/glass.ts') },
         // Sandboxed preloads must be a single CommonJS file.
         output: { format: 'cjs', entryFileNames: '[name].cjs' },
       },
@@ -32,7 +32,7 @@ export default defineConfig({
   },
   renderer: {
     root: resolve('src/renderer'),
-    build: { rollupOptions: { input: { index: resolve('src/renderer/index.html'), presence: resolve('src/renderer/presence.html') } } },
+    build: { rollupOptions: { input: { index: resolve('src/renderer/index.html'), presence: resolve('src/renderer/presence.html'), glass: resolve('src/renderer/glass.html') } } },
     plugins: [react(), tailwindcss()],
     // satellite.js ships an optional WebAssembly worker that uses top-level await: bundle workers as ES modules.
     worker: { format: 'es' },

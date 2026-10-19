@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: assistant-news:; connect-src 'self' ws://localhost:* https://tiles.openfreemap.org"
+    />
+    <title>Atlas</title>
+    <style>
+      /* The window is invisible: only the page's cards are drawn. */
+      html,
+      body,
+      #root {
+        background: transparent !important;
+        margin: 0;
+        overflow: hidden;
+      }
+      .glass-scroll {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+      }
+      /*
+       * Neon glass: a thin accent edge, a soft glow outside and in, and a sheen
+       * across the top, so every piece reads as lit glass over the desktop.
+       * Follows the owner's accent colour.
+       */
+      .neon-glass {
+        position: relative;
+        background: linear-gradient(160deg, rgba(16, 24, 44, 0.84), rgba(6, 10, 20, 0.8));
+        border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+        box-shadow:
+          0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
+          0 0 12px color-mix(in srgb, var(--accent) 38%, transparent),
+          0 0 30px color-mix(in srgb, var(--accent) 16%, transparent),
+          inset 0 1px 0 rgba(255, 255, 255, 0.16),
+          inset 0 0 18px color-mix(in srgb, var(--accent) 10%, transparent);
+        transition:
+          box-shadow 200ms,
+          border-color 200ms,
+          transform 200ms;
+      }
+      .neon-glass::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 38%);
+        pointer-events: none;
+        z-index: 1;
+      }
+      /* Over a picture or a map: the edge and glow only, no tint. */
+      .neon-glass.frame {
+        background: transparent;
+      }
+      .neon-glass.lively:hover {
+        border-color: color-mix(in srgb, var(--accent) 80%, transparent);
+        box-shadow:
+          0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent),
+          0 0 16px color-mix(in srgb, var(--accent) 55%, transparent),
+          0 0 40px color-mix(in srgb, var(--accent) 24%, transparent),
+          inset 0 1px 0 rgba(255, 255, 255, 0.2),
+          inset 0 0 22px color-mix(in srgb, var(--accent) 16%, transparent);
+      }
+      :root[data-lite='true'] .neon-glass {
+        transition: none;
+      }
+      /* Map controls and credits in the panel's smoky style. */
+      .maplibregl-ctrl-group {
+        background: rgba(6, 10, 20, 0.7) !important;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: none !important;
+      }
+      .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+        filter: invert(1);
+      }
+      .maplibregl-ctrl-attrib {
+        background: rgba(6, 10, 20, 0.6) !important;
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 10px;
+      }
+      .maplibregl-ctrl-attrib a {
+        color: rgba(255, 255, 255, 0.75);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/glass/main.tsx"></script>
+  </body>
+</html>

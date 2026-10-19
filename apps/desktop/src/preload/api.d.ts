@@ -15,6 +15,7 @@ import type { PersonalityBridge } from '../shared/personality.ts'
 import type { ProjectsBridge } from '../shared/projects.ts'
 import type { WakeBridge } from '../shared/wake.ts'
 import type { PresenceBridge, PresenceHostBridge } from '../shared/presence.ts'
+import type { GlassBridge } from '../shared/glass.ts'
 
 declare global {
   interface Window {
@@ -22,6 +23,8 @@ declare global {
     presenceHost: PresenceHostBridge
     /** Only in the desktop widget's page. */
     presence: PresenceBridge
+    /** Only in the glass panel's page. */
+    glass: GlassBridge
     controls: ControlBridge
     personality: PersonalityBridge
     activity: ActivityBridge

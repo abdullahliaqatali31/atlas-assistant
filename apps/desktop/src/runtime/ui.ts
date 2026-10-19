@@ -9,6 +9,8 @@ import { randomUUID } from 'node:crypto'
 import type { Rule } from '@assistant/policy'
 import type { RuntimeTool } from '@assistant/runtime'
 
+import { GLASS_VIEWS, MAX_GLASS_PINS, parseGlassShow } from '../shared/glass.ts'
+import { CATEGORIES } from '../shared/news.ts'
 import { MAP_LAYERS, MAP_STYLES, mapOpFromTool, MAX_PINS, MAX_STORY_ITEMS } from '../shared/map.ts'
 import { describeUi, VIEWS, WINDOW_SIZES, type UiChange, type UiOp, type UiState } from '../shared/ui.ts'
 
@@ -17,7 +19,11 @@ const REQUEST_TIMEOUT_MS = 30_000
 /** The World map tools only change the view, so they are observe-class and run without asking, even after reading news. */
 export const MAP_TOOLS = ['map_view', 'map_layers', 'map_visible', 'map_find', 'map_focus', 'map_pins', 'map_back', 'map_story', 'map_tour'] as const
 
+/** The glass panel only shows things on the owner's own screen: no asking, even after reading the web. */
+export const GLASS_TOOLS = ['glass_show', 'glass_close'] as const
+
 export const UI_RULES: Rule[] = [
+  ...GLASS_TOOLS.map((tool): Rule => ({ id: `default-${tool}`, tool, actionClass: 'observe', effect: 'allow' })),
   { id: 'default-ui_state', tool: 'ui_state', actionClass: 'observe', effect: 'allow' },
   { id: 'default-ui_control', tool: 'ui_control', actionClass: 'modify', effect: 'allow' },
   ...MAP_TOOLS.map((tool): Rule => ({ id: `default-${tool}`, tool, actionClass: 'observe', effect: 'allow' })),
@@ -72,6 +78,79 @@ export class HostUi {
     }
     const result = await this.request({ kind: 'map', op: mapOpFromTool('map_story', { ...input, items }) }, signal)
     return missing.length ? `${result} Not placed (unknown places): ${missing.join(', ')}.` : result
+  }
+
+  /** glass_show: a place name becomes coordinates here, for the map and each pin. */
+  private async glassShow(input: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
+    const lookup = async (place: string) => {
+      if (!this.deps.geocode) throw new Error('Place lookup is not available; give lat and lon.')
+      const found = await this.deps.geocode(place)
+      if (!found) throw new Error(`Could not find a place called "${place}".`)
+      return found
+    }
+    let o = { ...input }
+    if (o.view === 'map') {
+      const place = typeof o.place === 'string' ? o.place.trim().slice(0, 80) : ''
+      if (place && (typeof o.lat !== 'number' || typeof o.lon !== 'number')) {
+        const f = await lookup(place)
+        o = { ...o, lat: f.lat, lon: f.lon, title: typeof o.title === 'string' && o.title ? o.title : [f.name, f.country].filter(Boolean).join(', ') }
+      }
+      if (Array.isArray(o.pins)) {
+        const pins = []
+        for (const raw of o.pins.slice(0, MAX_GLASS_PINS)) {
+          const pin = { ...(raw as Record<string, unknown>) }
+          if ((typeof pin.lat !== 'number' || typeof pin.lon !== 'number') && typeof pin.place === 'string') {
+            const f = await lookup(pin.place).catch(() => null)
+            if (!f) continue
+            Object.assign(pin, { lat: f.lat, lon: f.lon, label: typeof pin.label === 'string' && pin.label ? pin.label : f.name })
+          }
+          pins.push(pin)
+        }
+        o.pins = pins
+      }
+    }
+    const op = parseGlassShow(o)
+    if (typeof op === 'string') throw new Error(op)
+    return this.request({ kind: 'glass', op }, signal)
+  }
+
+  private glassTools(): RuntimeTool[] {
+    return [
+      {
+        name: 'glass_show',
+        description:
+          'Show something on the glass panel: a floating see-through panel beside your desktop widget, over whatever the owner is doing, without opening your main window. Use it when the owner asks to be shown something ("aaj ki news dikhao", "is ki detail dikhao", "Karachi ka map dikhao"). view news: the latest headlines with pictures (optionally a category or query); the result lists them numbered. view story: one story in full with its picture: n is its number from the list on the panel, or query a few words of its title. view map: a map of place (a name) or lat/lon, zoom 1-16, optional pins [{place or lat/lon, label}]. view note: a short text you write (title, text). One view at a time; a new one replaces the old.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            view: { type: 'string', enum: [...GLASS_VIEWS] },
+            category: { type: 'string', enum: [...CATEGORIES] },
+            query: { type: 'string' },
+            n: { type: 'integer', minimum: 1 },
+            place: { type: 'string' },
+            lat: { type: 'number' },
+            lon: { type: 'number' },
+            zoom: { type: 'number' },
+            pins: { type: 'array', items: { type: 'object', properties: { place: { type: 'string' }, lat: { type: 'number' }, lon: { type: 'number' }, label: { type: 'string' } } } },
+            title: { type: 'string' },
+            text: { type: 'string' },
+          },
+          required: ['view'],
+          additionalProperties: false,
+        },
+        actionClass: 'observe',
+        isUntrusted: true,
+        run: (input, signal) => this.glassShow(input, signal),
+      },
+      {
+        name: 'glass_close',
+        description: 'Put the glass panel away when the owner is done with it ("side pe karo", "band karo", "hata do", "ok theek hai"); the widget goes back to its small self.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        actionClass: 'observe',
+        isUntrusted: false,
+        run: (_i, signal) => this.request({ kind: 'glass', op: { kind: 'close' } }, signal),
+      },
+    ]
   }
 
   private mapTools(): RuntimeTool[] {
@@ -176,7 +255,7 @@ export class HostUi {
   }
 
   contextLines(): string[] {
-    return this.snapshot ? [`Your own window (the Atlas app): ${describeUi(this.snapshot)} You can change it with ui_control when the owner asks, and drive the World map with the map_* tools.`] : []
+    return this.snapshot ? [`Your own window (the Atlas app): ${describeUi(this.snapshot)} You can change it with ui_control when the owner asks, drive the World map with the map_* tools, and show news, a story, a map or a note on the glass panel beside your desktop widget with glass_show (glass_close puts it away).`] : []
   }
 
   onResult(requestId: string, result?: string, error?: string) {
@@ -208,6 +287,7 @@ export class HostUi {
   tools(): RuntimeTool[] {
     return [
       ...this.mapTools(),
+      ...this.glassTools(),
       {
         name: 'ui_state',
         description: 'What your own Atlas window shows right now: page, conversation open or hidden, compact mode, size and layout, kept on top or not.',

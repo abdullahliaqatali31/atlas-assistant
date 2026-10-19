@@ -10,6 +10,7 @@ import { ipcMain, screen, type BrowserWindow, type Rectangle } from 'electron'
 
 import { MC, type MapOp } from '../shared/map.ts'
 import { describeUi, layoutFor, parseUiChange, UC, isView, type PageCommand, type PageUi, type UiChange, type UiOp, type UiState } from '../shared/ui.ts'
+import type { GlassOp } from '../shared/glass.ts'
 
 const COMPACT = { width: 400, height: 640 }
 const NORMAL = { width: 1180, height: 760 }
@@ -38,6 +39,8 @@ export class UiService {
       requireOwner: () => void
       /** Called whenever the window changes, so the runtime knows. */
       onChange: (s: UiState) => void
+      /** The glass panel beside the desktop widget. */
+      glass?: (op: GlassOp) => Promise<string>
     },
   ) {}
 
@@ -149,6 +152,10 @@ export class UiService {
   async handleOp(op: UiOp): Promise<string> {
     if (op.kind === 'state') return describeUi(this.state())
     if (op.kind === 'map') return this.mapOp(op.op)
+    if (op.kind === 'glass') {
+      if (!this.deps.glass) throw new Error('The glass panel is not available.')
+      return this.deps.glass(op.op)
+    }
     return `Done. Now: ${describeUi(await this.apply(op.change))}`
   }
 

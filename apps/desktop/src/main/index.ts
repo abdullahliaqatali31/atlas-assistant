@@ -47,6 +47,7 @@ import { watchSession } from './session.ts'
 import { providerFor, readSetup, runtimeEnv, saveSetup, saveSpeakReplies, setupSummary as readSetupSummary } from './settings.ts'
 import { RuntimeSupervisor } from './supervisor.ts'
 import { PresenceWidget } from './presence.ts'
+import { GlassPanel } from './glass.ts'
 import { PRS, WIDGET_WHEN, type WidgetWhen } from '../shared/presence.ts'
 
 // Privileged scheme for the local speech model must be declared before 'ready'.
@@ -85,6 +86,8 @@ let heldReturn: Extract<SessionChange, { idleMs: number }> | null = null
 const publishIdentity = () => {
   toRenderer(IC.changed, identity.view())
   presence.refresh()
+  // Nothing stays on the desktop while the owner check is on.
+  if (identity.locked) glass.close()
 }
 const requireOwner = () => {
   if (identity.locked) throw new Error('Please confirm it is you first.')
@@ -251,6 +254,18 @@ const presence = new PresenceWidget({
   name: () => 'Atlas',
 })
 presence.register()
+
+/** The glass panel beside the widget: news, a story, a map or a note, when the owner asks Atlas for one. */
+const glass = new GlassPanel({
+  preload: join(import.meta.dirname, '../preload/glass.cjs'),
+  isDev,
+  load: (w, page) => void (isDev ? w.loadURL(`${process.env.ELECTRON_RENDERER_URL}/${page}.html`) : w.loadFile(join(import.meta.dirname, `../renderer/${page}.html`))),
+  headlines: async () => (await news.list()).headlines,
+  widget: () => presence.bounds(),
+  locked: () => identity.locked,
+  world: (kind, box) => world.glassData(kind, box),
+})
+glass.register()
 
 // ── window ──────────────────────────────────────────────────
 
@@ -425,6 +440,7 @@ const ui = new UiService({
   handle,
   requireOwner: () => requireOwner(),
   onChange: state => supervisor.ui(state),
+  glass: op => glass.handle(op),
 })
 ui.register()
 /** The live world at the owner's places, for the World page. */
@@ -695,6 +711,7 @@ if (!app.requestSingleInstanceLock()) {
     desktop.stop()
     world.ships.stop()
     presence.stop()
+    glass.stop()
     void supervisor.stop().finally(() => {
       tray?.destroy()
       app.quit()

@@ -88,3 +88,27 @@ transparent, always-on-top window, separate from the main window:
 
 Phases go in order 1 → 5; each ends with `pnpm check` and a commit. Phase 5
 also needs a hands-on check by the owner (drag, sizes, multi-monitor).
+
+## Phase 6: the glass panel (added 2026-10-19)
+
+Owner's ask: say "aaj ki news dikhao" and see it beside the widget; "number 3
+ki detail" opens it in full with its picture; "Karachi ka map" shows a map
+with the same live layers as the app's World map; "side pe karo" puts it away.
+
+- **Widget fix first.** The idle orb grew on hover, which moved the window
+  under the cursor (open/close loop), and OS drag regions swallowed clicks.
+  Now press-and-move drags (main follows the cursor), a press is a click, and
+  size changes only with what Atlas is doing.
+- **Invisible glass.** The panel window is fully transparent; only its pieces
+  are drawn: smoky cards behind text, a thin neon edge in the owner's accent,
+  soft glow and a top sheen. Clicks on see-through space fall through to the
+  desktop. (Acrylic blur was dropped: Windows turns it solid whenever the
+  window is unfocused, and this panel never takes focus.)
+- **Placement.** Stacked above the widget (below it near the top of the
+  screen), on the widget's corner edge, so orb ↔ pill changes do not move it.
+- **Atlas drives it** with glass_show (news, story, map, note) and
+  glass_close, through the window's `ui` requests; main fills news from its
+  own feeds and validates every request. Observe-class: no asking.
+- **The map** draws the app's own layer registry (flights, ships, quakes,
+  natural events, disasters, places, cameras, satellites) for the layers the
+  owner has switched on, from main's World service, and shows a card on click.
