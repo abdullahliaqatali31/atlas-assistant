@@ -16,11 +16,13 @@ import type { ProjectsBridge } from '../shared/projects.ts'
 import type { WakeBridge } from '../shared/wake.ts'
 import type { PresenceBridge, PresenceHostBridge } from '../shared/presence.ts'
 import type { GlassBridge } from '../shared/glass.ts'
+import type { PcBridge } from '../shared/system.ts'
 
 declare global {
   interface Window {
     assistant: AssistantBridge
     presenceHost: PresenceHostBridge
+    pc: PcBridge
     /** Only in the desktop widget's page. */
     presence: PresenceBridge
     /** Only in the glass panel's page. */

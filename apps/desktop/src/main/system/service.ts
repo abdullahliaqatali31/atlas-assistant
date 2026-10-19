@@ -170,6 +170,11 @@ export class SystemService {
     for (const ev of ['on-ac', 'on-battery', 'resume', 'unlock-screen'] as const) powerMonitor.on(ev as 'resume', () => void this.refresh())
   }
 
+  /** Every Start-menu app (Win32 and Store) with its launch id. */
+  apps(): Promise<{ name: string; id: string }[]> {
+    return this.worker.request<{ name: string; id: string }[] | { name: string; id: string } | null>('apps').then(r => (Array.isArray(r) ? r : r ? [r] : []))
+  }
+
   /** The runtime's PC requests. */
   async handle(op: SystemOp): Promise<string> {
     switch (op.kind) {
@@ -182,6 +187,8 @@ export class SystemService {
         await shell.openExternal(url)
         return `Opened Windows Settings › ${op.page}.`
       }
+      default:
+        throw new Error('Not a status request.')
     }
   }
 

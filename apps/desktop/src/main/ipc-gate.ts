@@ -10,6 +10,7 @@ import { CC } from '../shared/control.ts'
 import { CH } from '../shared/ipc.ts'
 import { PC } from '../shared/personality.ts'
 import { PJ } from '../shared/projects.ts'
+import { PCC } from '../shared/system.ts'
 
 export const OWNER_ONLY: ReadonlySet<string> = new Set([
   // Provider, key and server address: a swap would send conversations elsewhere.
@@ -53,6 +54,11 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   PJ.addCommitment,
   PJ.assignCommitment,
   PJ.resolveCommitment,
+  // What Atlas may know about the PC, and what it must never index.
+  PCC.setMap,
+  PCC.rebuild,
+  PCC.addExcluded,
+  PCC.removeExcluded,
 ])
 
 /** Wraps one IPC handler: our window only, and the owner for the listed channels. */

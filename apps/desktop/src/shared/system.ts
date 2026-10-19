@@ -1,3 +1,5 @@
+import type { MapKind } from './sysmap.ts'
+
 /**
  * What Atlas knows about the PC itself: Wi-Fi, Bluetooth, battery, VPN.
  * Main reads it (a PowerShell probe, read-only) and the runtime turns it
@@ -193,4 +195,30 @@ export const SETTINGS_PAGES = {
 export type SettingsPage = keyof typeof SETTINGS_PAGES
 
 /** PC actions the runtime asks main for (grows with the system map and Full control). */
-export type SystemOp = { kind: 'status' } | { kind: 'settings'; page: SettingsPage }
+export type SystemOp = { kind: 'status' } | { kind: 'settings'; page: SettingsPage } | { kind: 'find'; query: string; mapKind: MapKind | null }
+
+/** The This PC tab: live status, the system map's state. */
+export interface PcState {
+  status: SystemSnapshot | null
+  changes: SystemChange[]
+  map: { enabled: boolean; building: boolean; builtAt: number | null; counts: { apps: number; projects: number; folders: number }; excluded: string[] }
+}
+
+export const PCC = {
+  state: 'pc:state',
+  changed: 'pc:changed',
+  setMap: 'pc:set-map',
+  rebuild: 'pc:rebuild',
+  addExcluded: 'pc:add-excluded',
+  removeExcluded: 'pc:remove-excluded',
+} as const
+
+export interface PcBridge {
+  state(): Promise<PcState>
+  onChanged(cb: (s: PcState) => void): () => void
+  setMap(enabled: boolean): Promise<PcState>
+  rebuild(): Promise<PcState>
+  /** Pick a folder the map must never index. */
+  addExcluded(): Promise<PcState>
+  removeExcluded(path: string): Promise<PcState>
+}

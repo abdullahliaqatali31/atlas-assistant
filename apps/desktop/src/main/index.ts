@@ -6,7 +6,7 @@
 import { join } from 'node:path'
 
 import { isLlmProvider } from '@assistant/providers/llm-presets'
-import { app, BrowserWindow, protocol, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, session, shell, Tray, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, protocol, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, session, shell, Tray, type IpcMainInvokeEvent } from 'electron'
 
 import {
   CH,
@@ -49,6 +49,9 @@ import { RuntimeSupervisor } from './supervisor.ts'
 import { PresenceWidget } from './presence.ts'
 import { GlassPanel } from './glass.ts'
 import { SystemService } from './system/service.ts'
+import { SystemMapService } from './system/sysmap.ts'
+import { PCC, type PcState, type SystemOp } from '../shared/system.ts'
+import { describeEntry, searchMap } from '../shared/sysmap.ts'
 import { PRS, WIDGET_WHEN, type WidgetWhen } from '../shared/presence.ts'
 
 // Privileged scheme for the local speech model must be declared before 'ready'.
@@ -275,8 +278,31 @@ glass.register()
 const pcSystem = new SystemService({
   dir: join(app.getPath('userData'), 'system'),
   log: (level, message) => log(level, message),
-  onSnapshot: (s, changes) => supervisor.system(s, changes),
+  onSnapshot: (s, changes) => {
+    supervisor.system(s, changes)
+    publishPc()
+  },
 })
+
+/** Where things are on the PC (apps, projects, folders), once the owner turns it on. */
+const sysmap = new SystemMapService({
+  file: join(app.getPath('userData'), 'sysmap.json'),
+  apps: () => pcSystem.apps(),
+  codeProjects: () => code.state().projects.map(p => ({ name: p.name, path: p.path })),
+  log: (level, message) => log(level, message),
+  onChange: () => publishPc(),
+})
+const pcState = (): PcState => ({ status: pcSystem.current, changes: pcSystem.changes, map: sysmap.view() })
+const publishPc = () => toRenderer(PCC.changed, pcState())
+
+/** Atlas's PC requests: status, Settings pages, finding things in the map. */
+const pcOp = async (op: SystemOp): Promise<string> => {
+  if (op.kind !== 'find') return pcSystem.handle(op)
+  if (!sysmap.enabled) return 'The system map is off. The owner can turn it on in Controls › This PC; until then only the folders, apps and projects they picked are known.'
+  if (sysmap.view().building && !sysmap.map.builtAt) return 'The system map is still being built; try again in a minute.'
+  const found = searchMap(sysmap.map.entries, op.query, op.mapKind)
+  return found.length ? ['Found on this PC:', ...found.map(describeEntry)].join('\n') : `Nothing on this PC matches "${op.query}".`
+}
 
 /** The app opens on exactly what the glass panel was showing; the panel folds away. */
 const handOffGlass = () => {
@@ -479,7 +505,7 @@ const ui = new UiService({
   requireOwner: () => requireOwner(),
   onChange: state => supervisor.ui(state),
   glass: op => glass.handle(op),
-  system: op => pcSystem.handle(op),
+  system: op => pcOp(op),
 })
 ui.register()
 /** The live world at the owner's places, for the World page. */
@@ -546,6 +572,28 @@ handle(CH.initiativeAction, (id, action) => {
   supervisor.initiativeAction(parsed.id, parsed.action)
 })
 handle(PRS.update, raw => presence.update(raw))
+handle(PCC.state, () => pcState())
+handle(PCC.setMap, on => {
+  if (typeof on !== 'boolean') throw new Error('On or off.')
+  sysmap.setEnabled(on)
+  return pcState()
+})
+handle(PCC.rebuild, () => {
+  if (sysmap.enabled) void sysmap.build()
+  void pcSystem.refresh()
+  return pcState()
+})
+handle(PCC.addExcluded, async () => {
+  const opts = { title: 'A folder Atlas must never look into', properties: ['openDirectory' as const] }
+  const picked = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+  if (!picked.canceled && picked.filePaths[0]) sysmap.setExcluded([...sysmap.view().excluded, picked.filePaths[0]])
+  return pcState()
+})
+handle(PCC.removeExcluded, path => {
+  if (typeof path !== 'string') throw new Error('Which folder?')
+  sysmap.setExcluded(sysmap.view().excluded.filter(p => p !== path))
+  return pcState()
+})
 handle(PRS.getWhen, () => presence.when)
 handle(PRS.setWhen, when => {
   requireOwner()
@@ -742,6 +790,7 @@ if (!app.requestSingleInstanceLock()) {
     }
     supervisor.start()
     pcSystem.start()
+    sysmap.start()
     // The glass panel loads hidden in the background, so it opens at once when asked.
     setTimeout(() => glass.prewarm(), 4_000).unref?.()
     // Started by Windows at login: stay in the tray until the owner opens Atlas (the widget shows meanwhile).
@@ -761,6 +810,7 @@ if (!app.requestSingleInstanceLock()) {
     presence.stop()
     glass.stop()
     pcSystem.stop()
+    sysmap.stop()
     void supervisor.stop().finally(() => {
       tray?.destroy()
       app.quit()

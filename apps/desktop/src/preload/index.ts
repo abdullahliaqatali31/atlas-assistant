@@ -21,6 +21,7 @@ import { WC, type WakeBridge, type WakeView } from '../shared/wake.ts'
 import { PC, type PersonalityBridge, type PersonalityView } from '../shared/personality.ts'
 import { PJ, type ProjectsBridge } from '../shared/projects.ts'
 import { PRS, type PresenceCommand, type PresenceHostBridge } from '../shared/presence.ts'
+import { PCC, type PcBridge, type PcState } from '../shared/system.ts'
 
 const subscribe = <T>(channel: string, cb: (v: T) => void) => {
   const listener = (_e: IpcRendererEvent, v: T) => cb(v)
@@ -285,3 +286,14 @@ const presenceHost: PresenceHostBridge = {
   setWhen: when => ipcRenderer.invoke(PRS.setWhen, when),
 }
 contextBridge.exposeInMainWorld('presenceHost', presenceHost)
+
+/** The This PC tab: Wi-Fi, Bluetooth, battery, and the system map. */
+const pc: PcBridge = {
+  state: () => ipcRenderer.invoke(PCC.state),
+  onChanged: cb => subscribe<PcState>(PCC.changed, cb),
+  setMap: enabled => ipcRenderer.invoke(PCC.setMap, enabled),
+  rebuild: () => ipcRenderer.invoke(PCC.rebuild),
+  addExcluded: () => ipcRenderer.invoke(PCC.addExcluded),
+  removeExcluded: path => ipcRenderer.invoke(PCC.removeExcluded, path),
+}
+contextBridge.exposeInMainWorld('pc', pc)

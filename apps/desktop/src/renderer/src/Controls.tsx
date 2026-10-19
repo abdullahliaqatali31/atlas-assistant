@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNo
 import { Select } from './ui/Select.tsx'
 import { BrandIcon } from './ui/BrandIcon.tsx'
 import { WindowTracking } from './WindowTracking.tsx'
+import { ThisPc } from './ThisPc.tsx'
 import {
   ACTION_CLASSES,
   ALWAYS_ASK,
@@ -21,11 +22,12 @@ import {
   type ServerView,
 } from '../../shared/control.ts'
 
-export type ControlsTab = 'connections' | 'permissions' | 'activity'
+export type ControlsTab = 'connections' | 'permissions' | 'pc' | 'activity'
 
 const TABS: { id: ControlsTab; label: string }[] = [
   { id: 'connections', label: 'Connections' },
   { id: 'permissions', label: 'Permissions' },
+  { id: 'pc', label: 'This PC' },
   { id: 'activity', label: 'Activity' },
 ]
 
@@ -82,6 +84,7 @@ export function Controls({ state, initialTab = 'connections', onBack }: { state:
       <main className="flex-1 overflow-y-auto px-3 py-3 text-sm">
         {tab === 'connections' && <Connections state={state} run={run} />}
         {tab === 'permissions' && <Permissions state={state} run={run} />}
+        {tab === 'pc' && <ThisPc run={run} />}
         {tab === 'activity' && <Activity state={state} />}
       </main>
     </div>

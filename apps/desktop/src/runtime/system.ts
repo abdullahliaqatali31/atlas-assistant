@@ -14,6 +14,7 @@ const RECENT_MS = 20 * 60_000
 
 export const SYSTEM_RULES: Rule[] = [
   { id: 'default-system_status', tool: 'system_status', actionClass: 'observe', effect: 'allow' },
+  { id: 'default-system_find', tool: 'system_find', actionClass: 'observe', effect: 'allow' },
   // Opening a Settings page changes nothing by itself.
   { id: 'default-system_settings', tool: 'system_settings', actionClass: 'modify', effect: 'allow' },
 ]
@@ -65,6 +66,20 @@ export class HostSystem {
           ]
             .filter(Boolean)
             .join('\n')
+        },
+      },
+      {
+        name: 'system_find',
+        description:
+          'Find where something is on this PC in the system map: apps (Start menu), code projects (Windows and WSL, from VS Code, Cursor, Claude Code and git folders), and the owner’s folders. Say it as the owner did ("WSL project atlas", "WhatsApp", "invoices folder"); kind narrows it. Returns ids to open with open_item. Names and paths only.',
+        inputSchema: { type: 'object', properties: { query: { type: 'string' }, kind: { type: 'string', enum: ['app', 'project', 'folder'] } }, required: ['query'], additionalProperties: false },
+        actionClass: 'observe',
+        isUntrusted: false,
+        run: (input, signal) => {
+          const query = typeof input.query === 'string' ? input.query.trim().slice(0, 120) : ''
+          if (!query) return Promise.reject(new Error('Say what to find.'))
+          const kind = input.kind === 'app' || input.kind === 'project' || input.kind === 'folder' ? input.kind : null
+          return this.deps.request({ kind: 'find', query, mapKind: kind }, signal)
         },
       },
       {
