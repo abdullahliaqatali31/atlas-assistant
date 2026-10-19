@@ -9,35 +9,40 @@ const button = 'btn py-0.5 text-muted'
 /** Owner controls under something the assistant said on its own (plan section 9). */
 export function InitiativeControls({ item, speaking, onStop }: { item: InitiativeItem; speaking: boolean; onStop: () => void }) {
   const [done, setDone] = useState<string | null>(null)
+  const [why, setWhy] = useState(false)
   const choose = (action: InitiativeAction, label: string) => {
     setDone(label)
     void act(item.id, action)
   }
+  // One quiet line under the message: the reason folds away, the choices are small text, not big buttons.
+  const link = 'rounded px-1 py-0.5 text-[11px] text-muted transition-colors hover:bg-surface-strong hover:text-text'
   return (
-    <div className="mt-2 border-t border-border pt-1.5">
-      <details className="text-xs text-muted">
-        <summary className="cursor-pointer select-none">Why did you say this?</summary>
-        <p className="mt-1">{item.reason}</p>
-      </details>
-      {done ? (
-        <p className="mt-1 text-xs text-muted">{done}</p>
-      ) : (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {speaking && (
-            <button type="button" className={button} onClick={onStop}>
-              Stop
+    <div className="mt-1.5 border-t border-border/70 pt-1">
+      <div className="-mx-1 flex flex-wrap items-center gap-x-0.5">
+        <button type="button" className={`${link} ${why ? 'text-text' : ''}`} onClick={() => setWhy(w => !w)} aria-expanded={why}>
+          Why?
+        </button>
+        {done ? (
+          <span className="px-1 text-[11px] text-muted">· {done}</span>
+        ) : (
+          <>
+            {speaking && (
+              <button type="button" className={`${link} text-warm`} onClick={onStop}>
+                Stop
+              </button>
+            )}
+            <button type="button" className={link} onClick={() => choose('snooze', 'Okay, I’ll bring it up again in 30 minutes.')}>
+              Not now
             </button>
-          )}
-          <button type="button" className={button} onClick={() => choose('snooze', 'Okay, I’ll bring it up again in 30 minutes.')}>
-            Not now
-          </button>
-          {item.canMute && (
-            <button type="button" className={button} onClick={() => choose('mute', 'I won’t remind you about this again. The task stays on your list.')}>
-              Don’t remind me again
-            </button>
-          )}
-        </div>
-      )}
+            {item.canMute && (
+              <button type="button" className={link} onClick={() => choose('mute', 'I won’t remind you about this again. The task stays on your list.')}>
+                Don’t remind me
+              </button>
+            )}
+          </>
+        )}
+      </div>
+      {why && <p className="mt-0.5 text-[11px] leading-snug text-muted">{item.reason}</p>}
     </div>
   )
 }

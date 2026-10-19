@@ -1,5 +1,5 @@
 import * as ToggleGroup from '@radix-ui/react-toggle-group'
-import { Ear, History, Mic, Settings2, SlidersHorizontal, SquarePen, Volume2, VolumeX } from 'lucide-react'
+import { Ear, Mic, Square, SquarePen, Volume2, VolumeX } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 
 import { MODES, type ActionNotice, type ApprovalRequest, type InitiativeItem, type RuntimeStatus, type TaskView, type UiMode } from '../../shared/ipc.ts'
@@ -11,6 +11,8 @@ import { VoiceMode, type VoicePhase } from './VoiceMode.tsx'
 import { chime, toWav, WakeListener } from './wake/listener.ts'
 import type { Presence } from './Jarvis.tsx'
 import { ChatList } from './ChatList.tsx'
+import { ChatMenu } from './ChatMenu.tsx'
+import { chatViewVars, readChatView, saveChatView, type ChatView } from './chatview.ts'
 import { Onboarding } from './Onboarding.tsx'
 import { Markdown } from './ui/Markdown.tsx'
 import { ASK_EVENT, MIC_EVENT, publishLive } from './shell/live.ts'
@@ -64,6 +66,11 @@ export function Companion({
   const [chatsOpen, setChatsOpen] = useState(false)
   const startNewChat = () => void window.assistant.newChat().then(() => setLines([]), () => undefined)
   const [draft, setDraft] = useState('')
+  const [chatView, setChatView] = useState<ChatView>(readChatView)
+  const changeView = (v: ChatView) => {
+    setChatView(v)
+    saveChatView(v)
+  }
   const [replyId, setReplyId] = useState<string | null>(null)
   const [tasks, setTasks] = useState<TaskView[] | null>(null)
   const [showLater, setShowLater] = useState(false)
@@ -500,86 +507,71 @@ export function Companion({
 
   return (
     // A container: the header adapts to the panel width (side panel, drawer or compact window), not the screen.
-    <div className="@container relative flex min-h-0 flex-1 flex-col">
+    <div className="@container relative flex min-h-0 flex-1 flex-col" style={chatViewVars(chatView)}>
       {chatsOpen && (
         <ChatList
           onClose={() => setChatsOpen(false)}
           onResumed={day => setLines(day.map((d, i): Line => ({ id: 'chat-' + i + '-' + d.at, who: d.who, text: d.text, earlier: true })))}
         />
       )}
-      <header className="flex items-center gap-2 border-b border-border px-3 py-2 @[420px]:px-4 @[420px]:py-2.5">
-        <span
-          className={`size-2 rounded-full ${listening ? 'bg-danger' : ready ? 'bg-accent' : 'bg-muted'} ${replyId || speaking || listening ? 'thinking-dot' : ''}`}
-          aria-hidden
-        />
-        {wakeActive && (
+      {/* Two tiers, so nothing is clipped at drawer width: who and what now, then the mode. */}
+      <header className="border-b border-border px-3 pb-2 pt-1.5 @[420px]:px-4">
+        <div className="flex h-9 items-center gap-1.5">
           <span
-            className="flex items-center gap-1 rounded-full border border-accent/30 bg-accent-soft px-2 py-0.5 text-[11px] text-accent"
-            title="Listening for wake triggers on this computer"
-          >
-            <Ear className="size-3" aria-hidden />
-            {[nameOn ? wake?.aliases[0] : null, wake?.clap ? '👏👏' : null, wake?.whistle ? 'seeti' : null].filter(Boolean).join(' · ')}
+            className={`size-2 shrink-0 rounded-full ${listening ? 'bg-danger' : ready ? 'bg-accent' : 'bg-muted'} ${replyId || speaking || listening ? 'thinking-dot' : ''}`}
+            aria-hidden
+          />
+          {wakeActive && (
+            <span
+              className="flex min-w-0 shrink items-center gap-1 truncate rounded-full border border-accent/30 bg-accent-soft px-2 py-0.5 text-[11px] text-accent"
+              title="Listening for wake triggers on this computer"
+            >
+              <Ear className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{[nameOn ? wake?.aliases[0] : null, wake?.clap ? '👏👏' : null, wake?.whistle ? 'seeti' : null].filter(Boolean).join(' · ')}</span>
+            </span>
+          )}
+          <span className="min-w-0 flex-1 truncate text-xs text-muted" role="status">
+            {state}
           </span>
-        )}
-        <span className="min-w-0 truncate text-xs text-muted" role="status">
-          {state}
-        </span>
-        {/* Narrow panels: the mode as a compact menu instead of four buttons. */}
-        <select
-          value={status.mode}
-          onChange={e => void window.assistant.setMode(e.target.value as UiMode)}
-          aria-label="Mode"
-          className="field ml-auto w-auto shrink-0 py-1 text-xs capitalize @[420px]:hidden"
-        >
-          {MODES.map(m => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
+          {(replyId !== null || speaking) && (
+            <button type="button" onClick={interrupt} className="btn h-7 shrink-0 gap-1 rounded-full border-warm/60 px-2.5 text-xs text-warm" title="Stop the reply (Esc)">
+              <Square className="size-3 fill-current" aria-hidden /> Stop
+            </button>
+          )}
+          {voice && (
+            <button
+              type="button"
+              onClick={toggleSpeech}
+              aria-pressed={status.speech.enabled}
+              aria-label={status.speech.enabled ? 'Mute spoken replies' : 'Speak replies aloud'}
+              title={status.mode === 'quiet' ? 'Quiet mode keeps replies on screen' : status.speech.enabled ? 'Spoken replies on: when you talk, and when I speak up. Typed messages get text.' : 'Spoken replies off'}
+              className="icon-btn shrink-0"
+            >
+              {status.speech.enabled ? <SpeakerIcon /> : <MutedIcon />}
+            </button>
+          )}
+          <button type="button" onClick={startNewChat} className="icon-btn shrink-0" aria-label="New chat" title="New chat: start fresh (this one stays in Earlier chats)" disabled={ownerLocked || replyId !== null}>
+            <SquarePen className="size-4" aria-hidden />
+          </button>
+          <ChatMenu view={chatView} onView={changeView} onChats={() => setChatsOpen(true)} onControls={onOpenControls} onSetup={onOpenSetup} locked={ownerLocked} />
+        </div>
         <ToggleGroup.Root
           type="single"
           value={status.mode}
           onValueChange={v => v && void window.assistant.setMode(v as UiMode)}
           aria-label="Mode"
-          className="ml-auto hidden shrink-0 rounded-xl border border-border bg-bg p-0.5 @[420px]:flex"
+          className="grid grid-cols-4 rounded-xl border border-border bg-bg p-0.5"
         >
           {MODES.map(m => (
             <ToggleGroup.Item
               key={m}
               value={m}
-              className="rounded-lg px-2.5 py-1 text-xs capitalize text-muted transition-colors hover:text-text data-[state=on]:bg-accent-soft data-[state=on]:text-accent"
+              className="rounded-lg py-1 text-center text-xs capitalize text-muted transition-colors hover:text-text data-[state=on]:bg-accent-soft data-[state=on]:text-accent"
             >
               {m}
             </ToggleGroup.Item>
           ))}
         </ToggleGroup.Root>
-        {voice && (
-          <button
-            type="button"
-            onClick={toggleSpeech}
-            aria-pressed={status.speech.enabled}
-            aria-label={status.speech.enabled ? 'Mute spoken replies' : 'Speak replies aloud'}
-            title={status.mode === 'quiet' ? 'Quiet mode keeps replies on screen' : status.speech.enabled ? 'Spoken replies on: when you talk, and when I speak up. Typed messages get text.' : 'Spoken replies off'}
-            className="icon-btn"
-          >
-            {status.speech.enabled ? <SpeakerIcon /> : <MutedIcon />}
-          </button>
-        )}
-        {onOpenControls && (
-          <button type="button" onClick={onOpenControls} className="icon-btn hidden @[360px]:inline-flex" aria-label="Connections, permissions and activity" title="Connections, permissions and activity">
-            <SlidersIcon />
-          </button>
-        )}
-        <button type="button" onClick={() => setChatsOpen(true)} className="icon-btn" aria-label="Earlier chats" title="Earlier chats" disabled={ownerLocked}>
-          <History className="size-4" aria-hidden />
-        </button>
-        <button type="button" onClick={startNewChat} className="icon-btn" aria-label="New chat" title="New chat: start fresh (this one stays in Earlier chats)" disabled={ownerLocked || replyId !== null}>
-          <SquarePen className="size-4" aria-hidden />
-        </button>
-        <button type="button" onClick={onOpenSetup} className="icon-btn" aria-label="Open setup" title="Setup">
-          <Settings2 className="size-4" aria-hidden />
-        </button>
       </header>
 
       {conversation && (
@@ -601,7 +593,7 @@ export function Companion({
           />
         </div>
       )}
-      <main className={`flex-1 space-y-3 overflow-y-auto px-3 py-3 @[480px]:px-4 ${conversation ? 'hidden' : ''}`} aria-live="polite">
+      <main className={`flex flex-1 flex-col gap-[var(--chat-gap)] overflow-y-auto px-3 py-3 @[480px]:px-4 ${conversation ? 'hidden' : ''}`} aria-live="polite">
         {lines.length === 0 && (
           <p className="pt-16 text-center text-sm text-muted">
             {!ready ? `${PHASE_TEXT[status.phase]}…` : voice ? 'Type, or tap the mic (Ctrl+Space) and talk.' : 'Type to start talking.'}
@@ -610,12 +602,16 @@ export function Companion({
         {lines[0]?.earlier && <p className="hud-label text-center">Earlier today</p>}
         {lines.map((l, i) => (
           <div key={l.id} className={`rise-in ${l.who === 'owner' ? 'flex flex-wrap justify-end' : ''} ${l.earlier ? 'opacity-70' : ''}`}>
-            {!l.earlier && lines[i - 1]?.earlier && <p className="hud-label mb-3 w-full basis-full text-center">Now</p>}
+            {!l.earlier && lines[i - 1]?.earlier && <p className="hud-label mb-2 w-full basis-full text-center">Now</p>}
             <div
-              className={`max-w-[80%] px-3.5 py-2.5 text-sm leading-relaxed ${
+              className={`text-[length:var(--chat-text)] leading-relaxed ${
                 l.who === 'owner'
-                  ? 'rounded-2xl rounded-br-md bg-linear-to-br from-cyan-300 to-sky-500 text-slate-950 shadow-[0_0_24px_rgba(34,211,238,0.25)]'
-                  : 'tile rounded-2xl rounded-bl-md'
+                  ? chatView.style === 'minimal'
+                    ? 'max-w-[var(--chat-max)] rounded-xl bg-accent-soft px-[var(--chat-pad-x)] py-[var(--chat-pad-y)] text-text'
+                    : 'max-w-[var(--chat-max)] rounded-2xl rounded-br-md bg-linear-to-br from-cyan-300 to-sky-500 px-[var(--chat-pad-x)] py-[var(--chat-pad-y)] text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.2)]'
+                  : chatView.style === 'minimal'
+                    ? 'max-w-full border-l-2 border-accent/50 py-0.5 pl-3'
+                    : 'tile max-w-[var(--chat-max)] rounded-2xl rounded-bl-md px-[var(--chat-pad-x)] py-[var(--chat-pad-y)]'
               }`}
             >
               {l.actions?.map((a, i) => (
@@ -746,7 +742,6 @@ const voiceProblem = (message: string) => {
 
 const MicIcon = () => <Mic className="size-4" aria-hidden />
 const SpeakerIcon = () => <Volume2 className="size-4" aria-hidden />
-const SlidersIcon = () => <SlidersHorizontal className="size-4" aria-hidden />
 const MutedIcon = () => <VolumeX className="size-4" aria-hidden />
 
 /** The policy gate asked before running a tool; nothing runs until the owner answers. */
