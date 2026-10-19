@@ -3,6 +3,7 @@
  * supervised runtime. Closing the window destroys its renderer while the
  * runtime keeps running; Quit from the tray stops everything.
  */
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { isLlmProvider } from '@assistant/providers/llm-presets'
@@ -21,8 +22,7 @@ import {
   type ReplyEvent,
   type RuntimeStatus,
   type UsageView,
-  type SessionChange,
-} from '../shared/ipc.ts'
+  type SessionChange, parseChatModelChoice, type ChatModelChoice } from '../shared/ipc.ts'
 import { CC } from '../shared/control.ts'
 import { CHALLENGE, IC, isAskWhen } from '../shared/identity.ts'
 import { NC } from '../shared/news.ts'
@@ -682,6 +682,28 @@ handle(CH.setPrice, (model, price) => {
   const ok = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 10_000
   if (p !== null && (!ok(p.input) || !ok(p.output) || (p.cacheRead !== undefined && !ok(p.cacheRead)))) throw new Error('Prices are dollars per million tokens.')
   supervisor.usageSetting({ type: 'set-price', model, price: p === null ? null : { input: p.input as number, output: p.output as number, cacheRead: p.cacheRead as number | undefined } })
+})
+// The chat's model chip: remembered on this PC, re-sent after restarts.
+const chatModelFile = join(app.getPath('userData'), 'chat-model.json')
+const readChatModel = (): ChatModelChoice => {
+  try {
+    return parseChatModelChoice(JSON.parse(readFileSync(chatModelFile, 'utf8'))) ?? { kind: 'auto' }
+  } catch {
+    return { kind: 'auto' }
+  }
+}
+const chatModelView = () => {
+  const s = setupSummary()
+  return { choice: readChatModel(), provider: s.llmProvider, main: s.llmModel, quick: s.llmQuickModel }
+}
+supervisor.setChatModel(readChatModel())
+handle(CH.chatModel, () => chatModelView())
+handle(CH.setChatModel, raw => {
+  const choice = parseChatModelChoice(raw)
+  if (!choice) throw new Error('Unknown model choice.')
+  writeFileSync(chatModelFile, JSON.stringify(choice))
+  supervisor.setChatModel(choice)
+  return chatModelView()
 })
 handle(CH.listModels, (provider, apiKey, baseUrl) => {
   if (!isLlmProvider(provider)) throw new Error('Unknown provider.')

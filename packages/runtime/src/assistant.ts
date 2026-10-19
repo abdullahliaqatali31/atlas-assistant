@@ -195,6 +195,21 @@ export class Assistant {
     this.session.mode = mode
   }
 
+  /**
+   * The owner's pick in the chat: auto (quick for simple messages, main for
+   * the rest), always the main model, always the quick one, or one specific
+   * model (any provider with a key). Applies from the next message.
+   */
+  private chatChoice: { mode: 'auto' | 'main' | 'quick'; llm?: LlmProvider } = { mode: 'auto' }
+
+  setChatModel(choice: { mode: 'auto' | 'main' | 'quick'; llm?: LlmProvider }) {
+    this.chatChoice = choice
+  }
+
+  private get mainLlm(): LlmProvider {
+    return this.chatChoice.llm ?? this.deps.llm
+  }
+
   /** Owner typed or said something. Yields reply text as it streams. */
   async *reply(text: string, signal?: AbortSignal): AsyncIterable<string> {
     this.ensureSession()
@@ -202,7 +217,8 @@ export class Assistant {
     this.deps.memory.addMessage(this.session.conversationId, 'owner', text)
     // Style feedback ("hamesha chhote jawab") updates the profile before this reply is written.
     this.deps.learning?.observeOwner(text)
-    const route = this.deps.quickLlm && this.deps.routing !== 'main' ? routeMessage(text) : 'main'
+    const c = this.chatChoice
+    const route = c.llm || c.mode === 'main' || !this.deps.quickLlm ? 'main' : c.mode === 'quick' ? 'quick' : this.deps.routing !== 'main' ? routeMessage(text) : 'main'
     yield* this.turn(text, this.contextPacket(text), signal, false, route)
   }
 
@@ -309,8 +325,8 @@ export class Assistant {
   private async *turn(userText: string, context: string, signal?: AbortSignal, tainted = false, route: Route = 'main'): AsyncIterable<string> {
     // A simple message starts on the quick model; its reply is held until it is done, and if the
     // quick model wants a tool (or declines) the main model takes the whole turn instead.
-    let llm = route === 'quick' && this.deps.quickLlm ? this.deps.quickLlm : this.deps.llm
-    let quick = llm !== this.deps.llm
+    let llm = route === 'quick' && this.deps.quickLlm ? this.deps.quickLlm : this.mainLlm
+    let quick = llm !== this.mainLlm
     const tools = [...this.tools.values()].map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))
     // Fixed for the whole tool loop, so one turn never mixes two profiles.
     // A new day starts a fresh conversation (yesterday stays in long-term memory).
@@ -360,7 +376,7 @@ export class Assistant {
         quick = false
         if (escalate) {
           // Nothing was said or done yet: the main model answers from the same starting point.
-          llm = this.deps.llm
+          llm = this.mainLlm
           step--
           continue
         }

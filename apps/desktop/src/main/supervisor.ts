@@ -24,8 +24,7 @@ import type {
   DayLine,
   UiMode,
   VoiceProviderChoice,
-  UsageView,
-} from '../shared/ipc.ts'
+  UsageView, ChatModelChoice } from '../shared/ipc.ts'
 import type { ActivityEntry, ControlHostEvent, ControlHostRequest } from '../shared/control.ts'
 import type { PersonalityHostEvent, PersonalityHostRequest } from '../shared/personality.ts'
 import type { ActivityHostEvent, ActivityHostRequest } from '../shared/activity.ts'
@@ -76,6 +75,7 @@ export class RuntimeSupervisor {
   private startedAt = 0
   private restartTimer: NodeJS.Timeout | null = null
   private mode: UiMode = 'companion'
+  private chatChoice: ChatModelChoice = { kind: 'auto' }
   private speech = true
   private lastNews: Extract<HostRequest, { type: 'news-snapshot' }>['headlines'] = []
   private lastUi: Extract<HostRequest, { type: 'ui-snapshot' }>['state'] | null = null
@@ -167,6 +167,12 @@ export class RuntimeSupervisor {
 
   answerApproval(id: string, approved: boolean) {
     this.post({ type: 'approval-answer', id, approved })
+  }
+
+  /** The chat's model pick; re-sent to a restarted runtime. */
+  setChatModel(choice: ChatModelChoice) {
+    this.chatChoice = choice
+    this.post({ type: 'set-chat-model', choice })
   }
 
   setMode(mode: UiMode) {
@@ -374,6 +380,7 @@ export class RuntimeSupervisor {
         // The host starts in companion mode with speech on; re-apply the owner's choices after (re)starts.
         if (e.phase === 'ready') {
           if (this.mode !== 'companion') this.post({ type: 'set-mode', mode: this.mode })
+          if (this.chatChoice.kind !== 'auto') this.post({ type: 'set-chat-model', choice: this.chatChoice })
           this.post({ type: 'set-speech', enabled: this.speech })
           if (this.lastNews.length) this.post({ type: 'news-snapshot', headlines: this.lastNews })
           if (this.lastUi) this.post({ type: 'ui-snapshot', state: this.lastUi })

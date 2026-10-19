@@ -37,7 +37,7 @@ import {
 } from '@assistant/runtime'
 import { systemClock, type InitiativeEvent } from '@assistant/shared'
 
-import type { HostEvent, HostRequest, InitiativeItem, RuntimePhase, SetupProblem } from '../shared/ipc.ts'
+import type { ChatModelChoice, HostEvent, HostRequest, InitiativeItem, RuntimePhase, SetupProblem } from '../shared/ipc.ts'
 import type { ActivitySettings } from '../shared/activity.ts'
 import { approvalQuestion, parseConsent } from '../shared/consent.ts'
 import { HostActivity } from './activity.ts'
@@ -88,6 +88,24 @@ let dayOffsetMin = 0
 const code = new HostCode({ post: e => post(e), now: () => systemClock.now() })
 const files = new HostFiles({ post: e => post(e) })
 const desktop = new HostDesktop({ post: e => post(e) })
+/** The chat model chip's pick, kept across runtime restarts by main (re-sent on start). */
+let chatChoice: ChatModelChoice = { kind: 'auto' }
+let chatConfig: { llm: Parameters<typeof createLlm>[0]; env: Record<string, string | undefined> } | null = null
+const applyChatModel = () => {
+  if (!assistant || !chatConfig) return
+  const c = chatChoice
+  if (c.kind !== 'model') return assistant.setChatModel({ mode: c.kind })
+  const keyName = LLM_PROVIDERS[c.provider].keyName
+  const apiKey = keyName ? (store.get(keyName as SecretName) ?? chatConfig.env[keyName] ?? '') : ''
+  if (keyName && !apiKey) {
+    log('warn', `No key for ${c.provider}; the chat stays on its usual model.`)
+    return assistant.setChatModel({ mode: 'auto' })
+  }
+  const same = c.provider === chatConfig.llm.provider
+  const cfg = { ...chatConfig.llm, provider: c.provider, apiKey, model: c.model, baseUrl: same ? chatConfig.llm.baseUrl : undefined }
+  assistant.setChatModel({ mode: 'main', llm: meterLlm(createLlm(cfg as never), { purpose: 'chat', memory: memory!, clock: systemClock, utcOffsetMin: dayOffsetMin, onRecord: () => schedulePush() }) })
+}
+
 const ui = new HostUi({ post: e => post(e), geocode: name => (world ? world.geocode(name) : Promise.reject(new Error('The assistant is not ready yet.'))) })
 const system = new HostSystem({ request: (op, signal) => ui.ask({ kind: 'system', op }, signal), now: () => Date.now(), fullControl: () => controls.fullControl })
 const news = new HostNews()
@@ -221,6 +239,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   const usageMemory = memory
   const offset = config.owner.utcOffsetMin
   pushUsage = () => post({ type: 'usage', summary: usageSummary(usageMemory, systemClock.now(), offset) })
+  chatConfig = { llm: config.llm, env: merged }
   assistant = new Assistant({
     // Every reply is metered (tokens and cost per day and model).
     llm: meterLlm(llm, { purpose: 'chat', memory, clock: systemClock, utcOffsetMin: offset, onRecord: () => schedulePush() }),
@@ -248,6 +267,8 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   })
   // Local tools now; MCP servers start in the background and join when ready.
   // Answers to its own questions (project status, learning suggestions) go through these.
+  // The model chip's pick may have arrived before the assistant existed.
+  applyChatModel()
   void controls.attach(assistant, [...localTools(memory, systemClock), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...system.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
   const agendaMemory = memory
   const wrapUpMinute = parseClock(merged.ASSISTANT_WRAP_UP) ?? 18 * 60
@@ -474,6 +495,11 @@ port.on('message', ({ data }: { data: HostRequest }) => {
         log('info', `Barge-in: reply cancelled in ${(performance.now() - started).toFixed(1)} ms.`)
       }
       break
+    case 'set-chat-model': {
+      chatChoice = data.choice
+      applyChatModel()
+      break
+    }
     case 'set-mode':
       // While locked or away the owner's choice waits until they are back.
       if (initiative) initiative.setOwnerMode(data.mode)

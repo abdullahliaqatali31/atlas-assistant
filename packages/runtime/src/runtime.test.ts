@@ -141,6 +141,20 @@ describe('Assistant', () => {
     memory.close()
   })
 
+  it('follows the model chip: always main, always quick, or one picked model', async () => {
+    const quick = new FakeLlm(() => say('Quick here.'))
+    const picked = new FakeLlm(() => say('Picked model here.'))
+    const { assistant, llm, memory } = setup(() => say('Main model here.'), { quickLlm: quick, routing: 'auto' })
+    assistant.setChatModel({ mode: 'main' })
+    expect(await drain(assistant.reply('salam'))).toBe('Main model here.')
+    assistant.setChatModel({ mode: 'quick' })
+    expect(await drain(assistant.reply('aaj ki news map pe dikhao'))).toBe('Quick here.')
+    assistant.setChatModel({ mode: 'main', llm: picked })
+    expect(await drain(assistant.reply('salam'))).toBe('Picked model here.')
+    expect([llm.requests.length, quick.requests.length, picked.requests.length]).toEqual([1, 1, 1])
+    memory.close()
+  })
+
   it('starts a new conversation after a long pause, and only sends the current one', async () => {
     const { assistant, llm, memory, clock } = setup()
     await drain(assistant.reply('salam'))

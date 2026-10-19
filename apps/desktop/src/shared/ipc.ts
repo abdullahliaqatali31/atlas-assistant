@@ -93,6 +93,17 @@ export interface ActionNotice {
 }
 
 /** Voice providers setup offers. Azure's free F0 tier has real Pakistani Urdu voices. */
+/** The chat's model pick (the model chip): routing, or one model from any provider with a key. */
+export type ChatModelChoice = { kind: 'auto' } | { kind: 'main' } | { kind: 'quick' } | { kind: 'model'; provider: LlmProviderId; model: string }
+
+export const parseChatModelChoice = (v: unknown): ChatModelChoice | null => {
+  const o = v as Partial<{ kind: string; provider: unknown; model: unknown }> | null
+  if (!o || typeof o !== 'object') return null
+  if (o.kind === 'auto' || o.kind === 'main' || o.kind === 'quick') return { kind: o.kind }
+  if (o.kind === 'model' && isLlmProvider(o.provider) && typeof o.model === 'string' && /^[\w.:/@-]{1,120}$/.test(o.model)) return { kind: 'model', provider: o.provider, model: o.model }
+  return null
+}
+
 export const VOICE_PROVIDERS = ['elevenlabs', 'azure'] as const
 export type VoiceProviderChoice = (typeof VOICE_PROVIDERS)[number]
 
@@ -243,6 +254,8 @@ export const CH = {
   ready: 'assistant:ready',
   silence: 'assistant:silence',
   interrupt: 'assistant:interrupt',
+  chatModel: 'assistant:chat-model',
+  setChatModel: 'assistant:set-chat-model',
 } as const
 
 /** The API the preload exposes as `window.assistant`. */
@@ -291,6 +304,9 @@ export interface AssistantBridge {
   onSilence(cb: () => void): () => void
   onAction(cb: (n: ActionNotice) => void): () => void
   onStatus(cb: (s: RuntimeStatus) => void): () => void
+  /** The chat model chip: what is picked now, and pick another (applies from the next message). */
+  chatModel(): Promise<{ choice: ChatModelChoice; provider: LlmProviderId; main: string; quick: string }>
+  setChatModel(choice: ChatModelChoice): Promise<{ choice: ChatModelChoice; provider: LlmProviderId; main: string; quick: string }>
 }
 
 // ── validation (main process side) ──────────────────────────
@@ -392,6 +408,8 @@ export type HostRequest =
   | { type: 'world-op'; requestId: string; op: WorldOp }
   /** Atlas's own window, pushed by main whenever it changes. */
   | { type: 'ui-snapshot'; state: UiState }
+  /** The owner switched the chat's model (the model chip). */
+  | { type: 'set-chat-model'; choice: ChatModelChoice }
   /** The PC's Wi-Fi, Bluetooth and battery, pushed by main with what changed. */
   | { type: 'system-snapshot'; snapshot: SystemSnapshot; changes: SystemChange[] }
   /** Answer to a window tool's request. */

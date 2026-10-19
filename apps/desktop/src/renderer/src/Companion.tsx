@@ -12,6 +12,7 @@ import { chime, toWav, WakeListener } from './wake/listener.ts'
 import type { Presence } from './Jarvis.tsx'
 import { ChatList } from './ChatList.tsx'
 import { ChatMenu } from './ChatMenu.tsx'
+import { ModelChip } from './ModelChip.tsx'
 import { chatViewVars, readChatView, saveChatView, type ChatView } from './chatview.ts'
 import { Onboarding } from './Onboarding.tsx'
 import { Markdown } from './ui/Markdown.tsx'
@@ -590,6 +591,7 @@ export function Companion({
           <button type="button" onClick={startNewChat} className="icon-btn shrink-0" aria-label="New chat" title="New chat: start fresh (this one stays in Earlier chats)" disabled={ownerLocked || replyId !== null}>
             <SquarePen className="size-4" aria-hidden />
           </button>
+          <ModelChip disabled={ownerLocked} />
           <ChatMenu view={chatView} onView={changeView} onChats={() => setChatsOpen(true)} onControls={onOpenControls} onSetup={onOpenSetup} locked={ownerLocked} />
         </div>
         <ToggleGroup.Root
