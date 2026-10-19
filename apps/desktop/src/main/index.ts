@@ -50,6 +50,7 @@ import { PresenceWidget } from './presence.ts'
 import { GlassPanel } from './glass.ts'
 import { SystemService } from './system/service.ts'
 import { SystemMapService } from './system/sysmap.ts'
+import { PcActions } from './system/actions.ts'
 import { PCC, type PcState, type SystemOp } from '../shared/system.ts'
 import { describeEntry, searchMap } from '../shared/sysmap.ts'
 import { PRS, WIDGET_WHEN, type WidgetWhen } from '../shared/presence.ts'
@@ -295,9 +296,27 @@ const sysmap = new SystemMapService({
 const pcState = (): PcState => ({ status: pcSystem.current, changes: pcSystem.changes, map: sysmap.view() })
 const publishPc = () => toRenderer(PCC.changed, pcState())
 
-/** Atlas's PC requests: status, Settings pages, finding things in the map. */
+const pcActions = new PcActions({ map: () => sysmap.map, foreground: () => pcSystem.foreground() })
+
+/** Atlas's PC requests: status, Settings pages, finding, opening and making things. */
 const pcOp = async (op: SystemOp): Promise<string> => {
-  if (op.kind !== 'find') return pcSystem.handle(op)
+  switch (op.kind) {
+    case 'open':
+      return pcActions.open(op.target, op.with, op.prompt)
+    case 'launch':
+      return pcActions.launch(op.target)
+    case 'foreground':
+      return pcActions.foreground()
+    case 'folder':
+      return pcActions.folder(op.where, op.name)
+    case 'document':
+      return pcActions.document(op.where, op.name, op.markdown, op.open)
+    case 'sheet':
+      return pcActions.sheet(op.where, op.name, op.sheets, op.open)
+    case 'status':
+    case 'settings':
+      return pcSystem.handle(op)
+  }
   if (!sysmap.enabled) return 'The system map is off. The owner can turn it on in Controls › This PC; until then only the folders, apps and projects they picked are known.'
   if (sysmap.view().building && !sysmap.map.builtAt) return 'The system map is still being built; try again in a minute.'
   const found = searchMap(sysmap.map.entries, op.query, op.mapKind)

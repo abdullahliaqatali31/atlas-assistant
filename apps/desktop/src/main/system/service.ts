@@ -175,6 +175,11 @@ export class SystemService {
     return this.worker.request<{ name: string; id: string }[] | { name: string; id: string } | null>('apps').then(r => (Array.isArray(r) ? r : r ? [r] : []))
   }
 
+  /** The window in front: its title and program ("this project" is usually in the title). */
+  foreground(): Promise<{ title: string; process: string }> {
+    return this.worker.request<{ title: string; process: string }>('foreground', 10_000)
+  }
+
   /** The runtime's PC requests. */
   async handle(op: SystemOp): Promise<string> {
     switch (op.kind) {

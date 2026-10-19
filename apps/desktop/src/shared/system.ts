@@ -1,3 +1,4 @@
+import type { OpenWith, SheetSpec } from './pcactions.ts'
 import type { MapKind } from './sysmap.ts'
 
 /**
@@ -195,7 +196,19 @@ export const SETTINGS_PAGES = {
 export type SettingsPage = keyof typeof SETTINGS_PAGES
 
 /** PC actions the runtime asks main for (grows with the system map and Full control). */
-export type SystemOp = { kind: 'status' } | { kind: 'settings'; page: SettingsPage } | { kind: 'find'; query: string; mapKind: MapKind | null }
+export type SystemOp =
+  | { kind: 'status' }
+  | { kind: 'settings'; page: SettingsPage }
+  | { kind: 'find'; query: string; mapKind: MapKind | null }
+  /** Open a map entry or a path: in its app, Explorer, VS Code, the Claude app, Claude Code or a terminal. */
+  | { kind: 'open'; target: string; with: OpenWith; prompt: string }
+  /** Start an app from the map (by id or name). */
+  | { kind: 'launch'; target: string }
+  /** The window in front, and the project it shows. */
+  | { kind: 'foreground' }
+  | { kind: 'folder'; where: string; name: string }
+  | { kind: 'document'; where: string; name: string; markdown: string; open: boolean }
+  | { kind: 'sheet'; where: string; name: string; sheets: SheetSpec[]; open: boolean }
 
 /** The This PC tab: live status, the system map's state. */
 export interface PcState {

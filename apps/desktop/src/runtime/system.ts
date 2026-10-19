@@ -7,6 +7,7 @@
 import type { Rule } from '@assistant/policy'
 import type { RuntimeTool } from '@assistant/runtime'
 
+import { OPEN_WITH, parseSheets, type OpenWith } from '../shared/pcactions.ts'
 import { describeSystem, SETTINGS_PAGES, type SettingsPage, type SystemChange, type SystemOp, type SystemSnapshot } from '../shared/system.ts'
 
 /** Changes stay in Atlas's context this long. */
@@ -15,6 +16,9 @@ const RECENT_MS = 20 * 60_000
 export const SYSTEM_RULES: Rule[] = [
   { id: 'default-system_status', tool: 'system_status', actionClass: 'observe', effect: 'allow' },
   { id: 'default-system_find', tool: 'system_find', actionClass: 'observe', effect: 'allow' },
+  { id: 'default-system_foreground', tool: 'system_foreground', actionClass: 'observe', effect: 'allow' },
+  // Opening, starting and making things on the PC: the owner says yes each time, unless Full control is on.
+  ...['open_item', 'launch_app', 'make_folder', 'make_document', 'make_sheet'].map((tool): Rule => ({ id: `default-${tool}`, tool, actionClass: 'modify', effect: 'ask' })),
   // Opening a Settings page changes nothing by itself.
   { id: 'default-system_settings', tool: 'system_settings', actionClass: 'modify', effect: 'allow' },
 ]
@@ -80,6 +84,78 @@ export class HostSystem {
           if (!query) return Promise.reject(new Error('Say what to find.'))
           const kind = input.kind === 'app' || input.kind === 'project' || input.kind === 'folder' ? input.kind : null
           return this.deps.request({ kind: 'find', query, mapKind: kind }, signal)
+        },
+      },
+      {
+        name: 'system_foreground',
+        description: 'What is in front on the PC right now: the program and its window title, and the system-map project it shows. Use it when the owner says "this project", "this folder", "is wali file".',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        actionClass: 'observe',
+        isUntrusted: true,
+        run: (_i, signal) => this.deps.request({ kind: 'foreground' }, signal),
+      },
+      {
+        name: 'open_item',
+        description:
+          'Open something on the PC. target: an id from system_find, a name, or a full path (a WSL folder as \\\\wsl.localhost\\<distro>\\path). with: default (its own app), explorer (File Explorer), vscode (VS Code; WSL projects open through Remote-WSL), claude (the Claude desktop app Code section, a folder), claude-code (Claude Code in a terminal), terminal (Windows Terminal there). prompt: a first message for Claude when the owner gave one.',
+        inputSchema: { type: 'object', properties: { target: { type: 'string' }, with: { type: 'string', enum: [...OPEN_WITH] }, prompt: { type: 'string' } }, required: ['target'], additionalProperties: false },
+        actionClass: 'modify',
+        isUntrusted: false,
+        run: (input, signal) => {
+          const target = typeof input.target === 'string' ? input.target.trim().slice(0, 400) : ''
+          if (!target) return Promise.reject(new Error('Say what to open.'))
+          const w = OPEN_WITH.includes(input.with as OpenWith) ? (input.with as OpenWith) : 'default'
+          return this.deps.request({ kind: 'open', target, with: w, prompt: typeof input.prompt === 'string' ? input.prompt.slice(0, 2000) : '' }, signal)
+        },
+      },
+      {
+        name: 'launch_app',
+        description: 'Start an app on the PC by name or system_find id ("WhatsApp", "Spotify", "Excel"). Starting only; desktop_* tools act inside apps.',
+        inputSchema: { type: 'object', properties: { app: { type: 'string' } }, required: ['app'], additionalProperties: false },
+        actionClass: 'modify',
+        isUntrusted: false,
+        run: (input, signal) => (typeof input.app === 'string' && input.app.trim() ? this.deps.request({ kind: 'launch', target: input.app.trim().slice(0, 120) }, signal) : Promise.reject(new Error('Which app?'))),
+      },
+      {
+        name: 'make_folder',
+        description: 'Make a folder. where: Desktop, Documents, Downloads, Pictures, OneDrive, a folder or project id from system_find, or a full path. name may be nested ("Clients/2026").',
+        inputSchema: { type: 'object', properties: { where: { type: 'string' }, name: { type: 'string' } }, required: ['where', 'name'], additionalProperties: false },
+        actionClass: 'modify',
+        isUntrusted: false,
+        run: (input, signal) => this.deps.request({ kind: 'folder', where: String(input.where ?? ''), name: String(input.name ?? '') }, signal),
+      },
+      {
+        name: 'make_document',
+        description: 'Write a Word document (.docx) for the owner. where: as make_folder. content: Markdown (# headings, paragraphs, **bold**, - bullets, 1. numbered, | tables |). Never overwrites: a name in use gets (2). open: open it when done.',
+        inputSchema: { type: 'object', properties: { where: { type: 'string' }, name: { type: 'string' }, content: { type: 'string' }, open: { type: 'boolean' } }, required: ['where', 'name', 'content'], additionalProperties: false },
+        actionClass: 'modify',
+        isUntrusted: false,
+        run: (input, signal) => {
+          const markdown = typeof input.content === 'string' ? input.content.slice(0, 200_000) : ''
+          if (!markdown.trim()) return Promise.reject(new Error('Write the content.'))
+          return this.deps.request({ kind: 'document', where: String(input.where ?? ''), name: String(input.name ?? ''), markdown, open: input.open === true }, signal)
+        },
+      },
+      {
+        name: 'make_sheet',
+        description: 'Make an Excel sheet (.xlsx). where: as make_folder. sheets: [{name, columns: [..], rows: [[..], ..], totals: true to add a total row}]. Numbers as numbers. Never overwrites. open: open it when done.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            where: { type: 'string' },
+            name: { type: 'string' },
+            sheets: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, columns: { type: 'array', items: { type: 'string' } }, rows: { type: 'array', items: { type: 'array' } }, totals: { type: 'boolean' } }, required: ['columns', 'rows'] } },
+            open: { type: 'boolean' },
+          },
+          required: ['where', 'name', 'sheets'],
+          additionalProperties: false,
+        },
+        actionClass: 'modify',
+        isUntrusted: false,
+        run: (input, signal) => {
+          const sheets = parseSheets(input.sheets)
+          if (typeof sheets === 'string') return Promise.reject(new Error(sheets))
+          return this.deps.request({ kind: 'sheet', where: String(input.where ?? ''), name: String(input.name ?? ''), sheets, open: input.open === true }, signal)
         },
       },
       {

@@ -60,6 +60,25 @@ function Get-Battery {
   @{ percent = [int]$b.EstimatedChargeRemaining; status = [int]$b.BatteryStatus }
 }
 
+Add-Type @'
+using System; using System.Runtime.InteropServices; using System.Text;
+public static class AtlasFg {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+}
+'@
+
+function Get-Foreground {
+  $h = [AtlasFg]::GetForegroundWindow()
+  $sb = New-Object System.Text.StringBuilder 512
+  [void][AtlasFg]::GetWindowText($h, $sb, 512)
+  $procId = 0
+  [void][AtlasFg]::GetWindowThreadProcessId($h, [ref]$procId)
+  $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
+  @{ title = $sb.ToString(); process = if ($p) { $p.ProcessName } else { '' } }
+}
+
 function Get-Apps {
   @(Get-StartApps | ForEach-Object { @{ name = $_.Name; id = $_.AppID } })
 }
@@ -76,6 +95,7 @@ function Run($cmd) {
       $r
     }
     'apps' { Get-Apps }
+    'foreground' { Get-Foreground }
     default { throw "Unknown command $cmd" }
   }
 }
