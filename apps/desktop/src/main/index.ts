@@ -4,7 +4,8 @@
  * runtime keeps running; Quit from the tray stops everything.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { join, dirname } from 'node:path'
 
 import { isLlmProvider } from '@assistant/providers/llm-presets'
 import { app, BrowserWindow, dialog, protocol, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, session, shell, Tray, type IpcMainInvokeEvent } from 'electron'
@@ -56,7 +57,9 @@ import { osCredentialStore } from '@assistant/runtime'
 import { PWC } from '../shared/powerup.ts'
 import { SystemMapService } from './system/sysmap.ts'
 import { PcActions } from './system/actions.ts'
-import { PCC, type PcState, type SystemOp } from '../shared/system.ts'
+import { PCC, searchWords, type PcState, type SystemOp } from '../shared/system.ts'
+import { isProtectedPath } from '../shared/sysmap.ts'
+import type { GlassFile } from '../shared/glass.ts'
 import { describeEntry, searchMap } from '../shared/sysmap.ts'
 import { PRS, WIDGET_WHEN, type WidgetWhen } from '../shared/presence.ts'
 
@@ -327,6 +330,43 @@ const pcOp = async (op: SystemOp): Promise<string> => {
       return pcActions.document(op.where, op.name, op.markdown, op.open)
     case 'sheet':
       return pcActions.sheet(op.where, op.name, op.sheets, op.open)
+    case 'search': {
+      const words = searchWords(op.query)
+      if (!words.length) throw new Error('Say what to look for (a name or words inside).')
+      const since = op.days ? new Date(Date.now() - op.days * 86_400_000).toISOString().slice(0, 10) : null
+      let rows: Awaited<ReturnType<typeof pcSystem.search>>
+      try {
+        rows = await pcSystem.search(words, op.fileKind, since)
+      } catch (e) {
+        throw new Error(`Windows search did not answer (${e instanceof Error ? e.message : String(e)}). Is the Windows Search service on?`)
+      }
+      const excluded = sysmap.view().excluded.map(x => x.toLowerCase())
+      const found = rows
+        .filter(r => r.path && !isProtectedPath(r.path, homedir()) && !excluded.some(x => r.path.toLowerCase().startsWith(x)) && !/\\(node_modules|\.git|\$recycle\.bin)\\/i.test(r.path))
+        // Names that say it come before files that only mention it inside; newest first within each.
+        .map(r => ({ r, named: words.filter(w => r.name.toLowerCase().includes(w)).length }))
+        .sort((a, b) => b.named - a.named || (b.r.modified > a.r.modified ? 1 : b.r.modified < a.r.modified ? -1 : 0))
+        .map(x => x.r)
+        .slice(0, 20)
+      if (!found.length) return `Nothing on this PC matches "${op.query}"${op.fileKind ? ` (${op.fileKind})` : ''}${op.days ? ` from the last ${op.days} days` : ''}.`
+      if (op.show) {
+        const items: GlassFile[] = await Promise.all(
+          found.slice(0, 14).map(async (r, i) => {
+            let thumb: string | null = null
+            if (i < 10)
+              try {
+                const img = await Promise.race([nativeImage.createThumbnailFromPath(r.path, { width: 160, height: 160 }), new Promise<null>(res => setTimeout(() => res(null), 2_500))])
+                thumb = img && !img.isEmpty() ? img.toDataURL() : null
+              } catch {
+                // No preview for this one.
+              }
+            return { path: r.path, name: r.name, folder: dirname(r.path), modified: r.modified ? Date.parse(r.modified) : null, size: r.size || 0, kind: r.kind, thumb }
+          }),
+        )
+        glass.present({ kind: 'files', title: op.query, items })
+      }
+      return [`Found on this PC${op.show ? ' (on the glass panel)' : ''}:`, ...found.map((r, i) => `${i + 1}. ${r.name} — ${dirname(r.path)}${r.modified ? ` — ${r.modified.slice(0, 10)}` : ''}${r.kind ? ` — ${r.kind}` : ''}`), 'Open one with open_item and its full path.'].join('\n')
+    }
     case 'full-control':
       // The runtime asked the owner first (turning on is never automatic); the owner check still applies here.
       if (op.on && identity.locked) throw new Error('The owner check is on: confirm it is you first.')

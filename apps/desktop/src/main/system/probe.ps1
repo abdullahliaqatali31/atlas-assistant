@@ -83,7 +83,39 @@ function Get-Apps {
   @(Get-StartApps | ForEach-Object { @{ name = $_.Name; id = $_.AppID } })
 }
 
-function Run($cmd) {
+# The Windows Search index: every word must match the file name or the text inside. Words are
+# letters, digits and a few marks only (checked again in Node), so nothing reaches the SQL unescaped.
+function Search-Index($arg) {
+  $words = @($arg.words | Where-Object { $_ -match '^[\p{L}\p{N}._-]{1,40}$' })
+  if ($words.Count -eq 0) { return @() }
+  $where = ($words | ForEach-Object { "(System.FileName LIKE '%$_%' OR CONTAINS(*, '`"$_*`"'))" }) -join ' AND '
+  if ($arg.kind -and $arg.kind -match '^[a-z]+$') { $where += " AND System.Kind = '$($arg.kind)'" }
+  if ($arg.since -and $arg.since -match '^\d{4}-\d{2}-\d{2}$') { $where += " AND System.DateModified >= '$($arg.since)'" }
+  $conn = New-Object -ComObject ADODB.Connection
+  $rs = New-Object -ComObject ADODB.Recordset
+  $conn.Open("Provider=Search.CollatorDSO;Extended Properties='Application=Windows';")
+  try {
+    $rs.Open("SELECT TOP 80 System.ItemPathDisplay, System.ItemName, System.DateModified, System.Size, System.Kind FROM SystemIndex WHERE $where ORDER BY System.DateModified DESC", $conn)
+    $out = @()
+    while (-not $rs.EOF) {
+      $modified = $rs.Fields.Item('System.DateModified').Value
+      $out += @{
+        path = [string]$rs.Fields.Item('System.ItemPathDisplay').Value
+        name = [string]$rs.Fields.Item('System.ItemName').Value
+        modified = if ($modified) { ([DateTime]$modified).ToUniversalTime().ToString('o') } else { '' }
+        size = [double]($rs.Fields.Item('System.Size').Value -as [double])
+        kind = (@($rs.Fields.Item('System.Kind').Value) -join '/')
+      }
+      $rs.MoveNext()
+    }
+    $out
+  } finally {
+    if ($rs.State -ne 0) { $rs.Close() }
+    $conn.Close()
+  }
+}
+
+function Run($cmd, $arg) {
   switch ($cmd) {
     'status' {
       $r = @{}
@@ -96,6 +128,7 @@ function Run($cmd) {
     }
     'apps' { Get-Apps }
     'foreground' { Get-Foreground }
+    'search' { Search-Index $arg }
     default { throw "Unknown command $cmd" }
   }
 }
@@ -108,7 +141,7 @@ while ($true) {
   try {
     $req = $line | ConvertFrom-Json
     $id = $req.id
-    $result = Run $req.cmd
+    $result = Run $req.cmd $req.arg
     [Console]::Out.WriteLine((@{ id = $id; ok = $true; result = $result } | ConvertTo-Json -Depth 6 -Compress))
   } catch {
     [Console]::Out.WriteLine((@{ id = $id; ok = $false; error = "$($_.Exception.Message)" } | ConvertTo-Json -Compress))

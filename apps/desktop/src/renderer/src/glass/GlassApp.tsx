@@ -1,7 +1,7 @@
-import { ArrowLeft, ArrowUpRight, MapPin, Newspaper, StickyNote, X } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, File, FileText, Film, FolderOpen, Image as ImageIcon, MapPin, Music, Newspaper, Search, StickyNote, X } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 
-import type { GlassAlign, GlassView } from '../../../shared/glass.ts'
+import type { GlassAlign, GlassFile, GlassView } from '../../../shared/glass.ts'
 import { CATEGORY_LABEL, type Headline } from '../../../shared/news.ts'
 import { Markdown } from '../ui/Markdown.tsx'
 import { BASE_URL } from '../world/styles.ts'
@@ -23,7 +23,7 @@ const ago = (t: number | null) => {
   return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`
 }
 
-const ICON = { news: Newspaper, story: Newspaper, map: MapPin, note: StickyNote }
+const ICON = { news: Newspaper, story: Newspaper, map: MapPin, note: StickyNote, files: Search }
 
 /** Fades and lifts in, one after another. */
 const Rise = ({ i, children, className = '' }: { i: number; children: ReactNode; className?: string }) => (
@@ -111,6 +111,8 @@ export function GlassApp() {
               <NewsList items={view.items} />
             ) : view.kind === 'story' ? (
               <Story item={view.item} />
+            ) : view.kind === 'files' ? (
+              <FileList items={view.items} />
             ) : (
               <Rise i={1}>
                 <div data-solid className={`rounded-2xl p-4 text-sm leading-relaxed ${SMOKE}`}>
@@ -219,5 +221,47 @@ function Story({ item }: { item: Headline }) {
         </div>
       </Rise>
     </article>
+  )
+}
+
+const KIND_ICON = (k: string) => (/picture/.test(k) ? ImageIcon : /video/.test(k) ? Film : /music/.test(k) ? Music : /folder/.test(k) ? FolderOpen : /document|text/.test(k) ? FileText : File)
+
+const size = (b: number) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : b >= 1e3 ? `${Math.round(b / 1e3)} KB` : b ? `${b} B` : '')
+
+/** What the courier brought: Windows' own thumbnails, where it lives, one click to open or show in its folder. */
+function FileList({ items }: { items: GlassFile[] }) {
+  return (
+    <ol className="space-y-2.5 p-0.5">
+      {items.map((f, i) => {
+        const Icon = KIND_ICON(f.kind)
+        return (
+          <li key={f.path}>
+            <Rise i={i + 1}>
+              <div data-solid className={`lively group flex items-center gap-3 rounded-2xl p-2 ${SMOKE}`}>
+                <button type="button" onClick={() => void window.glass.openFile(f.path)} className="shrink-0" title="Open">
+                  {f.thumb ? (
+                    <img src={f.thumb} alt="" className="size-16 rounded-xl bg-black/30 object-cover" />
+                  ) : (
+                    <span className="grid size-16 place-items-center rounded-xl bg-white/8 text-accent">
+                      <Icon className="size-6" aria-hidden />
+                    </span>
+                  )}
+                </button>
+                <button type="button" onClick={() => void window.glass.openFile(f.path)} className="min-w-0 flex-1 text-left" title={f.path}>
+                  <span className="line-clamp-2 text-[13px] font-medium leading-snug text-white group-hover:text-accent" dir="auto">
+                    {f.name}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[11px] text-white/55">{f.folder}</span>
+                  <span className="block text-[10px] text-white/45">{[f.modified ? new Date(f.modified).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : '', size(f.size), f.kind].filter(Boolean).join(' · ')}</span>
+                </button>
+                <button type="button" onClick={() => void window.glass.revealFile(f.path)} className="grid size-8 shrink-0 place-items-center rounded-full text-white/60 hover:bg-white/10 hover:text-white" title="Show in its folder" aria-label="Show in its folder">
+                  <FolderOpen className="size-4" aria-hidden />
+                </button>
+              </div>
+            </Rise>
+          </li>
+        )
+      })}
+    </ol>
   )
 }

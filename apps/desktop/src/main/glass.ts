@@ -76,6 +76,11 @@ export class GlassPanel {
     return describeGlass(view)
   }
 
+  /** Main puts a view up itself (search results). */
+  present(view: GlassView) {
+    this.show(view)
+  }
+
   private show(view: GlassView) {
     this.view = view
     const win = this.ensure()
@@ -162,6 +167,18 @@ export class GlassPanel {
     on(GLS.story, n => {
       if (typeof n !== 'number' || !this.list[n - 1]) throw new Error('No such story.')
       this.show({ kind: 'story', item: this.list[n - 1]!, n, of: this.list.length })
+    })
+    // Only files this panel is showing can be opened from it.
+    const shown = (p: unknown) => typeof p === 'string' && this.view?.kind === 'files' && this.view.items.some(i => i.path === p)
+    on(GLS.openFile, p => {
+      if (!shown(p)) throw new Error('Not a file on the panel.')
+      return shell.openPath(p as string).then(err => {
+        if (err) throw new Error(err)
+      })
+    })
+    on(GLS.revealFile, p => {
+      if (!shown(p)) throw new Error('Not a file on the panel.')
+      shell.showItemInFolder(p as string)
     })
     on(GLS.openLink, url => {
       if (typeof url !== 'string' || !/^https:\/\/[^\s]+$/.test(url)) throw new Error('Only https links open.')

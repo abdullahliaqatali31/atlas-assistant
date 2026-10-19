@@ -25,6 +25,19 @@ export type GlassView =
   | { kind: 'story'; item: Headline; n: number | null; of: number | null }
   | { kind: 'map'; title: string; lat: number; lon: number; zoom: number; pins: GlassPin[] }
   | { kind: 'note'; title: string; text: string }
+  | { kind: 'files'; title: string; items: GlassFile[] }
+
+/** A file found on the PC, as the glass panel shows it. */
+export interface GlassFile {
+  path: string
+  name: string
+  folder: string
+  modified: number | null
+  size: number
+  kind: string
+  /** A Windows thumbnail (data URL) for the first few. */
+  thumb: string | null
+}
 
 /** What the model asks for. */
 export type GlassOp =
@@ -108,6 +121,8 @@ export const describeGlass = (v: GlassView | null): string => {
       return `Showing story${v.n ? ` ${v.n}` : ''} in full on the glass panel: ${v.item.title} (${v.item.source}). ${v.item.summary}`
     case 'map':
       return `Showing a map of ${v.title || `${v.lat.toFixed(2)}, ${v.lon.toFixed(2)}`} on the glass panel${v.pins.length > 1 ? ` with ${v.pins.length} pins` : ''}.`
+    case 'files':
+      return `Showing ${v.items.length} file${v.items.length === 1 ? '' : 's'} on the glass panel: ${v.title}.`
     case 'note':
       return `Showing the note${v.title ? ` "${v.title}"` : ''} on the glass panel.`
   }
@@ -120,6 +135,7 @@ export const GLASS_SIZE: Record<GlassView['kind'], { width: number; height: numb
   story: { width: 492, height: 680 },
   map: { width: 592, height: 472 },
   note: { width: 432, height: 372 },
+  files: { width: 452, height: 620 },
 }
 
 type Rect = { x: number; y: number; width: number; height: number }
@@ -168,6 +184,9 @@ export const GLS = {
   back: 'glass:back',
   story: 'glass:story',
   openLink: 'glass:open-link',
+  /** Panel → main: open or reveal a file the panel is showing. */
+  openFile: 'glass:open-file',
+  revealFile: 'glass:reveal-file',
   /** Panel → main: the pointer is over something solid (true) or over see-through space (false). */
   hit: 'glass:hit',
   /** Panel → main: the World map's live layers, for the panel's map. */
@@ -189,6 +208,8 @@ export interface GlassBridge {
   /** Open one story from the list. */
   story(n: number): Promise<void>
   openLink(url: string): Promise<void>
+  openFile(path: string): Promise<void>
+  revealFile(path: string): Promise<void>
   /** Clicks reach the panel only over its cards; elsewhere they fall through to the desktop. */
   hit(solid: boolean): void
   /** The World map's live data, the same as the app's own map uses. */

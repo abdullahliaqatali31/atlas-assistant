@@ -85,7 +85,7 @@ export class PsWorker {
     return this.starting
   }
 
-  async request<T>(cmd: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  async request<T>(cmd: string, timeoutMs = REQUEST_TIMEOUT_MS, arg?: unknown): Promise<T> {
     await this.start()
     const child = this.child
     if (!child) throw new Error(`${this.name} is not running.`)
@@ -96,7 +96,7 @@ export class PsWorker {
         reject(new Error(`${this.name} did not answer in time.`))
       }, timeoutMs)
       this.pending.set(id, { resolve: v => resolve(v as T), reject, timer })
-      child.stdin.write(`${JSON.stringify({ id, cmd })}\n`)
+      child.stdin.write(`${JSON.stringify({ id, cmd, arg })}\n`)
     })
   }
 
@@ -108,6 +108,8 @@ export class PsWorker {
 
 export class SystemService {
   private readonly worker: PsWorker
+  /** Search and "what is in front" answer at once: their own process, never queued behind a status reading. */
+  private readonly quick: PsWorker
   private snapshot: SystemSnapshot | null = null
   private recent: SystemChange[] = []
   private timer: NodeJS.Timeout | null = null
@@ -124,6 +126,7 @@ export class SystemService {
     },
   ) {
     this.worker = new PsWorker(deps.dir, 'system-probe', PROBE_PS1, deps.log)
+    this.quick = new PsWorker(deps.dir, 'system-quick', PROBE_PS1, deps.log)
   }
 
   get current() {
@@ -175,9 +178,15 @@ export class SystemService {
     return this.worker.request<{ name: string; id: string }[] | { name: string; id: string } | null>('apps').then(r => (Array.isArray(r) ? r : r ? [r] : []))
   }
 
+  /** The Windows Search index (file names and text inside documents), newest first. */
+  async search(words: string[], kind: string | null, since: string | null): Promise<{ path: string; name: string; modified: string; size: number; kind: string }[]> {
+    const r = await this.quick.request<unknown>('search', 30_000, { words, kind, since })
+    return (Array.isArray(r) ? r : r ? [r] : []) as { path: string; name: string; modified: string; size: number; kind: string }[]
+  }
+
   /** The window in front: its title and program ("this project" is usually in the title). */
   foreground(): Promise<{ title: string; process: string }> {
-    return this.worker.request<{ title: string; process: string }>('foreground', 10_000)
+    return this.quick.request<{ title: string; process: string }>('foreground', 10_000)
   }
 
   /** The runtime's PC requests. */
@@ -201,5 +210,6 @@ export class SystemService {
     if (this.timer) clearInterval(this.timer)
     if (this.onlineTimer) clearInterval(this.onlineTimer)
     this.worker.stop()
+    this.quick.stop()
   }
 }

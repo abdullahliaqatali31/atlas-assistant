@@ -8,7 +8,7 @@ import type { Rule } from '@assistant/policy'
 import type { RuntimeTool } from '@assistant/runtime'
 
 import { OPEN_WITH, parseSheets, type OpenWith } from '../shared/pcactions.ts'
-import { describeSystem, SETTINGS_PAGES, type SettingsPage, type SystemChange, type SystemOp, type SystemSnapshot } from '../shared/system.ts'
+import { describeSystem, FILE_KINDS, SETTINGS_PAGES, type FileKind, type SettingsPage, type SystemChange, type SystemOp, type SystemSnapshot } from '../shared/system.ts'
 
 /** Changes stay in Atlas's context this long. */
 const RECENT_MS = 20 * 60_000
@@ -16,6 +16,7 @@ const RECENT_MS = 20 * 60_000
 export const SYSTEM_RULES: Rule[] = [
   { id: 'default-system_status', tool: 'system_status', actionClass: 'observe', effect: 'allow' },
   { id: 'default-system_find', tool: 'system_find', actionClass: 'observe', effect: 'allow' },
+  { id: 'default-pc_search', tool: 'pc_search', actionClass: 'observe', effect: 'allow' },
   { id: 'default-system_foreground', tool: 'system_foreground', actionClass: 'observe', effect: 'allow' },
   // Turning Full control on is the owner's yes every time; turning it off never waits.
   { id: 'default-full_control', tool: 'full_control', actionClass: 'modify', effect: 'ask' },
@@ -100,6 +101,27 @@ export class HostSystem {
           if (!query) return Promise.reject(new Error('Say what to find.'))
           const kind = input.kind === 'app' || input.kind === 'project' || input.kind === 'folder' ? input.kind : null
           return this.deps.request({ kind: 'find', query, mapKind: kind }, signal)
+        },
+      },
+      {
+        name: 'pc_search',
+        description:
+          'Bring the owner anything from this PC: search the whole computer through the Windows index, by file name and by the words inside documents and emails ("the invoice from Ali", "last week\u2019s photos of the car", "the Karachi report"). kind narrows it (document, picture, video, music, folder, program, email); days limits to recent changes. show: true puts the results on the glass panel with previews so the owner can pick; open one with open_item (full path). Names only come back to you; read a document with files_read when asked.',
+        inputSchema: {
+          type: 'object',
+          properties: { query: { type: 'string' }, kind: { type: 'string', enum: [...FILE_KINDS] }, days: { type: 'integer', minimum: 1, maximum: 3650 }, show: { type: 'boolean' } },
+          required: ['query'],
+          additionalProperties: false,
+        },
+        actionClass: 'observe',
+        // File names are other people's words too (downloads, attachments).
+        isUntrusted: true,
+        run: (input, signal) => {
+          const query = typeof input.query === 'string' ? input.query.trim().slice(0, 160) : ''
+          if (!query) return Promise.reject(new Error('Say what to look for.'))
+          const fileKind = FILE_KINDS.includes(input.kind as FileKind) ? (input.kind as FileKind) : null
+          const days = typeof input.days === 'number' && Number.isFinite(input.days) ? Math.round(input.days) : null
+          return this.deps.request({ kind: 'search', query, fileKind, days, show: input.show === true }, signal)
         },
       },
       {

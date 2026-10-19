@@ -13,6 +13,8 @@ const CH: { readonly [K in keyof typeof GLS]: (typeof GLS)[K] } = {
   back: 'glass:back',
   story: 'glass:story',
   openLink: 'glass:open-link',
+  openFile: 'glass:open-file',
+  revealFile: 'glass:reveal-file',
   hit: 'glass:hit',
   world: 'glass:world',
 }
@@ -27,6 +29,8 @@ const bridge: GlassBridge = {
   back: () => ipcRenderer.invoke(CH.back),
   story: n => ipcRenderer.invoke(CH.story, n),
   openLink: url => ipcRenderer.invoke(CH.openLink, url),
+  openFile: path => ipcRenderer.invoke(CH.openFile, path),
+  revealFile: path => ipcRenderer.invoke(CH.revealFile, path),
   hit: solid => ipcRenderer.send(CH.hit, solid === true),
   world: ((kind: string, box?: unknown) => ipcRenderer.invoke(CH.world, kind, box)) as GlassBridge['world'],
 }

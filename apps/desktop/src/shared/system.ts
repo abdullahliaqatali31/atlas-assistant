@@ -183,6 +183,17 @@ export const describeSystem = (s: SystemSnapshot): string => {
 }
 
 /** Windows Settings pages Atlas may open for the owner. */
+export const FILE_KINDS = ['document', 'picture', 'video', 'music', 'folder', 'program', 'email'] as const
+export type FileKind = (typeof FILE_KINDS)[number]
+
+/** Search words the index can take safely: letters, digits, dot, dash, underscore; at most 6. */
+export const searchWords = (query: string) =>
+  query
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}._-]+/u)
+    .filter(w => w.length >= 2 && !['the', 'my', 'a', 'an', 'of', 'file', 'files', 'mera', 'meri', 'wali', 'wala', 'ki', 'ka', 'ke'].includes(w))
+    .slice(0, 6)
+
 export const SETTINGS_PAGES = {
   bluetooth: 'ms-settings:bluetooth',
   wifi: 'ms-settings:network-wifi',
@@ -207,6 +218,8 @@ export type SystemOp =
   | { kind: 'launch'; target: string }
   /** The window in front, and the project it shows. */
   | { kind: 'foreground' }
+  /** Search the whole PC (Windows index: names and text inside), optionally onto the glass panel. */
+  | { kind: 'search'; query: string; fileKind: FileKind | null; days: number | null; show: boolean }
   | { kind: 'folder'; where: string; name: string }
   | { kind: 'document'; where: string; name: string; markdown: string; open: boolean }
   | { kind: 'sheet'; where: string; name: string; sheets: SheetSpec[]; open: boolean }
