@@ -216,7 +216,7 @@ export interface Ship {
 }
 
 export interface ShipsResult {
-  status: 'no-key' | 'off' | 'connecting' | 'live' | 'error'
+  status: 'no-key' | 'off' | 'connecting' | 'reconnecting' | 'live' | 'error'
   ships: Ship[]
   message: string | null
 }

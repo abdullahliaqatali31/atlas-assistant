@@ -883,7 +883,7 @@ export function MapView({
             sats: satsRef.current,
             storyTitle: story?.title ?? null,
             flightNote,
-            shipNote: shipState.status === 'connecting' ? 'Connecting to AISStream… ships appear as they report.' : shipState.status === 'error' && !needsShipKey ? shipState.message : null,
+            shipNote: shipState.status === 'connecting' ? 'Connecting to AISStream… ships appear as they report.' : (shipState.status === 'error' && !needsShipKey) || shipState.status === 'reconnecting' ? shipState.message : null,
             shipKeyForm: needsShipKey ? shipKeyForm('pt-1') : null,
             webcamNote: webcamState.status === 'error' ? webcamState.message : webcamState.status === 'ok' && webcamState.inView ? `${webcamState.inView} worldwide webcams in this view (Windy)` : webcamState.message,
             webcamKeyForm: webcamState.status === 'no-key' ? webcamKeyForm : null,
@@ -961,6 +961,7 @@ export function MapView({
             ))}
           {layers.flights && flightNote && <p className="pl-6 text-[10px] text-muted">{flightNote}</p>}
           {layers.ships && shipState.status === 'connecting' && <p className="pl-6 text-[10px] text-muted">Connecting to AISStream… ships appear as they report</p>}
+          {layers.ships && shipState.status === 'reconnecting' && <p className="pl-6 text-[10px] text-muted">{shipState.message}</p>}
           {layers.ships && needsShipKey && shipKeyForm('pl-6 pt-1')}
           {layers.ships && shipState.status === 'error' && !/key/i.test(shipState.message ?? '') && <p className="pl-6 text-[10px] text-warm">{shipState.message}</p>}
           {layers.cameras && <p className="pl-6 text-[10px] leading-snug text-muted">Official open feeds only: {CAMERA_COVERAGE}</p>}

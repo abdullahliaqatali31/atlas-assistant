@@ -107,6 +107,68 @@ describe('ShipFeed', () => {
     expect(ws.readyState).toBe(3)
   })
 
+  it('reconnects after a drop, keeping the last positions, with growing waits', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(Date.parse('2026-10-18T08:35:00Z'))
+    const secrets = store()
+    secrets.set('AISSTREAM_API_KEY', KEY)
+    const feed = new ShipFeed({ secrets: secrets as never, log: () => {}, WebSocketImpl: FakeSocket as never })
+    const box = { south: 22, west: 60, north: 27, east: 70 }
+    feed.view(box)
+    const first = FakeSocket.last!
+    first.open()
+    first.emit('message', JSON.stringify(POSITION))
+    await Promise.resolve()
+    // The network blips: an error, then a close.
+    first.emit('error')
+    first.emit('close')
+    let r = feed.view(box)
+    expect(r.status).toBe('reconnecting')
+    expect(r.ships).toHaveLength(1)
+    expect(r.message).toMatch(/last positions/)
+    expect(FakeSocket.last).toBe(first)
+    vi.advanceTimersByTime(2_000)
+    const second = FakeSocket.last!
+    expect(second).not.toBe(first)
+    second.open()
+    expect(JSON.parse(second.sent[0]!).BoundingBoxes[0][0][0]).toBeLessThan(22)
+    // It drops again at once: the next wait is longer.
+    second.emit('close')
+    vi.advanceTimersByTime(2_000)
+    expect(FakeSocket.last).toBe(second)
+    vi.advanceTimersByTime(3_000)
+    expect(FakeSocket.last).not.toBe(second)
+    FakeSocket.last!.open()
+    FakeSocket.last!.emit('message', JSON.stringify(POSITION))
+    await Promise.resolve()
+    r = feed.view(box)
+    expect(r).toMatchObject({ status: 'live', message: null })
+  })
+
+  it('replaces a socket that goes quiet, and retries on errors other than the key', async () => {
+    vi.useFakeTimers()
+    const secrets = store()
+    secrets.set('AISSTREAM_API_KEY', KEY)
+    const logs: string[] = []
+    const feed = new ShipFeed({ secrets: secrets as never, log: (_l, m) => logs.push(m), WebSocketImpl: FakeSocket as never })
+    const box = { south: 22, west: 60, north: 27, east: 70 }
+    feed.view(box)
+    const quiet = FakeSocket.last!
+    quiet.open()
+    vi.advanceTimersByTime(30_000)
+    feed.view(box)
+    vi.advanceTimersByTime(16_000)
+    expect(quiet.readyState).toBe(3)
+    vi.advanceTimersByTime(2_000)
+    const next = FakeSocket.last!
+    expect(next).not.toBe(quiet)
+    next.open()
+    next.emit('message', JSON.stringify({ error: 'Concurrent connections per user exceeded' }))
+    await Promise.resolve()
+    expect(feed.view(box).status).toBe('reconnecting')
+    expect(logs.join(' ')).toMatch(/Concurrent connections/)
+  })
+
   it('reports a rejected key without repeating it, and stops trying', () => {
     const secrets = store()
     secrets.set('AISSTREAM_API_KEY', KEY)
