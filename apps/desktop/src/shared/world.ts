@@ -355,19 +355,33 @@ export interface Camera {
   player?: { url: string; kind: 'live' | 'timelapse' } | undefined
   /** The camera's own page. */
   link?: string | undefined
+  /** Which way it looks, degrees from north, where the agency says (for its view cone in 3D). */
+  heading?: number | undefined
 }
 
 /** Where official public cameras are available without a key. */
-export const CAMERA_COVERAGE = 'London (TfL), California (Caltrans), Finland (Fintraffic), New Zealand (NZTA), Hong Kong (Transport Department), Singapore (LTA)'
+export const CAMERA_COVERAGE = 'London (TfL), California (Caltrans), Washington State (WSDOT), Delaware (DelDOT, live video), British Columbia (DriveBC), Calgary, Toronto, Finland (Fintraffic), Norway (Statens vegvesen), New South Wales, New Zealand (NZTA), Hong Kong (Transport Department), Singapore (LTA)'
+
+/** A compass word from a camera feed ("N", "SW", "NB", "Northbound") as degrees; undefined when it is not one. */
+export const compassDegrees = (v: unknown): number | undefined => {
+  if (typeof v !== 'string') return undefined
+  const w = v.trim().toUpperCase().replace(/BOUND$|B$/, '')
+  const map: Record<string, number> = { N: 0, NORTH: 0, NE: 45, E: 90, EAST: 90, SE: 135, S: 180, SOUTH: 180, SW: 225, W: 270, WEST: 270, NW: 315 }
+  return map[w]
+}
+
+/** Web Mercator metres (EPSG:3857) to degrees. */
+const fromMercator = (x: number, y: number) => ({ lon: (x / 6378137) * (180 / Math.PI), lat: (2 * Math.atan(Math.exp(y / 6378137)) - Math.PI / 2) * (180 / Math.PI) })
 
 /** Each agency's own format into one list. Unknown or broken entries are skipped. */
 const httpsVideo = (v: unknown, kind: 'hls' | 'clip') => (typeof v === 'string' && /^https:\/\/[^\s]+\.(m3u8|mp4)$/.test(v) ? { url: v, kind } : undefined)
 
-export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; finland?: unknown; nz?: unknown; hongKong?: string; singapore?: unknown }): Camera[] => {
+export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; finland?: unknown; nz?: unknown; hongKong?: string; singapore?: unknown; driveBc?: unknown; calgary?: unknown; nsw?: unknown; wsdot?: unknown; toronto?: string; deldot?: unknown; norway?: unknown }): Camera[] => {
   const out: Camera[] = []
   const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN)
   const push = (c: Camera) => {
-    if (Number.isFinite(c.lat) && Number.isFinite(c.lon) && Math.abs(c.lat) <= 90 && Math.abs(c.lon) <= 180 && c.image.startsWith('https://')) out.push(c)
+    // A still frame, or (DelDOT) live video alone.
+    if (Number.isFinite(c.lat) && Number.isFinite(c.lon) && Math.abs(c.lat) <= 90 && Math.abs(c.lon) <= 180 && (c.image.startsWith('https://') || (c.image === '' && c.video))) out.push(c)
   }
   for (const p of Array.isArray(raw.tfl) ? (raw.tfl as Record<string, unknown>[]) : []) {
     const props = (p.additionalProperties as { key: string; value: string }[] | undefined) ?? []
@@ -405,6 +419,61 @@ export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; f
   for (const c of ((raw.singapore as { items?: { cameras?: Record<string, unknown>[] }[] })?.items?.[0]?.cameras ?? [])) {
     const loc = (c.location as { latitude?: number; longitude?: number } | undefined) ?? {}
     push({ id: `sg:${String(c.camera_id)}`, name: `Singapore traffic camera ${String(c.camera_id)}`, lat: num(loc.latitude), lon: num(loc.longitude), country: 'Singapore', source: 'Land Transport Authority (data.gov.sg)', image: String(c.image ?? '') })
+  }
+  // British Columbia: frames are built from the numeric id on DriveBC's own host.
+  for (const c of Array.isArray(raw.driveBc) ? (raw.driveBc as Record<string, unknown>[]) : []) {
+    const id = c.id
+    const coords = (c.location as { coordinates?: number[] } | undefined)?.coordinates ?? []
+    if (typeof id !== 'number' || c.marked_stale === true || c.is_on === false) continue
+    push({ id: `bc:${id}`, name: [c.name, c.caption].filter(x => typeof x === 'string' && x).join(' · ') || 'British Columbia camera', lat: num(coords[1]), lon: num(coords[0]), country: 'Canada', source: 'DriveBC (Government of British Columbia)', image: `https://www.drivebc.ca/images/${id}.jpg`, heading: compassDegrees(c.orientation) })
+  }
+  // Calgary: listed as http://, served (and pinned) on https://trafficcam.calgary.ca.
+  for (const c of Array.isArray(raw.calgary) ? (raw.calgary as Record<string, unknown>[]) : []) {
+    const url = String((c.camera_url as { url?: string } | undefined)?.url ?? '').replace(/^http:\/\//, 'https://')
+    const coords = (c.point as { coordinates?: number[] } | undefined)?.coordinates ?? []
+    if (!url.startsWith('https://trafficcam.calgary.ca/')) continue
+    push({ id: `yyc:${url.replace(/^.*\//, '').replace(/\.jpg$/, '')}`, name: String(c.camera_location ?? 'Calgary camera'), lat: num(coords[1]), lon: num(coords[0]), country: 'Canada', source: 'City of Calgary (Open Calgary)', image: url })
+  }
+  // New South Wales (Live Traffic NSW).
+  for (const f of ((raw.nsw as { features?: Record<string, unknown>[] })?.features ?? [])) {
+    const p = (f.properties as Record<string, unknown> | undefined) ?? {}
+    const coords = (f.geometry as { coordinates?: number[] } | undefined)?.coordinates ?? []
+    push({ id: `nsw:${String(f.id)}`, name: String(p.title ?? 'NSW camera'), lat: num(coords[1]), lon: num(coords[0]), country: 'Australia', source: 'Transport for NSW (Live Traffic)', image: String(p.href ?? ''), heading: compassDegrees(p.direction) })
+  }
+  // Washington State: an ArcGIS layer in Web Mercator.
+  for (const f of ((raw.wsdot as { features?: { attributes?: Record<string, unknown>; geometry?: { x?: number; y?: number } }[] })?.features ?? [])) {
+    const a = f.attributes ?? {}
+    const g = f.geometry ?? {}
+    if (typeof g.x !== 'number' || typeof g.y !== 'number') continue
+    const at = fromMercator(g.x, g.y)
+    push({ id: `wa:${String(a.CameraID)}`, name: String(a.CameraTitle ?? 'Washington camera'), lat: at.lat, lon: at.lon, country: 'United States', source: 'Washington State DOT', image: String(a.ImageURL ?? ''), heading: compassDegrees(a.CompassDirection) })
+  }
+  // Toronto: a JSONP list; frames are built from the digits-only camera number.
+  const toronto = /\(([\s\S]*)\)\s*;?\s*$/.exec(raw.toronto ?? '')?.[1]
+  if (toronto)
+    try {
+      for (const c of ((JSON.parse(toronto) as { Data?: Record<string, unknown>[] }).Data ?? [])) {
+        const n = String(c.Number ?? '')
+        if (!/^\d{1,6}$/.test(n)) continue
+        push({ id: `yyz:${n}`, name: String(c.Name ?? 'Toronto camera'), lat: num(c.Latitude), lon: num(c.Longitude), country: 'Canada', source: 'City of Toronto (Open Data)', image: `https://opendata.toronto.ca/transportation/tmc/rescucameraimages/CameraImages/loc${n}.jpg` })
+      }
+    } catch {
+      // A broken list: no Toronto cameras this time.
+    }
+  // Delaware: live HLS video only, from DelDOT's own video host.
+  for (const c of ((raw.deldot as { videoCameras?: Record<string, unknown>[] })?.videoCameras ?? [])) {
+    const hls = String((c.urls as Record<string, unknown> | undefined)?.m3u8s ?? '')
+    if (c.enabled === false || !hls.startsWith('https://video.deldot.gov')) continue
+    push({ id: `de:${String(c.id)}`, name: String(c.title ?? 'Delaware camera'), lat: num(c.lat), lon: num(c.lon), country: 'United States', source: 'Delaware DOT', image: '', video: httpsVideo(hls, 'hls') })
+  }
+  // Norway: still frames for all, HLS where the record says so.
+  for (const f of ((raw.norway as { features?: Record<string, unknown>[] })?.features ?? [])) {
+    const p = (f.properties as Record<string, unknown> | undefined) ?? {}
+    const coords = (f.geometry as { coordinates?: number[] } | undefined)?.coordinates ?? []
+    const id = String(p.cameraId ?? '')
+    const still = String(p.stillImageUrl ?? '')
+    if (!/^[\w-]{1,40}$/.test(id) || !still.startsWith('https://kamera.atlas.vegvesen.no/')) continue
+    push({ id: `no:${id}`, name: [p.roadNumber, p.orientationDescription].filter(x => typeof x === 'string' && x).join(' · ') || 'Norway road camera', lat: num(coords[1]), lon: num(coords[0]), country: 'Norway', source: 'Statens vegvesen (NLOD)', image: still, video: p.videoEncodingStandard === 'hls' ? httpsVideo(`https://kamera.vegvesen.no/public/${id}/manifest.m3u8`, 'hls') : undefined })
   }
   return out
 }

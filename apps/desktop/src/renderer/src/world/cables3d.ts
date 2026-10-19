@@ -28,9 +28,10 @@ export class Cables3D {
     this.byId.clear()
     for (const c of data.cables) {
       this.names.set(c.id, c.name)
-      const material = Cesium.Material.fromType('Color', { color: Cesium.Color.fromCssColorString(c.color).withAlpha(0.85) })
+      // One material per line: Cesium destroys a polyline's material with it (same colours still batch).
+      const color = Cesium.Color.fromCssColorString(c.color).withAlpha(0.85)
       const parts: Cesium.Polyline[] = []
-      for (const line of c.lines) parts.push(this.lines.add({ positions: Cesium.Cartesian3.fromDegreesArray(line.flat()), width: 1.8, material, id: { kind: 'cable', id: c.id } }))
+      for (const line of c.lines) parts.push(this.lines.add({ positions: Cesium.Cartesian3.fromDegreesArray(line.flat()), width: 1.8, material: Cesium.Material.fromType('Color', { color }), id: { kind: 'cable', id: c.id } }))
       this.byId.set(c.id, parts)
     }
     const landing = Cesium.Color.fromCssColorString('#8fffd2')

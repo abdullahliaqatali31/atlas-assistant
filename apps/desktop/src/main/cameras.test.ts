@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { parseCameraSources } from '../shared/world.ts'
+import { compassDegrees, parseCameraSources } from '../shared/world.ts'
 import { CameraDirectory } from './cameras.ts'
 
 describe('public cameras', () => {
@@ -25,6 +25,39 @@ describe('public cameras', () => {
     expect(cams.map(c => c.id)).toEqual(['tfl:JamCams_00002.00865', 'ct:7-1', 'fi:C0150301', 'hk:H429F', 'sg:2701'])
     expect(cams.find(c => c.id === 'fi:C0150301')).toMatchObject({ name: 'kt51 Inkoo', image: 'https://weathercam.digitraffic.fi/C0150301.jpg', country: 'Finland' })
     expect(cams.find(c => c.id === 'ct:7-1')).toMatchObject({ lat: 34.0837, lon: -118.2215, source: 'Caltrans' })
+  })
+
+  it('reads the North American, Australian and Norwegian packs, with headings and pinned image hosts', () => {
+    const cams = parseCameraSources({
+      driveBc: [
+        { id: 1081, name: 'Lantzville - N', caption: 'Highway 19 near McKercher Road', location: { coordinates: [-124.110543, 49.251992] }, orientation: 'N', marked_stale: false },
+        { id: 9, name: 'Stale', location: { coordinates: [-124, 49] }, marked_stale: true },
+      ],
+      calgary: [
+        { camera_url: { url: 'http://trafficcam.calgary.ca/loc86.jpg' }, camera_location: 'Stoney Trail / Deerfoot Trail SE', point: { coordinates: [-113.9766, 50.9007] } },
+        { camera_url: { url: 'http://elsewhere.example/loc1.jpg' }, camera_location: 'Off host', point: { coordinates: [-114, 51] } },
+      ],
+      nsw: { features: [{ id: 'abc', geometry: { coordinates: [151.10533, -34.02977] }, properties: { title: '5 Ways (Miranda)', direction: 'W', href: 'https://webcams.transport.nsw.gov.au/livetraffic-webcams/cameras/5ways.jpg' } }] },
+      wsdot: { features: [{ attributes: { CameraID: 1001, CompassDirection: 'S', CameraTitle: 'I-5 at Interstate Bridge SB', ImageURL: 'https://www.tripcheck.com/RoadCams/cams/a.jpg' }, geometry: { x: -13656007.1, y: 5719738.5 } }] },
+      toronto: 'jsonTMCEarthCamerasCallback({"Data":[{"Number":"8001","Name":"YORK ST & BREMNER BLVD","Latitude":"43.643120","Longitude":"-79.381386"},{"Number":"../x","Name":"Bad","Latitude":"43","Longitude":"-79"}]});',
+      deldot: { videoCameras: [{ id: 'KCAM001', title: 'DE 1 @ MILFORD NECK ROAD', lat: 38.990931, lon: -75.448625, enabled: true, urls: { m3u8s: 'https://video.deldot.gov:443/live/KCAM001.stream/playlist.m3u8' } }, { id: 'X', title: 'Off', lat: 39, lon: -75, enabled: false, urls: { m3u8s: 'https://video.deldot.gov/x.m3u8' } }] },
+      norway: { features: [{ geometry: { coordinates: [5.459189, 61.832706] }, properties: { cameraId: '3000063_1', stillImageUrl: 'https://kamera.atlas.vegvesen.no/api/images/3000063_1', roadNumber: 'F614', orientationDescription: 'Svelgen', videoEncodingStandard: 'hls' } }] },
+    })
+    expect(cams.map(c => c.id)).toEqual(['bc:1081', 'yyc:loc86', 'nsw:abc', 'wa:1001', 'yyz:8001', 'de:KCAM001', 'no:3000063_1'])
+    expect(cams.find(c => c.id === 'bc:1081')).toMatchObject({ image: 'https://www.drivebc.ca/images/1081.jpg', heading: 0 })
+    expect(cams.find(c => c.id === 'yyc:loc86')?.image).toBe('https://trafficcam.calgary.ca/loc86.jpg')
+    expect(cams.find(c => c.id === 'nsw:abc')?.heading).toBe(270)
+    const wa = cams.find(c => c.id === 'wa:1001')!
+    expect(wa.lat).toBeCloseTo(45.62, 1)
+    expect(wa.lon).toBeCloseTo(-122.67, 1)
+    expect(wa.heading).toBe(180)
+    expect(cams.find(c => c.id === 'yyz:8001')?.image).toBe('https://opendata.toronto.ca/transportation/tmc/rescucameraimages/CameraImages/loc8001.jpg')
+    expect(cams.find(c => c.id === 'de:KCAM001')).toMatchObject({ image: '', video: { url: 'https://video.deldot.gov:443/live/KCAM001.stream/playlist.m3u8', kind: 'hls' } })
+    expect(cams.find(c => c.id === 'no:3000063_1')?.video?.url).toBe('https://kamera.vegvesen.no/public/3000063_1/manifest.m3u8')
+  })
+
+  it('reads compass words as degrees', () => {
+    expect([compassDegrees('N'), compassDegrees('se'), compassDegrees('NB'), compassDegrees('Westbound'), compassDegrees('B'), compassDegrees('')]).toEqual([0, 135, 0, 270, undefined, undefined])
   })
 
   it('keeps live video links: Caltrans streams and TfL clips, https only', () => {

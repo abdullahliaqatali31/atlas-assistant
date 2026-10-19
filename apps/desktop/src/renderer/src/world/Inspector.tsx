@@ -126,7 +126,7 @@ function LiveVideo({ url, kind, poster, onFail }: { url: string; kind: string; p
 }
 
 /** A public camera: live video where the agency offers it, else its latest frame (fetched by Atlas, refreshed every 30 s). */
-function CameraDetail({
+export function CameraDetail({
   id,
   source,
   video,

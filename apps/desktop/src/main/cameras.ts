@@ -1,8 +1,11 @@
 /**
  * Public traffic and road-weather cameras for the World map, only from
  * official open feeds that need no key: London (TfL JamCams), California
- * (Caltrans), Finland (Fintraffic Digitraffic), Hong Kong (Transport
- * Department), New Zealand (NZTA) and Singapore (LTA via data.gov.sg). Places without such a feed
+ * (Caltrans), Washington State (WSDOT), Delaware (DelDOT, live video),
+ * British Columbia (DriveBC), Calgary, Toronto, Finland (Fintraffic
+ * Digitraffic), Norway (Statens vegvesen), New South Wales, Hong Kong
+ * (Transport Department), New Zealand (NZTA) and Singapore (LTA via
+ * data.gov.sg). Places without such a feed
  * (Pakistan among them) simply have none. Like the agencies' own sites, only
  * the latest still frame is shown; nothing is recorded or analysed.
  */
@@ -13,8 +16,12 @@ const IMAGE_TTL = 30_000
 const MAX_IMAGE = 3 * 1024 * 1024
 const UA = { 'user-agent': 'Atlas personal assistant (open source)', 'Digitraffic-User': 'Atlas personal assistant (open source)' }
 
+/** The NSW webcam host answers non-browser clients with an HTML page instead of the frame. */
+const BROWSER_HOSTS = new Set(['webcams.transport.nsw.gov.au'])
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
 const get = async (url: string) => {
-  const res = await fetch(url, { signal: AbortSignal.timeout(25_000), headers: UA })
+  const res = await fetch(url, { signal: AbortSignal.timeout(25_000), headers: BROWSER_HOSTS.has(new URL(url).hostname) ? { ...UA, 'user-agent': BROWSER_UA } : UA })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res
 }
@@ -61,6 +68,13 @@ export class CameraDirectory {
       json('https://www.journeys.nzta.govt.nz/assets/map-data-cache/cameras.json').then(j => ({ nz: j })),
       text('https://static.data.gov.hk/td/traffic-snapshot-images/code/Traffic_Camera_Locations_En.xml').then(x => ({ hongKong: x })),
       json('https://api.data.gov.sg/v1/transport/traffic-images').then(j => ({ singapore: j })),
+      json('https://www.drivebc.ca/api/webcams/').then(j => ({ driveBc: j })),
+      json('https://data.calgary.ca/resource/k7p9-kppz.json?$limit=500').then(j => ({ calgary: j })),
+      json('https://data.livetraffic.com/cameras/traffic-cam.json').then(j => ({ nsw: j })),
+      json('https://data.wsdot.wa.gov/travelcenter/Cameras.json').then(j => ({ wsdot: j })),
+      text('https://opendata.toronto.ca/transportation/tmc/rescucameraimages/Data/tmcearthcameras.json').then(x => ({ toronto: x })),
+      json('https://tmc.deldot.gov/json/videocamera.json').then(j => ({ deldot: j })),
+      json('https://ogckart-sn1.atlas.vegvesen.no/ogc/features/v1/collections/datex_3_1:CctvSimple/items?f=application/geo%2Bjson&limit=5000').then(j => ({ norway: j })),
     ])
     const raw = Object.assign({}, ...tries.flatMap(t => (t.status === 'fulfilled' ? [t.value] : [])))
     for (const t of tries) if (t.status === 'rejected') this.log('warn', `Cameras: a source failed (${t.reason instanceof Error ? t.reason.message : String(t.reason)}).`)
