@@ -101,7 +101,7 @@ export function AppearanceSettings() {
         <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Desktop widget">
           {(['background', 'always', 'off'] as WidgetWhen[]).map(w => (
             <button key={w} type="button" role="radio" aria-checked={widget === w} disabled={widget === null} onClick={() => chooseWidget(w)} className={`btn ${widget === w ? 'border-accent text-accent' : ''}`}>
-              {w === 'background' ? 'When Atlas is in the background' : w === 'always' ? 'Always' : 'Never'}
+              {w === 'background' ? 'When Atlas is minimised or closed' : w === 'always' ? 'Whenever Atlas is not in front' : 'Never'}
             </button>
           ))}
         </div>

@@ -25,7 +25,7 @@ import {
   startBounds,
   WIDGET_SCALES,
   WIDGET_WHEN,
-  widgetVisible,
+  widgetVisible, type MainWindowState,
   type PresenceCard,
   type PresenceCommand,
   type PresenceState,
@@ -53,7 +53,7 @@ export class PresenceWidget {
   private saved: Saved
   private live: PresenceUpdate = { activity: 'idle', caption: '', level: 0 }
   private initiative: { item: InitiativeItem; until: number } | null = null
-  private mainInView = true
+  private main: MainWindowState = 'front'
   private lastSent = ''
   private glassOpen = false
   private fullControlOn = false
@@ -112,8 +112,8 @@ export class PresenceWidget {
   }
 
   /** The main window was shown, hidden, minimised, focused or closed. */
-  mainWindow(inView: boolean) {
-    this.mainInView = inView
+  mainWindow(state: MainWindowState) {
+    this.main = state
     this.sync()
   }
 
@@ -184,7 +184,7 @@ export class PresenceWidget {
 
   /** Show or hide the widget for the current setting and main window state. */
   sync() {
-    const show = widgetVisible(this.saved.when, this.mainInView)
+    const show = widgetVisible(this.saved.when, this.main)
     if (!show) {
       if (this.win && !this.win.isDestroyed() && this.win.isVisible()) this.win.hide()
       return
@@ -224,7 +224,7 @@ export class PresenceWidget {
     win.webContents.on('will-navigate', e => e.preventDefault())
     win.once('ready-to-show', () => {
       this.push()
-      if (widgetVisible(this.saved.when, this.mainInView)) win.showInactive()
+      if (widgetVisible(this.saved.when, this.main)) win.showInactive()
     })
     win.on('closed', () => {
       if (this.win === win) this.win = null
@@ -295,7 +295,7 @@ export class PresenceWidget {
       { label: 'Talk', click: () => this.talk() },
       { type: 'separator' },
       { label: 'Size', submenu: [scale('s', 'Small'), scale('m', 'Medium'), scale('l', 'Large')] },
-      { label: 'Show the widget', submenu: [when('background', 'When Atlas is in the background'), when('always', 'Always'), when('off', 'Never')] },
+      { label: 'Show the widget', submenu: [when('background', 'When Atlas is minimised or closed'), when('always', 'Whenever Atlas is not in front'), when('off', 'Never')] },
       { label: 'Back to the corner', click: () => this.home() },
       { type: 'separator' },
       { label: 'Hide the widget', click: () => this.setWhen('off') },

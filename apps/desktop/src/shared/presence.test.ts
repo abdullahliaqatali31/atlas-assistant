@@ -27,10 +27,14 @@ describe('desktop widget', () => {
   })
 
   it('shows when the setting and the main window say so', () => {
-    expect(widgetVisible('off', false)).toBe(false)
-    expect(widgetVisible('background', true)).toBe(false)
-    expect(widgetVisible('background', false)).toBe(true)
-    expect(widgetVisible('always', true)).toBe(true)
+    expect(widgetVisible('off', 'away')).toBe(false)
+    expect(widgetVisible('background', 'front')).toBe(false)
+    expect(widgetVisible('background', 'open')).toBe(false)
+    expect(widgetVisible('background', 'away')).toBe(true)
+    // Never beside the app while it is in front, even on "always".
+    expect(widgetVisible('always', 'front')).toBe(false)
+    expect(widgetVisible('always', 'open')).toBe(true)
+    expect(widgetVisible('always', 'away')).toBe(true)
   })
 
   it('accepts only sane updates and sizes from the pages', () => {

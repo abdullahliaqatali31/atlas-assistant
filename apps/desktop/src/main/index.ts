@@ -441,8 +441,9 @@ const createWindow = ({ inactive = false } = {}) => {
   win.on('focus', () => win?.flashFrame(false))
   // The desktop widget steps in while Atlas's window is out of sight or behind other apps.
   const seen = () => {
-    const inView = Boolean(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused())
-    presence.mainWindow(inView)
+    const open = Boolean(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized())
+    const inView = open && Boolean(win?.isFocused())
+    presence.mainWindow(inView ? 'front' : open ? 'open' : 'away')
     // Coming to the front with something on the glass panel: the app takes it over, the widget goes compact.
     if (inView) handOffGlass()
   }
@@ -450,7 +451,7 @@ const createWindow = ({ inactive = false } = {}) => {
   // Closing the window destroys the renderer (keeping idle RAM low); the tray and runtime stay up.
   win.on('closed', () => {
     win = null
-    presence.mainWindow(false)
+    presence.mainWindow('away')
     rendererReady = false
     heldReplies = []
   })
@@ -942,7 +943,7 @@ if (!app.requestSingleInstanceLock()) {
     setTimeout(() => glass.prewarm(), 4_000).unref?.()
     // Started by Windows at login: stay in the tray until the owner opens Atlas (the widget shows meanwhile).
     if (!startedHidden()) createWindow()
-    else presence.mainWindow(false)
+    else presence.mainWindow('away')
   })
   // Staying alive in the tray is the point: never quit when the last window closes.
   app.on('window-all-closed', () => {})

@@ -137,4 +137,12 @@ export const startBounds = (area: Rect, size: { width: number; height: number },
 })
 
 /** Whether the widget should be on screen now. */
-export const widgetVisible = (when: WidgetWhen, mainInView: boolean) => when === 'always' || (when === 'background' && !mainInView)
+/** Where Atlas's own window is: in front (focused), open behind other apps, or away (minimised, hidden, closed). */
+export type MainWindowState = 'front' | 'open' | 'away'
+
+/**
+ * The widget never sits beside Atlas's window while it is in front: it steps
+ * in when the window is away ("background"), or also when it is behind other
+ * apps ("always").
+ */
+export const widgetVisible = (when: WidgetWhen, main: MainWindowState) => when !== 'off' && main !== 'front' && (when === 'always' || main === 'away')
