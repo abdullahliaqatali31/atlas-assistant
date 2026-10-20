@@ -534,27 +534,32 @@ input[type='radio']:disabled {
   display: none;
 }
 
-/* Floating controls on the World map: small glass pills. */
-.map-chip {
-  display: inline-flex;
-  height: 2rem;
-  align-items: center;
-  gap: 0.375rem;
-  border-radius: 9999px;
-  border: 1px solid var(--edge);
-  background: color-mix(in srgb, var(--solid) 82%, transparent);
-  padding: 0 0.75rem;
-  font-size: 0.75rem;
-  color: var(--text);
-  backdrop-filter: blur(10px);
-  transition: border-color 120ms, color 120ms;
-}
-.map-chip:hover {
-  border-color: var(--accent);
-}
-:root[data-lite='true'] .map-chip {
-  backdrop-filter: none;
-  background: var(--solid);
+/* Floating controls on the World map: small glass pills. In the components
+   layer, so utilities on a chip (hidden, px-2, responsive variants) win. */
+@layer components {
+  .map-chip {
+    display: inline-flex;
+    height: 2rem;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.375rem;
+    white-space: nowrap;
+    border-radius: 9999px;
+    border: 1px solid var(--edge);
+    background: color-mix(in srgb, var(--solid) 82%, transparent);
+    padding: 0 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text);
+    backdrop-filter: blur(10px);
+    transition: border-color 120ms, color 120ms;
+  }
+  .map-chip:hover {
+    border-color: var(--accent);
+  }
+  :root[data-lite='true'] .map-chip {
+    backdrop-filter: none;
+    background: var(--solid);
+  }
 }
 
 /* ── Drawer density ────────────────────────────────────────────

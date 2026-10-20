@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { ASK_EVENT } from './live.ts'
 import { searchCommands } from './search.ts'
+import { nameOf } from '../ui/assistantName.ts'
 
 export interface Command {
   id: string
@@ -47,7 +48,7 @@ export function CommandPalette({ open, onClose, commands, sources }: { open: boo
   const results = useMemo(() => {
     const found = query.trim() ? searchCommands([...commands, ...extra], query) : commands
     const ask: Command[] = query.trim()
-      ? [{ id: 'ask', group: 'Ask', label: `Ask Atlas: “${query.trim()}”`, icon: <Sparkles />, run: () => window.dispatchEvent(new CustomEvent(ASK_EVENT, { detail: query.trim() })) }]
+      ? [{ id: 'ask', group: 'Ask', label: `Ask ${nameOf()}: “${query.trim()}”`, icon: <Sparkles />, run: () => window.dispatchEvent(new CustomEvent(ASK_EVENT, { detail: query.trim() })) }]
       : []
     return [...found, ...ask]
   }, [query, commands, extra])

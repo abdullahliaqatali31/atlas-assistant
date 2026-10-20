@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import type { WidgetWhen } from '../../shared/presence.ts'
 
 import { ACCENTS, THEME_LABEL, THEMES, useAppearance, type Accent, type LiteChoice, type ThemeName } from './theme.ts'
+import { nameOf } from './ui/assistantName.ts'
 
 const SWATCH: Record<Exclude<Accent, 'theme'>, string> = { cyan: '#22d3ee', blue: '#60a5fa', violet: '#a78bfa', emerald: '#34d399', amber: '#fbbf24', rose: '#fb7185' }
 const PREVIEW: Record<Exclude<ThemeName, 'system'>, { bg: string; card: string; accent: string }> = {
@@ -95,13 +96,13 @@ export function AppearanceSettings() {
 
       <section className="space-y-2">
         <h3 className="flex items-center gap-2 text-sm font-medium">
-          <MonitorUp className="size-4 text-accent" aria-hidden /> Atlas on the desktop
+          <MonitorUp className="size-4 text-accent" aria-hidden /> {nameOf()} on the desktop
         </h3>
         <p className="text-xs text-muted">A small widget that floats over your other apps: a quiet orb when idle, a pill with Stop while Atlas listens or speaks, and a card when it speaks up or needs your yes. Drag it anywhere; right-click it for size and options.</p>
         <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Desktop widget">
           {(['background', 'always', 'off'] as WidgetWhen[]).map(w => (
             <button key={w} type="button" role="radio" aria-checked={widget === w} disabled={widget === null} onClick={() => chooseWidget(w)} className={`btn ${widget === w ? 'border-accent text-accent' : ''}`}>
-              {w === 'background' ? 'When Atlas is minimised or closed' : w === 'always' ? 'Whenever Atlas is not in front' : 'Never'}
+              {w === 'background' ? `When ${nameOf()} is minimised or closed` : w === 'always' ? `Whenever ${nameOf()} is not in front` : 'Never'}
             </button>
           ))}
         </div>

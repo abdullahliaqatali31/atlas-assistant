@@ -29,6 +29,8 @@ export interface PersonalityIpcDeps {
   speechAvailable: () => boolean
   toRenderer: (channel: string, payload: unknown) => void
   window: () => BrowserWindow | null
+  /** Every profile seen (the assistant's name lives in it). */
+  onView?: (view: PersonalityView) => void
 }
 
 const TIMEOUT_MS = 10_000
@@ -60,6 +62,7 @@ export const registerPersonalityIpc = (deps: PersonalityIpcDeps) => {
     if (e.type !== 'personality' || !e.view) throw new Error(e.error ?? 'The profile could not be changed.')
     // Every view the owner caused goes to the renderer, so Setup and the companion agree.
     deps.toRenderer(PC.changed, e.view)
+    deps.onView?.(e.view)
     return e.view
   }
 
@@ -124,6 +127,8 @@ export const registerPersonalityIpc = (deps: PersonalityIpcDeps) => {
   return {
     transcribe,
     speakFixed,
+    /** Read the profile now (when the runtime has just become ready). */
+    refresh: () => (deps.isReady() ? op({ kind: 'get' }).then(() => undefined, () => undefined) : Promise.resolve()),
     /** Host answers, routed by request id. */
     onHostEvent(e: PersonalityHostEvent) {
       pending.get(e.requestId)?.(e)

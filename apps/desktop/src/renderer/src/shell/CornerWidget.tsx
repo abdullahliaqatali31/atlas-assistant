@@ -4,6 +4,7 @@ import { MAP_VIEW_EVENT } from '../../../shared/map.ts'
 import type { PlaceStatus } from '../../../shared/world.ts'
 import { STATE_LABEL, useNow, type Presence } from '../Jarvis.tsx'
 import { Orb, type OrbState } from '../ui/Orb.tsx'
+import { nameOf } from '../ui/assistantName.ts'
 
 type Ring = [number, number][]
 
@@ -186,7 +187,7 @@ export function CornerWidget({ state, presence, onHome }: { state: OrbState; pre
       type="button"
       onClick={onHome}
       title={`${STATE_LABEL[state]} · back to Home`}
-      aria-label={`Atlas is ${STATE_LABEL[state].toLowerCase()}. Back to Home`}
+      aria-label={`${nameOf()} is ${STATE_LABEL[state].toLowerCase()}. Back to Home`}
       className="pointer-events-auto flex items-center gap-3 rounded-full border border-accent/25 bg-slate-950/70 py-1 pl-1 pr-4 text-left text-slate-200 shadow-2xl backdrop-blur-md transition-colors hover:border-accent/60"
     >
       <MiniGlobe size={64} />

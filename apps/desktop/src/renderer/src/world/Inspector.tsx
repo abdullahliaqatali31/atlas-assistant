@@ -10,6 +10,7 @@ import { hoverInfo, type NearbyItem } from './hover.ts'
 import { layerDef, type LayerId } from './layers.ts'
 import { MAP3D_EVENT } from './mapops.ts'
 import type { Map3dOp } from '../../../shared/map.ts'
+import { nameOf } from '../ui/assistantName.ts'
 
 /** Something picked on the map, shown in the Inspector. */
 export interface Selected {
@@ -360,7 +361,7 @@ export function Inspector({
           </button>
         )}
         <button type="button" className="btn h-7 gap-1 border-accent/60 px-2 text-xs text-accent" onClick={ask}>
-          <Sparkles className="size-3.5" aria-hidden /> <span className={compact ? '' : 'lbl'}>{compact ? 'Ask' : 'Ask Atlas'}</span>
+          <Sparkles className="size-3.5" aria-hidden /> <span className={compact ? '' : 'lbl'}>{compact ? 'Ask' : `Ask ${nameOf()}`}</span>
         </button>
         {typeof p.url === 'string' && p.url.startsWith('https://') && (
           <a href={p.url} target="_blank" rel="noreferrer" className="btn h-7 gap-1 px-2 text-xs">

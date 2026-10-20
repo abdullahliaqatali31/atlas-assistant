@@ -2,6 +2,7 @@ import { Gauge } from 'lucide-react'
 import { useEffect, useState, type KeyboardEvent } from 'react'
 
 import type { UsageView } from '../../shared/ipc.ts'
+import { nameOf } from './ui/assistantName.ts'
 
 const usd = (n: number) => (n < 0.01 && n > 0 ? '<$0.01' : `$${n.toFixed(2)}`)
 const tokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n))
@@ -27,7 +28,7 @@ export function StartupToggle() {
     <section className="tile space-y-1 p-4">
       <label className={`flex items-center gap-2 text-sm ${s.available ? '' : 'opacity-60'}`}>
         <input type="checkbox" checked={s.enabled} disabled={!s.available} onChange={e => set(e.target.checked, s.show)} />
-        Start Atlas when Windows starts
+        Start {nameOf()} when Windows starts
       </label>
       {s.available && s.enabled && (
         <div className="flex flex-wrap gap-3 pl-6 text-xs" role="radiogroup" aria-label="How it starts">

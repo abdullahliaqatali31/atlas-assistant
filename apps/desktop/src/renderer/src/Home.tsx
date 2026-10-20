@@ -32,6 +32,7 @@ import { ActivityCard, ago, Empty, greetingFor, Panel, STATE_LABEL, TodayCard, u
 import { useNews } from './News.tsx'
 import { Orb, type OrbState } from './ui/Orb.tsx'
 import { RemoteImg } from './world/RemoteImg.tsx'
+import { nameOf, possessive } from './ui/assistantName.ts'
 
 export type HomeTarget = 'today' | 'projects' | 'world' | 'chat' | 'news' | 'learning'
 
@@ -192,7 +193,7 @@ function FindTile({ ready }: { ready: boolean }) {
 function Face({ orbState, presence, line, ready }: { orbState: OrbState; presence: Presence; line: string[]; ready: boolean }) {
   return (
     <section className="glass rise-in flex shrink-0 flex-col items-center rounded-2xl px-3 pb-3 pt-2 text-center">
-      <span className="hud-label self-start">Atlas</span>
+      <span className="hud-label self-start">{nameOf()}</span>
       <Orb state={orbState} level={presence.level} size={112} />
       <p className={`text-sm ${orbState === 'paused' ? 'text-danger' : orbState === 'listening' ? 'text-warm' : 'text-accent'}`}>{STATE_LABEL[orbState]}</p>
       <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted">{!ready ? 'Connect a provider in Settings to begin.' : line.length ? line.join(' · ') : 'All quiet. Nothing needs you right now.'}</p>
@@ -357,7 +358,7 @@ function BrainStage({ brain, mood, ready, openLearning }: { brain: ReturnType<ty
       <header className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-2 p-3">
         <div>
           <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-300/80">
-            <BrainIcon className="size-3.5" aria-hidden /> Atlas's mind
+            <BrainIcon className="size-3.5" aria-hidden /> {possessive(nameOf())} mind
           </p>
           <p className="mt-0.5 font-mono text-[11px] text-slate-400">{view ? `${memories} memories · ${view.links.length} connections · ${counts.skill} skills` : ready ? 'Waking up…' : 'Offline'}</p>
         </div>

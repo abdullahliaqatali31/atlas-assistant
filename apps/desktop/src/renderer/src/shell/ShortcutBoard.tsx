@@ -8,6 +8,7 @@ import { AlertTriangle, Globe, Keyboard, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { acceleratorKeys, APP_SHORTCUTS, type ShortcutsView } from '../../../shared/shortcuts.ts'
+import { nameOf } from '../ui/assistantName.ts'
 
 function Keys({ keys }: { keys: readonly string[] }) {
   return (
@@ -55,7 +56,7 @@ export function ShortcutBoard({ onClose }: { onClose: () => void }) {
           <div className="tile space-y-2 p-3 md:col-span-2">
             <h3 className="flex items-center gap-2 text-sm font-medium">
               <Globe className="size-4 text-accent" aria-hidden /> Anywhere in Windows
-              <span className="text-xs font-normal text-muted">· even while Atlas is minimised</span>
+              <span className="text-xs font-normal text-muted">· even while {nameOf()} is minimised</span>
             </h3>
             <ul className="grid gap-x-6 gap-y-1.5 md:grid-cols-2">
               {(view?.global ?? []).map(s => (

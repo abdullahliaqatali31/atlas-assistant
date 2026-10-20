@@ -1,11 +1,12 @@
 /**
  * The World page's dock (after Argos): Intelligence, Markets, VIP people and
- * Geography, as buttons in the map's toolbar (flat map and 3D view alike)
- * and one panel at a time, docked on the right so the item card keeps the
- * left. Each panel reads main's keyless feeds; the map shows what it can.
+ * Geography, as buttons in the map's toolbar (flat map and 3D view alike).
+ * A panel opens docked on the right (the item card keeps the left); from its
+ * header it can float over the map or be pinned as a card in the bottom tray
+ * (panelDock.ts). Each panel reads main's keyless feeds; the map shows what it can.
  */
-import { Briefcase, Globe2, Search, Shield, Star, Video, X, Rocket } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Briefcase, Globe2, GripHorizontal, Move, PanelRight, Pin, PinOff, Search, Shield, Star, Video, X, Rocket } from 'lucide-react'
+import { useEffect, useMemo, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 
 import { CATEGORY_COLOR, CATEGORY_LABEL, INTEL_CATEGORIES, type AlertRegion, type IntelCategory, type IntelEvent } from '../../../shared/intel.ts'
 import { GROUP_LABEL, MARKET_GROUPS, sparkPath, type MarketGroup, type Quote } from '../../../shared/markets.ts'
@@ -47,14 +48,15 @@ export interface DockContext {
   world: WorldSnapshot
 }
 
-export function DockButtons({ open, onOpen, badge }: { open: DockId | null; onOpen: (id: DockId | null) => void; badge?: Partial<Record<DockId, string>> }) {
+export function DockButtons({ isOpen, onToggle, badge }: { isOpen: (id: DockId) => boolean; onToggle: (id: DockId) => void; badge?: Partial<Record<DockId, string>> }) {
   return (
     <>
       {DOCK.map(d => {
         const Icon = d.icon
+        const open = isOpen(d.id)
         return (
-          <button key={d.id} type="button" onClick={() => onOpen(open === d.id ? null : d.id)} aria-pressed={open === d.id} aria-keyshortcuts={d.key.toUpperCase()} className={`map-chip px-2 ${open === d.id ? 'border-accent text-accent' : ''}`} title={`${d.label} (${d.key.toUpperCase()})`}>
-            <Icon className="size-3.5" style={{ color: open === d.id ? undefined : d.color }} aria-hidden />
+          <button key={d.id} type="button" onClick={() => onToggle(d.id)} aria-pressed={open} aria-keyshortcuts={d.key.toUpperCase()} className={`map-chip px-2 ${open ? 'border-accent text-accent' : ''}`} title={`${d.label} (${d.key.toUpperCase()})`}>
+            <Icon className="size-3.5" style={{ color: open ? undefined : d.color }} aria-hidden />
             <span className="hidden @[1400px]:inline">{d.label}</span>
             {badge?.[d.id] && <span className="font-mono text-[10px] text-muted">{badge[d.id]}</span>}
           </button>
@@ -263,24 +265,71 @@ function IntelPanel({ ctx }: { ctx: DockContext }) {
   )
 }
 
-export function DockPanel({ which, onClose, ctx, children }: { which: DockId; onClose: () => void; ctx: DockContext; children?: ReactNode }) {
+export type PanelPlace = 'side' | 'float' | 'pinned'
+
+/** Where a panel can go from its header. */
+export interface PanelMoves {
+  onPin: () => void
+  onFloat: () => void
+  onSide: () => void
+  /** Floating: press the header to move it. */
+  onHeaderDown?: ((e: RPointerEvent<HTMLElement>) => void) | undefined
+  /** Floating: press the corner to resize it. */
+  onResizeDown?: ((e: RPointerEvent<HTMLElement>) => void) | undefined
+}
+
+export function DockPanel({ which, onClose, ctx, children, place = 'side', moves }: { which: DockId; onClose: () => void; ctx: DockContext; children?: ReactNode; place?: PanelPlace; moves?: PanelMoves | undefined }) {
   const d = DOCK.find(x => x.id === which)!
   const Icon = d.icon
+  const pinned = place === 'pinned'
+  const size = pinned ? 'size-6' : 'size-7'
   return (
-    <section aria-label={`${d.label} panel`} className="peek-card glass pointer-events-auto flex max-h-full w-[min(360px,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl bg-solid/92 shadow-2xl">
-      <header className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <Icon className="size-4" style={{ color: d.color }} aria-hidden />
-        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{d.label}</h3>
+    <section
+      aria-label={`${d.label} panel`}
+      className={`peek-card glass pointer-events-auto relative flex flex-col overflow-hidden rounded-xl bg-solid/92 shadow-2xl ${place === 'side' ? 'max-h-full w-[min(360px,calc(100vw-2rem))]' : 'h-full w-full'}`}
+    >
+      <header
+        onPointerDown={place === 'float' ? moves?.onHeaderDown : undefined}
+        className={`flex shrink-0 items-center gap-1.5 border-b border-border ${pinned ? 'px-2 py-1' : 'px-3 py-2'} ${place === 'float' ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''}`}
+        title={place === 'float' ? 'Drag to move' : undefined}
+      >
+        {place === 'float' && <GripHorizontal className="size-3.5 shrink-0 text-muted" aria-hidden />}
+        <Icon className={pinned ? 'size-3.5' : 'size-4'} style={{ color: d.color }} aria-hidden />
+        <h3 className={`min-w-0 flex-1 truncate font-semibold ${pinned ? 'text-xs' : 'text-sm'}`}>{d.label}</h3>
         {which === 'intel' && (
           <button type="button" onClick={() => ctx.setIntelOnMap(!ctx.intelOnMap)} aria-pressed={ctx.intelOnMap} className={`rounded-md border px-2 py-0.5 text-[11px] ${ctx.intelOnMap ? 'border-accent text-accent' : 'border-border text-muted'}`} title="Events, country shading and alert regions on the map">
             On map
           </button>
         )}
-        <button type="button" className="icon-btn size-7" onClick={onClose} aria-label="Close the panel" title="Close (Esc)">
-          <X className="size-4" aria-hidden />
+        {moves && (
+          <>
+            {place !== 'side' && (
+              <button type="button" className={`icon-btn ${size}`} onClick={moves.onSide} aria-label="Dock on the right" title="Dock on the right">
+                <PanelRight className="size-3.5" aria-hidden />
+              </button>
+            )}
+            {place !== 'float' && (
+              <button type="button" className={`icon-btn ${size}`} onClick={moves.onFloat} aria-label="Float over the map" title="Float: move and resize it anywhere on the map">
+                <Move className="size-3.5" aria-hidden />
+              </button>
+            )}
+            <button type="button" className={`icon-btn ${size} ${pinned ? 'text-accent' : ''}`} onClick={pinned ? moves.onSide : moves.onPin} aria-pressed={pinned} aria-label={pinned ? 'Unpin from the bottom' : 'Pin to the bottom'} title={pinned ? 'Unpin' : 'Pin to the bottom tray (up to 4 cards stay in view)'}>
+              {pinned ? <PinOff className="size-3.5" aria-hidden /> : <Pin className="size-3.5" aria-hidden />}
+            </button>
+          </>
+        )}
+        <button type="button" className={`icon-btn ${size}`} onClick={onClose} aria-label="Close the panel" title="Close">
+          <X className={pinned ? 'size-3.5' : 'size-4'} aria-hidden />
         </button>
       </header>
-      {which === 'intel' ? <IntelPanel ctx={ctx} /> : which === 'markets' ? <MarketsPanel /> : which === 'geo' ? <GeoPanel ctx={ctx} /> : which === 'vip' ? <VipPanel ctx={ctx} /> : which === 'cams' ? <CamerasPanel ctx={ctx} /> : which === 'launches' ? <LaunchesPanel ctx={ctx} /> : children}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {which === 'intel' ? <IntelPanel ctx={ctx} /> : which === 'markets' ? <MarketsPanel /> : which === 'geo' ? <GeoPanel ctx={ctx} /> : which === 'vip' ? <VipPanel ctx={ctx} /> : which === 'cams' ? <CamerasPanel ctx={ctx} /> : which === 'launches' ? <LaunchesPanel ctx={ctx} /> : children}
+      </div>
+      {place === 'float' && moves?.onResizeDown && (
+        <span onPointerDown={moves.onResizeDown} className="absolute bottom-0 right-0 z-10 size-4 cursor-nwse-resize" aria-label="Resize" role="separator">
+          <span className="absolute bottom-1 right-1 size-2 border-b-2 border-r-2 border-muted/60" aria-hidden />
+        </span>
+      )}
     </section>
   )
 }

@@ -19,6 +19,7 @@ import { chatViewVars, readChatView, saveChatView, type ChatView } from './chatv
 import { Onboarding } from './Onboarding.tsx'
 import { Markdown } from './ui/Markdown.tsx'
 import { ASK_EVENT, MIC_EVENT, publishLive, STOP_EVENT } from './shell/live.ts'
+import { nameOf } from './ui/assistantName.ts'
 
 interface Line {
   id: string
@@ -222,7 +223,7 @@ export function Companion({
   const statusRef = useRef(status)
   statusRef.current = status
   const live = useLiveVoice({
-    assistantName: personality?.profile.assistantName ?? 'Atlas',
+    assistantName: personality?.profile.assistantName || nameOf(),
     show: (id, text) => begin(id, text),
     approvals: () => statusRef.current.approvals,
   })

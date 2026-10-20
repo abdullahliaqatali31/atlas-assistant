@@ -87,7 +87,7 @@ export function WorldPage() {
           </button>
         )}
       </form>
-      <span className="pointer-events-auto flex min-w-0 max-w-full flex-wrap gap-1.5">{mapControls}</span>
+      <span className="no-scrollbar pointer-events-auto flex min-w-0 max-w-full gap-1.5 overflow-x-auto">{mapControls}</span>
       <div className="no-scrollbar pointer-events-auto flex min-w-0 max-w-full gap-1.5 overflow-x-auto @max-[520px]:order-last @max-[520px]:basis-full">
         {world.places.map(s => (
           <button

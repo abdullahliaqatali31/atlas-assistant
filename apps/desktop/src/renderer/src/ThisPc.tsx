@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 
 import type { FullControlMode, FullControlView } from '../../shared/control.ts'
 import type { PcState } from '../../shared/system.ts'
+import { nameOf } from './ui/assistantName.ts'
 
 const MODE_LABEL: Record<FullControlMode, string> = { session: 'Until I lock or leave', hour: 'For an hour', manual: 'Until I turn it off' }
 
@@ -205,7 +206,7 @@ export function ThisPc({ run }: { run: <T>(fn: () => Promise<T>) => Promise<T | 
               <span className="text-danger">Could not read them: {s.notifications.error}</span>
             ) : (
               <>
-                <b>{s.notifications.seen}</b> seen since Atlas started
+                <b>{s.notifications.seen}</b> seen since {nameOf()} started
                 {s.notifications.lastAt && <span className="text-xs text-muted"> · latest {ago(s.notifications.lastAt)}</span>}
               </>
             )}

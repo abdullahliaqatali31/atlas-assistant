@@ -162,7 +162,7 @@ const drawAttention = () => {
 
 const notify = (item: InitiativeItem) => {
   if (!Notification.isSupported()) return
-  const n = new Notification({ title: item.kind === 'reminder' ? 'Reminder' : 'Assistant', body: item.title, silent: true })
+  const n = new Notification({ title: item.kind === 'reminder' ? 'Reminder' : assistantName, body: item.title, silent: true })
   n.on('click', () => createWindow())
   n.show()
 }
@@ -196,6 +196,7 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
   env: () => runtimeEnv(devEnvFile),
   cwd: app.getPath('userData'),
   onStatus: ({ keys: k, voiceReady: v, phase, problems, warnings }) => {
+    if (phase === 'ready') setTimeout(() => void personality.refresh(), 500)
     if (k) keys = k
     if (v !== undefined) voiceReady = v
     // A host that exited can no longer act on any approval.
@@ -224,7 +225,7 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
     publish({ approvals: [...status.approvals, request] })
     // An approval needs the owner's eyes: bring the companion back if it was closed.
     createWindow()
-    if (tray && !win?.isFocused()) tray.displayBalloon?.({ title: 'Assistant needs your approval', content: `${request.tool}: ${request.reason}` })
+    if (tray && !win?.isFocused()) tray.displayBalloon?.({ title: `${assistantName} needs your approval`, content: `${request.tool}: ${request.reason}` })
   },
   onApprovalClosed: id => publish({ approvals: status.approvals.filter(a => a.id !== id) }),
   onAction: notice => {
@@ -276,6 +277,17 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
   },
   log,
 })
+
+/** The assistant's own name (Settings › Personality); "Atlas" until the owner gives one. */
+let assistantName = 'Atlas'
+const setAssistantName = (n: string) => {
+  const next = n.trim() || 'Atlas'
+  if (next === assistantName) return
+  assistantName = next
+  if (win && !win.isDestroyed()) win.setTitle(assistantName)
+  updateTray()
+  presence.refresh()
+}
 
 // ── desktop widget ──────────────────────────────────────────
 
@@ -348,7 +360,7 @@ const presence = new PresenceWidget({
   initiativeAction: (id, action) => supervisor.initiativeAction(id, action),
   approvals: () => status.approvals,
   locked: () => identity.locked,
-  name: () => 'Atlas',
+  name: () => assistantName,
   openView: view => void ui.apply({ view }).catch(() => undefined),
   later: () => status.later.length,
 })
@@ -507,7 +519,7 @@ const createWindow = ({ inactive = false } = {}) => {
     minWidth: 360,
     minHeight: 480,
     show: false,
-    title: 'Assistant',
+    title: assistantName,
     icon: appIcon(),
     // Windows 11 acrylic behind the glass UI; a transparent base avoids a flash of solid colour.
     // Older Windows ignores the material and the page's own tinted background shows instead.
@@ -604,10 +616,10 @@ const PHASE_LABEL: Record<RuntimeStatus['phase'], string> = {
 
 const updateTray = () => {
   if (!tray) return
-  tray.setToolTip(`Assistant: ${PHASE_LABEL[status.phase]}${controls.fullControlView.on ? ' · Full control' : ''}`)
+  tray.setToolTip(`${assistantName}: ${PHASE_LABEL[status.phase]}${controls.fullControlView.on ? ' · Full control' : ''}`)
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Open assistant', click: () => createWindow() },
+      { label: `Open ${assistantName}`, click: () => createWindow() },
       { label: PHASE_LABEL[status.phase], enabled: false },
       {
         label: 'Mode',
@@ -1012,6 +1024,7 @@ registerBackupIpc({
 })
 
 const personality = registerPersonalityIpc({
+  onView: v => setAssistantName(v.profile.assistantName),
   handle,
   post: msg => supervisor.personality(msg),
   isReady: () => status.phase === 'ready',

@@ -35,6 +35,7 @@ import type { Globe3DControl } from './Globe3D.tsx'
 import type { Globe3dLayer } from '../../../shared/map.ts'
 import { CATEGORY_COLOR, type AlertRegion, type IntelEvent } from '../../../shared/intel.ts'
 import { DockButtons, DockPanel, DOCK, type DockContext, type DockId } from './Dock.tsx'
+import { useWorldPanels, type FloatRect } from './panelDock.ts'
 import { MAP3D_STATE_EVENT } from '../../../shared/ui.ts'
 /** If the 3D view fails (no WebGL, a bad driver), say so and keep the 2D map working. */
 class Guard3D extends Component<{ onClose: () => void; children: ReactNode }, { error: string | null }> {
@@ -140,8 +141,9 @@ export function MapView({
   const [threeD, setThreeD] = useState<{ lat: number; lon: number; zoom: number } | null>(null)
   const threeDRef = useRef(threeD)
   threeDRef.current = threeD
-  // The dock: Intelligence, Markets, VIP, Geography (one panel at a time).
-  const [dock, setDock] = useState<DockId | null>(null)
+  // The panels: one docked on the right, any floating over the map, up to four pinned along the bottom.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const panels = useWorldPanels(() => rootRef.current)
   const [intelOnMap, setIntelOnMapState] = useState(() => {
     try {
       return localStorage.getItem('atlas.intel.onMap') !== '0'
@@ -581,7 +583,7 @@ export function MapView({
           .join(' ')
       }
       case 'panel': {
-        setDock(op.panel)
+        panels.showSide(op.panel)
         return op.panel ? `The ${DOCK.find(d => d.id === op.panel)?.label ?? op.panel} panel is open on the World page.` : 'Panel closed.'
       }
       case 'display': {
@@ -819,7 +821,7 @@ export function MapView({
       if (Number.isInteger(n) && n >= 1 && n <= DISPLAY_MODES.length) return setDisplay(d => ({ ...d, mode: DISPLAY_MODES[n - 1]! }))
       if (e.key.toLowerCase() === 'h') return setDisplay(d => ({ ...d, hud: !d.hud }))
       const dk = DOCK.find(x => x.key === e.key.toLowerCase())
-      if (dk) return setDock(o => (o === dk.id ? null : dk.id))
+      if (dk) return panels.toggle(dk.id)
       const r = RAIL.find(x => x.key === e.key.toLowerCase())
       if (!r) return
       setLayers(x => ({ ...x, [r.id]: !x[r.id] }))
@@ -1214,6 +1216,8 @@ export function MapView({
   const on = LAYERS.filter(l => layers[l.id]).length
   const current = STYLES.find(s => s.id === prefs.style)!
   const toggle = (which: 'layers' | 'style' | 'display') => setOpen(o => (o === which ? null : which))
+  const trayShown = panels.state.pinned.length > 0 && panels.state.trayOpen
+  const movesFor = (id: DockId) => ({ onPin: () => panels.pin(id), onFloat: () => panels.float(id), onSide: () => panels.dockSide(id) })
   const dockCtx: DockContext = {
     flyTo: (lat, lon, zoom) => {
       if (threeDRef.current && globeCtl.current) void globeCtl.current.run({ kind: '3d', action: 'open', lat, lon, zoom, show: [], hide: [] })
@@ -1233,7 +1237,7 @@ export function MapView({
         <CarFront className="size-3.5" aria-hidden />
         <span className="hidden @[1400px]:inline">Traffic</span>
       </button>
-      <DockButtons open={dock} onOpen={setDock} badge={intel ? { intel: String(intel.events.length) } : undefined} />
+      <DockButtons isOpen={panels.isOpen} onToggle={panels.toggle} badge={intel ? { intel: String(intel.events.length) } : undefined} />
     </>
   )
   const displayButton = (
@@ -1280,7 +1284,6 @@ export function MapView({
       </button>
       {displayButton}
       {dockButtons}
-      {display.hud && ready && <HudChip map={map.current} mode={display.mode} counts={counts} />}
       <button type="button" onClick={() => toggle('layers')} aria-expanded={open === 'layers'} className={`map-chip @[640px]:hidden ${open === 'layers' ? 'border-accent text-accent' : ''}`} title="Map layers">
         <Layers className="size-3.5" aria-hidden />
         <span className="hidden @[520px]:inline">Layers</span>
@@ -1292,7 +1295,7 @@ export function MapView({
   )
 
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    <div ref={rootRef} className="relative h-full w-full overflow-hidden">
       <DisplayDefs />
       {!threeD && <TrafficLayer2D map={ready ? map.current : null} on={traffic} idle={idle} onStatus={setTrafficStatus} />}
       {traffic && trafficStatus && !threeD && <TrafficPill s={trafficStatus} />}
@@ -1349,11 +1352,49 @@ export function MapView({
         />
       )}
       {!threeD && toolbar(controls)}
-      {dock && (
-        <div className={`pointer-events-none absolute bottom-4 top-14 z-40 flex ${threeD ? 'right-3' : 'right-[64px]'}`}>
-          <DockPanel which={dock} onClose={() => setDock(null)} ctx={dockCtx}>
-            <p className="p-4 text-xs text-muted">Coming next in this build.</p>
-          </DockPanel>
+      {/* The HUD readout: its own line under the toolbar, never mixed into the buttons. */}
+      {display.hud && ready && !threeD && (
+        <div className="pointer-events-none absolute left-1/2 top-[52px] z-10 flex max-w-[calc(100%-8rem)] -translate-x-1/2 justify-center">
+          <HudChip map={map.current} mode={display.mode} counts={counts} />
+        </div>
+      )}
+      {panels.state.side && (
+        <div className={`pointer-events-none absolute top-14 z-40 flex ${threeD ? 'right-3' : 'right-[64px]'}`} style={{ bottom: trayShown ? panels.state.trayH + 24 : 16 }}>
+          <DockPanel which={panels.state.side} onClose={() => panels.close(panels.state.side!)} ctx={dockCtx} moves={movesFor(panels.state.side)} />
+        </div>
+      )}
+      {(Object.entries(panels.state.floats) as [DockId, FloatRect][]).map(([id, r]) => (
+        <div key={id} className="absolute z-40" style={{ left: r.x, top: r.y, width: r.w, height: r.h }}>
+          <DockPanel which={id} place="float" onClose={() => panels.close(id)} ctx={dockCtx} moves={{ ...movesFor(id), onHeaderDown: e => panels.startMove(id, e), onResizeDown: e => panels.startResize(id, e) }} />
+        </div>
+      ))}
+      {panels.state.pinned.length > 0 && (
+        <div className={`pointer-events-none absolute bottom-2 left-2 z-[36] flex flex-col ${threeD ? 'right-3' : 'right-[64px]'}`}>
+          {/* The tray's top edge: drag to resize the cards; the tab folds the tray away. */}
+          <div className="pointer-events-auto flex items-center justify-center">
+            <button
+              type="button"
+              onPointerDown={trayShown ? panels.startTrayResize : undefined}
+              onClick={() => !trayShown && panels.setTray({ trayOpen: true })}
+              className={`group flex h-4 w-28 items-center justify-center rounded-t-lg border border-b-0 border-border bg-solid/85 ${trayShown ? 'cursor-ns-resize' : ''}`}
+              title={trayShown ? 'Drag to resize the pinned cards' : 'Show the pinned cards'}
+              aria-label={trayShown ? 'Resize the pinned cards' : 'Show the pinned cards'}
+            >
+              <span className="h-1 w-10 rounded-full bg-muted/50 group-hover:bg-accent" aria-hidden />
+            </button>
+            <button type="button" onClick={() => panels.setTray({ trayOpen: !trayShown })} className="ml-1 h-4 rounded-t-lg border border-b-0 border-border bg-solid/85 px-2 text-[10px] text-muted hover:text-text" title={trayShown ? 'Fold the pinned cards away' : 'Show the pinned cards'}>
+              {trayShown ? 'Hide' : `Pinned (${panels.state.pinned.length})`}
+            </button>
+          </div>
+          {trayShown && (
+            <div className="pointer-events-auto flex gap-2 overflow-x-auto" style={{ height: panels.state.trayH }} role="region" aria-label="Pinned cards">
+              {panels.state.pinned.map(id => (
+                <div key={id} className="h-full min-w-[260px] flex-1">
+                  <DockPanel which={id} place="pinned" onClose={() => panels.close(id)} ctx={dockCtx} moves={movesFor(id)} />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {note3d && <p className="glass absolute left-1/2 top-14 z-40 max-w-md -translate-x-1/2 rounded-lg bg-solid/90 px-3 py-1.5 text-xs text-warm">{note3d}</p>}

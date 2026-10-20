@@ -13,6 +13,7 @@ import { ArrowLeft, ArrowRight, Columns2, Loader2, Maximize2, Minimize2, Picture
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 import { AWAKE_TABS, BROWSER_PARTITION, EMPTY_TABS, orderTabs, toUrl, type BrowserMode, type BrowserTab, type BrowserTabsState, type TabAction } from '../../../shared/browser.ts'
+import { nameOf } from '../ui/assistantName.ts'
 
 /** The webview element's methods this page uses. */
 interface WebviewEl extends HTMLElement {
@@ -449,7 +450,7 @@ export function AtlasBrowser({ mode, driving, panes, onMode }: { mode: BrowserMo
         </form>
         {driving && (
           <span className="flex shrink-0 items-center gap-1 rounded-full bg-sky-400/15 px-2 py-0.5 text-[10px] text-sky-300">
-            <Sparkles className="size-3 animate-pulse" aria-hidden /> {mini ? 'Atlas' : 'Atlas is using this'}
+            <Sparkles className="size-3 animate-pulse" aria-hidden /> {mini ? nameOf() : `${nameOf()} is using this`}
           </span>
         )}
         {mode !== 'pane' && (

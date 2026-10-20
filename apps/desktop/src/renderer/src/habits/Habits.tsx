@@ -34,6 +34,7 @@ import {
   type WorkHours,
 } from '../../../shared/habits.ts'
 import { Select } from '../ui/Select.tsx'
+import { nameOf, possessive } from '../ui/assistantName.ts'
 
 const RANGE_LABEL: Record<RangeDays, string> = { 1: 'Today', 7: '7 days', 30: '30 days' }
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -103,7 +104,7 @@ function RoleChip({ p }: { p: ProfileHabits }) {
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${p.role ? 'border-accent/50 bg-accent-soft text-accent' : 'border-border text-muted'}`}
-      title={p.role ? 'You set this' : `Atlas's guess: ${p.inferred.why}`}
+      title={p.role ? 'You set this' : `${possessive(nameOf())} guess: ${p.inferred.why}`}
     >
       {!p.role && <Sparkles className="size-2.5" aria-hidden />}
       {p.role ? ROLE_LABEL[role] : `Looks ${ROLE_LABEL[role].toLowerCase()}`}
@@ -349,7 +350,7 @@ function ProfileCard({ p, guide, days, tip, onRole, onShare }: { p: ProfileHabit
             <RoleChip p={p} />
             {!p.shared && (
               <span className="inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-muted" title="Atlas does not see this profile">
-                <EyeOff className="size-2.5" aria-hidden /> hidden from Atlas
+                <EyeOff className="size-2.5" aria-hidden /> hidden from {nameOf()}
               </span>
             )}
           </div>
@@ -424,7 +425,7 @@ function ProfileCard({ p, guide, days, tip, onRole, onShare }: { p: ProfileHabit
           items={[{ value: 'auto', label: `Auto (${ROLE_LABEL[p.inferred.role].toLowerCase()})` }, ...(Object.keys(ROLE_LABEL) as ProfileRole[]).map(r => ({ value: r, label: ROLE_LABEL[r] }))]}
         />
         <label className="flex items-center gap-1.5 text-xs text-muted">
-          <input type="checkbox" checked={p.shared} onChange={e => onShare(e.target.checked)} /> Atlas can see
+          <input type="checkbox" checked={p.shared} onChange={e => onShare(e.target.checked)} /> {nameOf()} can see
         </label>
         <button type="button" className="ml-auto flex items-center gap-1 text-xs text-muted hover:text-text" onClick={() => setOpen(o => !o)} aria-expanded={open}>
           Details <ChevronDown className={`size-3.5 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden />
@@ -751,7 +752,7 @@ export function HabitsPage() {
     return (
       <div className="grid h-full place-items-center p-6 text-center text-sm text-muted">
         <p className="flex items-center gap-2">
-          <Lock className="size-4" aria-hidden /> Your browsing is shown to you only: unlock Atlas first.
+          <Lock className="size-4" aria-hidden /> Your browsing is shown to you only: unlock {nameOf()} first.
         </p>
       </div>
     )

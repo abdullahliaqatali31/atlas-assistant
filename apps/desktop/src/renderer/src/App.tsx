@@ -92,6 +92,7 @@ import {
   THEME_LABEL,
   THEMES,
 } from "./theme.ts";
+import { nameOf, useAssistantName } from "./ui/assistantName.ts";
 
 // Pages load the first time they open: a lighter start.
 const HabitsPage = lazy(() =>
@@ -228,6 +229,11 @@ export function App() {
   const panesRef = useRef<HTMLDivElement>(null);
   /** The stage-and-panel area: the side panel docks to its edges or floats inside it. */
   const areaRef = useRef<HTMLDivElement>(null);
+  // The assistant's own name, everywhere on screen: renaming it re-renders the app (and the taskbar title).
+  const assistantName = useAssistantName();
+  useEffect(() => {
+    document.title = assistantName;
+  }, [assistantName]);
   const stage = layout.main;
   const [drawer, setDrawer] = useState<DrawerId | null>(() => {
     const d = stored("drawer", "chat");
@@ -588,7 +594,7 @@ export function App() {
     {
       id: "ask",
       group: "Do",
-      label: "Ask Atlas",
+      label: `Ask ${nameOf()}`,
       hint: "/",
       icon: <Sparkles />,
       run: () => focusAsk(),
@@ -1211,7 +1217,7 @@ function TitleBar({ status, tabs }: { status: RuntimeStatus | null; tabs?: React
         alt=""
         className="size-5 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]"
       />
-      <span className="text-[13px] font-semibold tracking-wide">Assistant</span>
+      <span className="text-[13px] font-semibold tracking-wide">{nameOf()}</span>
       <ModeChip
         phase={phase}
         label={PHASE[phase]}
@@ -1224,7 +1230,7 @@ function TitleBar({ status, tabs }: { status: RuntimeStatus | null; tabs?: React
           onClick={() => void window.controls.setFullControl(false).catch(() => undefined)}
           style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
           className="flex items-center gap-1.5 rounded-full border border-warm/70 bg-warm/15 px-2 py-0.5 text-[11px] font-medium text-warm shadow-[0_0_12px_rgba(251,191,36,0.35)] hover:bg-warm/25"
-          title="Atlas acts on your commands without asking. Click to turn it off."
+          title={`${nameOf()} acts on your commands without asking. Click to turn it off.`}
         >
           <span className="size-1.5 animate-pulse rounded-full bg-warm" aria-hidden />
           Full control

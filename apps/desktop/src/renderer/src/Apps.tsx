@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import type { AppAccess, DesktopState, InstalledApp, RecordedStep } from '../../shared/desktop.ts'
 import { Select } from './ui/Select.tsx'
+import { nameOf } from './ui/assistantName.ts'
 
 const cleanError = (err: unknown) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.'
@@ -88,7 +89,7 @@ export function AppsPage({ onTalk }: { onTalk: () => void }) {
         <section className="d-section">
           <header className="d-head">
             <h2 className="d-title">
-              <AppWindow aria-hidden /> Apps Atlas may use · {state.apps.length}
+              <AppWindow aria-hidden /> Apps {nameOf()} may use · {state.apps.length}
             </h2>
             <button type="button" className="btn btn-primary btn-sm" onClick={() => void openPicker()}>
               <Plus className="size-3.5" aria-hidden /> Add
@@ -138,7 +139,7 @@ export function AppsPage({ onTalk }: { onTalk: () => void }) {
               <p className="min-w-0 flex-1 truncate font-medium">{a.name}</p>
               <div className="w-full @sm:w-48">
                 <Select
-                  label={`What Atlas may do in ${a.name}`}
+                  label={`What ${nameOf()} may do in ${a.name}`}
                   value={a.access}
                   onChange={v => void run(async () => setState(await window.desktop.setAccess(a.id, v as AppAccess)))}
                   items={(Object.keys(ACCESS_LABEL) as AppAccess[]).map(k => ({ value: k, label: ACCESS_LABEL[k] }))}
@@ -197,7 +198,7 @@ export function AppsPage({ onTalk }: { onTalk: () => void }) {
                   <input className="field py-1 text-xs" placeholder="What it is for (optional)" value={goal} onChange={e => setGoal(e.target.value)} aria-label="What the task is for" />
                   <div className="flex gap-2">
                     <button type="button" className="btn btn-primary btn-sm flex-1" onClick={teach} disabled={!taskName.trim()}>
-                      Teach Atlas this task
+                      Teach {nameOf()} this task
                     </button>
                     <button type="button" className="btn btn-sm" onClick={() => setSteps(null)}>
                       Discard

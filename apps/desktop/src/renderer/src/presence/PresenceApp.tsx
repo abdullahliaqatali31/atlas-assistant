@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type Poi
 import type { PresenceState } from '../../../shared/presence.ts'
 import { Orb, type OrbState } from '../ui/Orb.tsx'
 
-const LABEL = { idle: 'Atlas', listening: 'Listening…', thinking: 'Thinking…', speaking: 'Speaking' } as const
+const LABEL = { idle: '', listening: 'Listening…', thinking: 'Thinking…', speaking: 'Speaking' } as const
 const ORB: Record<PresenceState['activity'], OrbState> = { idle: 'idle', listening: 'listening', thinking: 'thinking', speaking: 'speaking' }
 const ZOOM = { s: 0.85, m: 1, l: 1.2 } as const
 
@@ -99,7 +99,7 @@ export function PresenceApp() {
           onKeyDown={e => e.key === 'Enter' && void (s && s.activity !== 'idle' ? window.presence.stop() : window.presence.talk())}
           className="relative grid size-14 cursor-grab touch-none select-none place-items-center rounded-full border border-border bg-solid/95 shadow-lg transition-shadow hover:shadow-[0_0_18px_var(--accent-soft)] active:cursor-grabbing"
           title={s && s.activity !== 'idle' ? 'Click to stop · drag to move' : 'Click to talk · drag to move · right-click for options'}
-          aria-label="Talk to Atlas"
+          aria-label={`Talk to ${s?.name ?? 'Atlas'}`}
         >
           <Orb state={ORB[s?.activity ?? 'idle']} level={s?.level ?? 0} size={44} />
           {!!s && s.waiting + s.later > 0 && (
@@ -115,7 +115,7 @@ export function PresenceApp() {
           </div>
           <div className="min-w-0 flex-1 py-0.5">
             <p className={`text-[11px] font-medium ${s.activity === 'listening' ? 'text-warm' : 'text-accent'}`} role="status">
-              {LABEL[s.activity]}
+              {LABEL[s.activity] || s.name}
             </p>
             {s.caption && (
               <p className="line-clamp-2 text-xs leading-snug text-text" dir="auto">
@@ -172,7 +172,7 @@ export function PresenceApp() {
                 </button>
               )}
               <button type="button" className="ml-auto flex h-8 items-center gap-1 rounded px-1.5 text-[11px] text-muted hover:text-text" onClick={() => void window.presence.open()}>
-                <MessageSquareReply className="size-3.5" aria-hidden /> Open Atlas
+                <MessageSquareReply className="size-3.5" aria-hidden /> Open {s.name}
               </button>
             </div>
           </div>
@@ -191,7 +191,7 @@ export function PresenceApp() {
           </header>
           <div className="px-3 pb-3 pt-1.5">
             {s.card.kind === 'locked' ? (
-              <p className="text-sm text-text">Something is waiting for you. Open Atlas and confirm it's you to see it.</p>
+              <p className="text-sm text-text">Something is waiting for you. Open {s.name} and confirm it's you to see it.</p>
             ) : s.card.kind === 'approval' ? (
               <>
                 <p className="text-sm leading-snug text-text" dir="auto">
@@ -239,7 +239,7 @@ export function PresenceApp() {
                 </>
               )}
               <button type="button" className="ml-auto h-8 rounded px-1.5 text-[11px] text-muted hover:text-text" onClick={() => void window.presence.open()}>
-                Open Atlas
+                Open {s.name}
               </button>
             </div>
           </div>

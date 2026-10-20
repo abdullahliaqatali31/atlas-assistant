@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import type { FileAccess, FileBatchView, FilesState } from '../../shared/files.ts'
 import { ago, useNow } from './Jarvis.tsx'
 import { Select } from './ui/Select.tsx'
+import { nameOf } from './ui/assistantName.ts'
 
 const cleanError = (err: unknown) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.'
@@ -77,7 +78,7 @@ export function FilesPage({ onTalk }: { onTalk: () => void }) {
               <div className="flex w-full items-center gap-1 @md:w-auto">
               <div className="min-w-0 flex-1 @md:w-52 @md:flex-none">
                 <Select
-                  label={`What Atlas may do in ${f.name}`}
+                  label={`What ${nameOf()} may do in ${f.name}`}
                   value={f.access}
                   onChange={v => void run(() => window.files.setAccess(f.id, v as FileAccess))}
                   items={(Object.keys(ACCESS_LABEL) as FileAccess[]).map(k => ({ value: k, label: ACCESS_LABEL[k] }))}
@@ -110,7 +111,7 @@ export function FilesPage({ onTalk }: { onTalk: () => void }) {
                 ))}
               </ul>
               <button type="button" className="btn btn-sm" onClick={onTalk}>
-                <MessageSquare className="size-3.5" aria-hidden /> Talk to Atlas
+                <MessageSquare className="size-3.5" aria-hidden /> Talk to {nameOf()}
               </button>
             </div>
           </details>
@@ -119,7 +120,7 @@ export function FilesPage({ onTalk }: { onTalk: () => void }) {
         <section className="d-section">
           <header className="d-head">
             <h2 className="d-title">
-              <History aria-hidden /> What Atlas changed
+              <History aria-hidden /> What {nameOf()} changed
             </h2>
           </header>
           {state.history.length === 0 && <p className="d-note">Nothing yet. Moves, renames, new folders and Recycle Bin items appear here, with undo.</p>}

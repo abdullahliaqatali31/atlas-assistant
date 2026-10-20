@@ -5,6 +5,7 @@ import type { AskWhen, IdentityView } from '../../shared/identity.ts'
 import { learnAlias, SENSITIVITIES, type Sensitivity, type WakeMatch, type WakeView } from '../../shared/wake.ts'
 import { Select } from './ui/Select.tsx'
 import { WakeListener } from './wake/listener.ts'
+import { nameOf } from './ui/assistantName.ts'
 
 const cleanError = (err: unknown) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.'
@@ -92,7 +93,7 @@ function CodeCard() {
               ? 'Not set up on this PC: Windows Settings › Accounts › Sign-in options.'
               : !view.configured
                 ? 'Set a typed code first: it stays the fallback.'
-                : 'Windows’ own dialog appears by itself when Atlas checks it’s you; the typed code still works. Atlas never sees your face or finger, only Windows’ yes or no.'}
+                : `Windows’ own dialog appears by itself when ${nameOf()} checks it’s you; the typed code still works. ${nameOf()} never sees your face or finger, only Windows’ yes or no.`}
           </span>
         </span>
       </label>

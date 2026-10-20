@@ -248,13 +248,13 @@ export function Brain(props: BrainProps) {
         px[i * 3 + 1] = q.y
         px[i * 3 + 2] = q.z
         const tw = 0.6 + 0.4 * Math.sin(t * (0.6 + d.s) + d.s * 40)
-        ctx.fillStyle = `rgba(125,211,252,${(0.05 + 0.13 * depthA(q.z) * tw * dim).toFixed(3)})`
-        const sz = 0.7 + q.k * 0.6
+        ctx.fillStyle = `rgba(125,211,252,${(0.09 + 0.24 * depthA(q.z) * tw * dim).toFixed(3)})`
+        const sz = 0.8 + q.k * 0.7
         ctx.fillRect(q.x, q.y, sz, sz)
       }
       // Synapses in three depth bands, one path each.
       ctx.lineWidth = 0.6
-      for (const [lo, hi, a] of [[-9, -0.25, 0.035], [-0.25, 0.3, 0.07], [0.3, 9, 0.12]] as const) {
+      for (const [lo, hi, a] of [[-9, -0.25, 0.06], [-0.25, 0.3, 0.12], [0.3, 9, 0.2]] as const) {
         ctx.beginPath()
         for (const [i, j] of s.synapses) {
           const z = (px[i * 3 + 2]! + px[j * 3 + 2]!) / 2
@@ -323,7 +323,7 @@ export function Brain(props: BrainProps) {
           if (i) ctx.lineTo(q.x, q.y)
           else ctx.moveTo(q.x, q.y)
         })
-        ctx.strokeStyle = `rgba(125,211,252,${(0.035 + 0.05 * depthA(front / line.length) * dim).toFixed(3)})`
+        ctx.strokeStyle = `rgba(125,211,252,${(0.07 + 0.11 * depthA(front / line.length) * dim).toFixed(3)})`
         ctx.stroke()
       }
 
@@ -425,10 +425,10 @@ export function Brain(props: BrainProps) {
         const flare = usedAt !== undefined ? Math.exp(-(wall - usedAt) / 2600) : 0
         const bornAt = p.born.get(n.id)
         const birth = bornAt !== undefined ? Math.min(1, (wall - bornAt) / 1200) : 1
-        const base = (3.6 + 1.5 * Math.sqrt(n.degree) + 1.2 * Math.log2(1 + n.uses)) * q.k * Math.sqrt(cam.zoom) * birth
+        const base = (2.4 + 0.9 * Math.sqrt(n.degree) + 0.8 * Math.log2(1 + n.uses)) * q.k * Math.sqrt(cam.zoom) * birth
         const r = base * (1 + 0.6 * flare)
-        ctx.globalAlpha = Math.min(1, (0.5 + 0.5 * flare) * a)
-        const g = r * (6 + 9 * flare)
+        ctx.globalAlpha = Math.min(1, (0.38 + 0.6 * flare) * a)
+        const g = r * (4.5 + 9 * flare)
         ctx.drawImage(glow(color), q.x - g / 2, q.y - g / 2, g, g)
         ctx.globalAlpha = Math.min(1, a * (0.85 + 0.15 * moodPulse))
         ctx.fillStyle = flare > 0.2 ? '#ffffff' : color
