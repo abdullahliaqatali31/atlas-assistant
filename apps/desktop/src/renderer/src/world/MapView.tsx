@@ -96,6 +96,21 @@ const viewOf = (m: MapLibre): View => {
 
 const ICONS: Record<string, () => ImageData> = { plane: planeIcon, ship: shipIcon }
 
+/**
+ * The map's background threads: MapLibre starts one per two CPU cores (4 here), each with its
+ * own copy of tile data. One is plenty for a modest machine (Lite), two otherwise.
+ */
+let workersSet = false
+const setMapWorkers = () => {
+  if (workersSet) return
+  workersSet = true
+  try {
+    maplibregl.setWorkerCount(isLite() ? 1 : 2)
+  } catch {
+    // Already started: keep the default.
+  }
+}
+
 /** Sources whose points move every second or two (planes, ships, satellites). */
 const MOVING = new Set(['flights', 'ships', 'satellites'])
 /**
@@ -240,6 +255,7 @@ export function MapView({
 
   useEffect(() => {
     if (!box.current) return
+    setMapWorkers()
     const m = new maplibregl.Map({ container: box.current, style: BASE_URL.dark, center: [70, 28], zoom: 2.2, attributionControl: false, pixelRatio: isLite() ? 1 : Math.min(window.devicePixelRatio, 1.5), fadeDuration: 0, maxTileCacheZoomLevels: 3 })
     map.current = m
     // Dev runs only: a handle for checking the map from the debugger.

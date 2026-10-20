@@ -298,15 +298,23 @@ export function AtlasBrowser({ mode, driving, panes, onMode }: { mode: BrowserMo
     if (tabs?.tabs.length) asked.current = false
   }, [tabs])
 
-  // The tab shown wakes; the longest-unshown sleep past the limit; closed tabs go.
+  // The tab shown wakes; the longest-unshown sleep past the limit (fewer on a modest machine); closed tabs go.
+  // Out of sight for two minutes, every page sleeps: each one is a whole browser process (100-300 MB).
+  const [asleep, setAsleep] = useState(false)
+  useEffect(() => {
+    if (mode !== 'hidden') return setAsleep(false)
+    const t = setTimeout(() => setAsleep(true), 2 * 60_000)
+    return () => clearTimeout(t)
+  }, [mode])
   useEffect(() => {
     if (!born) return
+    const limit = asleep ? 0 : document.documentElement.dataset.lite === 'true' ? Math.min(3, AWAKE_TABS) : Math.min(6, AWAKE_TABS)
     setAwake(prev => {
       const ids = new Set(state.tabs.map(t => t.id))
-      const next = [...(state.active ? [state.active] : []), ...prev.filter(id => id !== state.active && ids.has(id))].slice(0, AWAKE_TABS)
+      const next = [...(state.active ? [state.active] : []), ...prev.filter(id => id !== state.active && ids.has(id))].slice(0, limit)
       return next.length === prev.length && next.every((id, i) => id === prev[i]) ? prev : next
     })
-  }, [born, state.active, state.tabs])
+  }, [born, state.active, state.tabs, asleep])
 
   const onEl = useMemo(
     () => (id: string, el: WebviewEl | null) => {

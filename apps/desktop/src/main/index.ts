@@ -569,6 +569,8 @@ const createWindow = ({ inactive = false } = {}) => {
     const open = Boolean(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized())
     const inView = open && Boolean(win?.isFocused())
     presence.mainWindow(inView ? 'front' : open ? 'open' : 'away')
+    // PC readings: frequent while Atlas is on screen, rare (nothing waiting in memory) while it is away.
+    pcSystem.setActive(open)
     // Coming to the front with something on the glass panel: the app takes it over, the widget goes compact.
     if (inView) handOffGlass()
   }
@@ -577,6 +579,7 @@ const createWindow = ({ inactive = false } = {}) => {
   win.on('closed', () => {
     win = null
     presence.mainWindow('away')
+    pcSystem.setActive(false)
     rendererReady = false
     heldReplies = []
   })
@@ -1137,6 +1140,8 @@ const isCompanion = (wc: Electron.WebContents | null) => win !== null && !win.is
 
 const allowMicrophoneOnlyForCompanion = () => {
   const s = session.defaultSession
+  // Atlas's own boxes need no spell-checker: it loads (and downloads) dictionaries for nothing.
+  s.setSpellCheckerEnabled(false)
   s.setPermissionRequestHandler((wc, permission, callback, details) => {
     const audioOnly = permission === 'media' && 'mediaTypes' in details && (details.mediaTypes ?? []).every(t => t === 'audio')
     callback(isCompanion(wc) && audioOnly)
@@ -1199,11 +1204,15 @@ if (!app.requestSingleInstanceLock()) {
     supervisor.start()
     pcSystem.start()
     sysmap.start()
-    // The glass panel loads hidden in the background, so it opens at once when asked.
-    setTimeout(() => glass.prewarm(), 4_000).unref?.()
+    // The glass panel loads hidden in the background so it opens at once, except in Lite mode,
+    // where its ~75 MB wait until the first time it is asked for.
+    if (!windowLook.solid) setTimeout(() => glass.prewarm(), 4_000).unref?.()
     // Started by Windows at login: stay in the tray until the owner opens Atlas (the widget shows meanwhile).
     if (!startedHidden()) createWindow()
-    else presence.mainWindow('away')
+    else {
+      presence.mainWindow('away')
+      pcSystem.setActive(false)
+    }
   })
   // Staying alive in the tray is the point: never quit when the last window closes.
   app.on('window-all-closed', () => {})

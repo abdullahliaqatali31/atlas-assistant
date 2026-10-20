@@ -17,6 +17,8 @@ import { mainWebPreferences } from './window-prefs.ts'
 
 export class GlassPanel {
   private win: BrowserWindow | null = null
+  /** A closed panel is released after a while, so it holds no memory when unused. */
+  private release: NodeJS.Timeout | null = null
   private view: GlassView | null = null
   /** The last news list shown, so "number 2" means what the owner sees. */
   private list: Headline[] = []
@@ -82,6 +84,8 @@ export class GlassPanel {
   }
 
   private show(view: GlassView) {
+    if (this.release) clearTimeout(this.release)
+    this.release = null
     this.view = view
     const win = this.ensure()
     const widget = this.deps.widget()
@@ -104,6 +108,15 @@ export class GlassPanel {
     this.view = null
     if (this.win && !this.win.isDestroyed()) this.win.hide()
     this.deps.onShown?.(false)
+    if (this.release) clearTimeout(this.release)
+    this.release = setTimeout(() => {
+      this.release = null
+      if (this.view || !this.win || this.win.isDestroyed()) return
+      this.win.destroy()
+      this.win = null
+      this.ready = false
+    }, 5 * 60_000)
+    this.release.unref?.()
   }
 
   private ensure(): BrowserWindow {

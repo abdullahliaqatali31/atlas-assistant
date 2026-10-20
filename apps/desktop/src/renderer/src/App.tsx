@@ -231,7 +231,9 @@ export function App() {
   const areaRef = useRef<HTMLDivElement>(null);
   // Every page loads in the background once the app is idle, so opening one never blinks a loader.
   useEffect(() => {
-    const pages = [() => import("./World.tsx"), () => import("./News.tsx"), () => import("./ProjectsHome.tsx"), () => import("./Files.tsx"), () => import("./Apps.tsx"), () => import("./Learning.tsx"), () => import("./Controls.tsx"), () => import("./Personality.tsx"), () => import("./habits/Habits.tsx")];
+    // The World page brings the whole map engine: on a modest machine (Lite) it loads when first opened.
+    const lite = document.documentElement.dataset.lite === "true";
+    const pages = [...(lite ? [] : [() => import("./World.tsx")]), () => import("./News.tsx"), () => import("./ProjectsHome.tsx"), () => import("./Files.tsx"), () => import("./Apps.tsx"), () => import("./Learning.tsx"), () => import("./Controls.tsx"), () => import("./Personality.tsx"), () => import("./habits/Habits.tsx")];
     let i = 0;
     let handle = 0;
     const next = () => {
@@ -268,6 +270,21 @@ export function App() {
   );
   const [placeMenu, setPlaceMenu] = useState(false);
   const [board, setBoard] = useState(false);
+  // Ten minutes out of sight: the World map (its engine, tiles and data) is let go; it comes back when shown.
+  const [dormant, setDormant] = useState(false);
+  useEffect(() => {
+    let t = 0;
+    const on = () => {
+      clearTimeout(t);
+      if (document.hidden) t = window.setTimeout(() => setDormant(true), 10 * 60_000);
+      else setDormant(false);
+    };
+    document.addEventListener("visibilitychange", on);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("visibilitychange", on);
+    };
+  }, []);
   const [compact, setCompact] = useState(false);
   const [map3d, setMap3d] = useState(false);
   const [onTop, setOnTop] = useState(false);
@@ -864,7 +881,7 @@ export function App() {
                               open={(t) => (t === "world" ? goStage("world") : open(t))}
                             />
                           ) : x === "world" ? (
-                            <WorldPage />
+                            dormant ? null : <WorldPage />
                           ) : x === "habits" ? (
                             <HabitsPage />
                           ) : (

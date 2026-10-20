@@ -16,6 +16,8 @@ import { diffSnapshots, interpretProbe, SETTINGS_PAGES, describeSystem, type Sys
 import PROBE_PS1 from './probe.ps1?raw'
 
 const POLL_MS = 45_000
+/** While Atlas is away (minimised or in the tray). */
+const AWAY_POLL_MS = 5 * 60_000
 const ONLINE_CHECK_MS = 5_000
 const REQUEST_TIMEOUT_MS = 60_000
 
@@ -24,6 +26,9 @@ type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; time
 /** A PowerShell script answering one JSON request per line. */
 export class PsWorker {
   private child: ChildProcessWithoutNullStreams | null = null
+  /** Exits after this long with nothing asked (0: stays); the next request starts it again. */
+  idleMs = 0
+  private idleTimer: NodeJS.Timeout | null = null
   private starting: Promise<void> | null = null
   private readonly pending = new Map<number, Pending>()
   private nextId = 1
@@ -86,6 +91,8 @@ export class PsWorker {
   }
 
   async request<T>(cmd: string, timeoutMs = REQUEST_TIMEOUT_MS, arg?: unknown): Promise<T> {
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = null
     await this.start()
     const child = this.child
     if (!child) throw new Error(`${this.name} is not running.`)
@@ -97,7 +104,18 @@ export class PsWorker {
       }, timeoutMs)
       this.pending.set(id, { resolve: v => resolve(v as T), reject, timer })
       child.stdin.write(`${JSON.stringify({ id, cmd, arg })}\n`)
-    })
+    }).finally(() => this.releaseWhenIdle())
+  }
+
+  /** With nothing pending, exit after idleMs: a PowerShell process holds ~100 MB while it waits. */
+  releaseWhenIdle() {
+    if (!this.idleMs || this.pending.size) return
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null
+      if (!this.pending.size) this.stop()
+    }, this.idleMs)
+    this.idleTimer.unref?.()
   }
 
   stop() {
@@ -116,6 +134,7 @@ export class SystemService {
   private onlineTimer: NodeJS.Timeout | null = null
   private busy: Promise<void> | null = null
   private wasOnline = true
+  private active = true
 
   constructor(
     private readonly deps: {
@@ -156,10 +175,31 @@ export class SystemService {
     return this.busy
   }
 
+  /**
+   * Atlas on screen: a reading every 45 s with the helper kept warm. Away (minimised, in the tray):
+   * every 5 minutes, and the helpers exit between readings, so nothing waits in memory.
+   */
+  setActive(active: boolean) {
+    if (active === this.active) return
+    this.active = active
+    this.worker.idleMs = this.quick.idleMs = active ? 0 : 30_000
+    if (!active) {
+      // Nothing pending now: let them go soon.
+      this.worker.releaseWhenIdle()
+      this.quick.releaseWhenIdle()
+    }
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = setInterval(() => void this.refresh(), active ? POLL_MS : AWAY_POLL_MS)
+      this.timer.unref?.()
+    }
+    if (active) void this.refresh()
+  }
+
   start() {
     if (process.platform !== 'win32') return
     void this.refresh()
-    this.timer = setInterval(() => void this.refresh(), POLL_MS)
+    this.timer = setInterval(() => void this.refresh(), this.active ? POLL_MS : AWAY_POLL_MS)
     this.timer.unref?.()
     // Cheap signals between readings: the network coming and going, power and lock.
     this.onlineTimer = setInterval(() => {
