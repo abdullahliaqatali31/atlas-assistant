@@ -26,6 +26,7 @@ import { BR, type BrainBridge, type MemoryUseWhy } from '../shared/brain.ts'
 import { PWC, type PowerUpBridge } from '../shared/powerup.ts'
 import { BRT, type BrowserTabsBridge, type BrowserTabsState } from '../shared/browser.ts'
 import { HB, type HabitsBridge, type HabitsView } from '../shared/habits.ts'
+import { SCT, type ShortcutsView } from '../shared/shortcuts.ts'
 
 const subscribe = <T>(channel: string, cb: (v: T) => void) => {
   const listener = (_e: IpcRendererEvent, v: T) => cb(v)
@@ -59,7 +60,7 @@ const bridge: AssistantBridge = {
   onUsage: cb => subscribe<UsageView>(CH.usageChanged, cb),
   setBudget: usd => ipcRenderer.invoke(CH.setBudget, usd),
   startup: () => ipcRenderer.invoke(CH.startup),
-  setStartup: on => ipcRenderer.invoke(CH.setStartup, on),
+  setStartup: (on, show) => ipcRenderer.invoke(CH.setStartup, on, show),
   setPrice: (model, price) => ipcRenderer.invoke(CH.setPrice, model, price),
   answerApproval: (id, approved) => ipcRenderer.invoke(CH.answerApproval, id, approved),
   initiativeAction: (id, action) => ipcRenderer.invoke(CH.initiativeAction, id, action),
@@ -164,6 +165,8 @@ const identity: IdentityBridge = {
   setAskWhen: when => ipcRenderer.invoke(IC.setAskWhen, when),
   speakChallenge: language => ipcRenderer.invoke(IC.speakChallenge, language),
   onChanged: cb => subscribe<IdentityView>(IC.changed, cb),
+  hello: () => ipcRenderer.invoke(IC.hello),
+  setHello: on => ipcRenderer.invoke(IC.setHello, on),
 }
 
 contextBridge.exposeInMainWorld('identity', identity)
@@ -367,3 +370,6 @@ const habits: HabitsBridge = {
   refresh: () => ipcRenderer.invoke(HB.refresh),
 }
 contextBridge.exposeInMainWorld('habits', habits)
+
+/** The shortcut board: which global shortcuts Windows gave Atlas. */
+contextBridge.exposeInMainWorld('shortcuts', { list: (): Promise<ShortcutsView> => ipcRenderer.invoke(SCT.list) })

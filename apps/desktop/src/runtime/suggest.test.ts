@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseOptions } from './suggest.ts'
+import { parseDone, parseOptions } from './suggest.ts'
 
 describe('quick replies', () => {
   it('keeps up to four short, distinct, clean options', () => {
@@ -8,5 +8,11 @@ describe('quick replies', () => {
     expect(parseOptions(String.raw`{"options": ["a\u0007b", 5, ""]}`)).toEqual(['a b'])
     expect(parseOptions('no json')).toEqual([])
     expect(parseOptions('{"options": "x"}')).toEqual([])
+  })
+
+  it('reads whether the topic is finished', () => {
+    expect(parseDone('{"done": true, "options": []}')).toBe(true)
+    expect(parseDone('{"done": "yes"}')).toBe(false)
+    expect(parseDone('nothing')).toBe(false)
   })
 })

@@ -23,7 +23,7 @@ import {
   type ReplyEvent,
   type RuntimeStatus,
   type UsageView,
-  type SessionChange, parseChatModelChoice, type ChatModelChoice } from '../shared/ipc.ts'
+  type SessionChange, parseChatModelChoice, type ChatModelChoice, type UiMode } from '../shared/ipc.ts'
 import { CC } from '../shared/control.ts'
 import { CHALLENGE, IC, isAskWhen } from '../shared/identity.ts'
 import { NC } from '../shared/news.ts'
@@ -34,16 +34,18 @@ import { FileService } from './files/service.ts'
 import { UiService } from './ui.ts'
 import { WorldService } from './world.ts'
 import { IdentityGate } from './identity.ts'
+import { WindowsHello } from './system/hello.ts'
 import { gateIpc } from './ipc-gate.ts'
 import { mainWebPreferences } from './window-prefs.ts'
 import { registerBackupIpc } from './backup.ts'
 import { CodeService } from './code/service.ts'
-import { registerStartupIpc, startedHidden } from './startup.ts'
+import { ensureStartupDefault, registerStartupIpc, startedHidden } from './startup.ts'
 import { registerLearningIpc } from './learning.ts'
 import { registerBrainIpc } from './brain.ts'
 import { BrowserService } from './browser.ts'
 import { NotificationWatcher } from './system/notifications.ts'
 import { HabitsService } from './system/habits.ts'
+import { GLOBAL_SHORTCUTS, SCT, type GlobalShortcutId, type ShortcutsView } from '../shared/shortcuts.ts'
 import { forAtlas, HB, parseWorkHours, ROLE_LABEL, type ProfileRole } from '../shared/habits.ts'
 import type { BrowserMode } from '../shared/browser.ts'
 import { NewsService, newsSchemePrivileges } from './news.ts'
@@ -69,7 +71,7 @@ import type { GlassFile } from '../shared/glass.ts'
 import { describeEntry, searchMap } from '../shared/sysmap.ts'
 import { LIVE_VOICES, type LiveVoiceName } from '../shared/livevoice.ts'
 import type { VoiceChange } from '../shared/ui.ts'
-import { PRS, WIDGET_WHEN, type WidgetWhen } from '../shared/presence.ts'
+import { PRS, WIDGET_WHEN, type PresenceCommand, type WidgetWhen } from '../shared/presence.ts'
 
 // Privileged scheme for the local speech model must be declared before 'ready'.
 // Electron takes one list of privileged schemes, before 'ready': local speech models and news pictures.
@@ -86,7 +88,6 @@ const isDev = !app.isPackaged && Boolean(process.env.ELECTRON_RENDERER_URL)
 const devEnvFile = app.isPackaged ? null : join(app.getAppPath(), '../../.env')
 const ACCENT = { r: 0x14, g: 0xb8, b: 0xa6 }
 /** Brings Atlas to the front from anywhere. */
-const SUMMON_HOTKEY = 'CommandOrControl+Alt+A'
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -109,9 +110,13 @@ let sessionWatch: ReturnType<typeof watchSession> | null = null
 // While locked, the runtime still believes the owner is away: the return that
 // would start a briefing is held here until the security code is confirmed.
 const identity = new IdentityGate(join(app.getPath('userData'), 'identity.json'))
+/** Face, fingerprint or PIN through Windows Hello, for the owner check. */
+const hello = new WindowsHello(join(app.getPath('userData'), 'workers'), (level, message) => log(level, message))
+/** The owner check as the window sees it, with whether Windows Hello is set up. */
+const identityView = () => ({ ...identity.view(), helloAvailable: hello.knownAvailable })
 let heldReturn: Extract<SessionChange, { idleMs: number }> | null = null
 const publishIdentity = () => {
-  toRenderer(IC.changed, identity.view())
+  toRenderer(IC.changed, identityView())
   presence.refresh()
   // Nothing stays on the desktop while the owner check is on, and nobody unconfirmed gets Full control.
   if (identity.locked) {
@@ -207,7 +212,7 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
       presence.spokeUp(e.item)
     }
     if (e.type === 'chunk' || e.type === 'heard' || e.type === 'initiative') presence.replyStarted(e.replyId)
-    if (e.type === 'suggestions') presence.suggest(e.replyId, e.text, e.options)
+    if (e.type === 'suggestions' && e.options.length) presence.suggest(e.replyId, e.text, e.options)
     replyToRenderer(e)
   },
   onLater: (later, item) => {
@@ -274,17 +279,71 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
 
 // ── desktop widget ──────────────────────────────────────────
 
+/** Tell the main window's conversation to stop, talk or send a quick reply (false while it is not loaded). */
+const pageCommand = (c: PresenceCommand): boolean => {
+  if (!win || win.isDestroyed() || !rendererReady) return false
+  toRenderer(PRS.command, c)
+  return true
+}
+
+/** Waits (opening the window if needed) until the page can take a command or a page change. */
+const whenPageReady = async (run: () => boolean) => {
+  if (run()) return
+  createWindow()
+  for (let i = 0; i < 75; i++) {
+    await new Promise(r => setTimeout(r, 200))
+    if (run()) return
+  }
+}
+
+/** Quiet mode from the shortcut remembers the mode it came from. */
+let beforeQuiet: UiMode | null = null
+const toggleQuiet = () => {
+  const now = supervisor.currentMode
+  const next: UiMode = now === 'quiet' ? (beforeQuiet ?? 'companion') : 'quiet'
+  if (now !== 'quiet') beforeQuiet = now
+  supervisor.setMode(next)
+  publish({ mode: next })
+}
+
+/** What each global shortcut does. */
+const shortcutActions: Record<GlobalShortcutId, () => void> = {
+  front: () => void ui.apply({ front: true }).catch(() => createWindow()),
+  talk: () => void whenPageReady(() => pageCommand('talk')),
+  stop: () => void pageCommand('stop'),
+  quiet: toggleQuiet,
+  palette: () => {
+    void ui.apply({ front: true }).catch(() => createWindow())
+    void whenPageReady(() => (rendererReady ? (ui.send({ palette: true }), true) : false))
+  },
+  board: () => {
+    void ui.apply({ front: true }).catch(() => createWindow())
+    void whenPageReady(() => (rendererReady ? (ui.send({ shortcuts: true }), true) : false))
+  },
+  // Registered by Controls (it owns pausing).
+  pause: () => undefined,
+}
+
+const registerShortcuts = () => {
+  for (const s of GLOBAL_SHORTCUTS) {
+    if (s.id === 'pause') continue
+    try {
+      if (!globalShortcut.register(s.accelerator, shortcutActions[s.id])) log('warn', `The shortcut ${s.accelerator} (${s.label}) is taken by another app.`)
+    } catch {
+      log('warn', `The shortcut ${s.accelerator} could not be registered.`)
+    }
+  }
+}
+
+const shortcutsView = (): ShortcutsView => ({ global: GLOBAL_SHORTCUTS.map(s => ({ ...s, ok: globalShortcut.isRegistered(s.accelerator) })) })
+
 const presence = new PresenceWidget({
   file: join(app.getPath('userData'), 'presence.json'),
   preload: join(import.meta.dirname, '../preload/presence.cjs'),
   isDev,
   load: (w, page) => void (isDev ? w.loadURL(`${process.env.ELECTRON_RENDERER_URL}/${page}.html`) : w.loadFile(join(import.meta.dirname, `../renderer/${page}.html`))),
   openMain: () => createWindow(),
-  command: c => {
-    if (!win || win.isDestroyed() || !rendererReady) return false
-    toRenderer(PRS.command, c)
-    return true
-  },
+  command: c => pageCommand(c),
   answerApproval: (id, approved) => supervisor.answerApproval(id, approved),
   initiativeAction: (id, action) => supervisor.initiativeAction(id, action),
   approvals: () => status.approvals,
@@ -570,6 +629,7 @@ const updateTray = () => {
         ? { label: 'Resume automation', click: () => controls.setPaused(false) }
         : { label: 'Stop all automation', accelerator: controls.activeHotkey ?? undefined, click: () => controls.stopAll() },
       { type: 'separator' },
+      { label: 'Keyboard shortcuts', click: shortcutActions.board },
       { label: 'Quit', click: () => app.quit() },
     ]),
   )
@@ -686,6 +746,7 @@ handle(CH.interrupt, () => {
   toRenderer(CH.silence, null)
   supervisor.interrupt()
 })
+handle(SCT.list, () => shortcutsView())
 handle(CH.setMode, arg => {
   if (!isMode(arg)) throw new Error('Unknown mode.')
   supervisor.setMode(arg)
@@ -973,7 +1034,27 @@ const afterVerify = (r: ReturnType<IdentityGate['verify']>) => {
   else publishIdentity()
   return r
 }
-handle(IC.get, () => identity.view())
+handle(IC.get, () => identityView())
+handle(IC.hello, async () => {
+  if (!identity.hello) throw new Error('Windows Hello is off for the owner check.')
+  if (!identity.locked) return { ok: true, result: 'Verified' }
+  const hwnd = win && !win.isDestroyed() ? win.getNativeWindowHandle().readBigUInt64LE(0) : 0n
+  const result = await hello.verify(hwnd, `${status.setup.ownerName ? `${status.setup.ownerName}, c` : 'C'}onfirm it is you to open Atlas`)
+  if (result === 'Verified' && identity.locked) {
+    identity.passHello()
+    releaseOwner()
+  }
+  return { ok: result === 'Verified', result }
+})
+handle(IC.setHello, async on => {
+  if (typeof on !== 'boolean') throw new Error('On or off.')
+  if (identity.locked) throw new Error('Please confirm it is you first.')
+  if (on && !identity.configured) throw new Error('Set a typed code first: it stays the fallback when Windows Hello is not at hand.')
+  if (on && !(await hello.isAvailable(true))) throw new Error('Windows Hello is not set up on this PC (Settings › Accounts › Sign-in options).')
+  identity.setHello(on)
+  publishIdentity()
+  return identityView()
+})
 handle(IC.verify, code => {
   if (typeof code !== 'string' || code.length > 500) throw new Error('Type the code.')
   return afterVerify(identity.verify(code))
@@ -1036,12 +1117,11 @@ if (!app.requestSingleInstanceLock()) {
     tray = new Tray(trayIcon())
     tray.on('click', () => createWindow())
     controls.registerHotkey()
-    // Ctrl+Alt+A brings Atlas forward from anywhere (opens it if closed).
-    try {
-      if (!globalShortcut.register(SUMMON_HOTKEY, () => void ui.apply({ front: true }).catch(() => createWindow()))) log('warn', `The hotkey ${SUMMON_HOTKEY} is taken by another app; use the widget or the tray.`)
-    } catch {
-      log('warn', `The hotkey ${SUMMON_HOTKEY} could not be registered.`)
-    }
+    // The installed app starts with Windows (window open) unless the owner has chosen otherwise.
+    ensureStartupDefault()
+    // Ctrl+Alt+A brings Atlas forward, Ctrl+Alt+Space talks, and the rest of the board (shared/shortcuts.ts).
+    registerShortcuts()
+    void hello.isAvailable().then(() => publishIdentity())
     updateTray()
     sessionWatch = watchSession(change => {
       // Leaving (lock, sleep, away): a session's Full control ends here.

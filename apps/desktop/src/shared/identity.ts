@@ -30,6 +30,10 @@ export interface IdentityView {
    * and Windows itself is unlocked. Null while nobody is there to hear it.
    */
   askNow: number | null
+  /** The owner chose Windows Hello (face, fingerprint or PIN) as well as the typed code. */
+  hello: boolean
+  /** Windows Hello is set up on this PC. */
+  helloAvailable: boolean
 }
 
 /** Why the owner is back: an app start, a return from sleep or Windows lock, or from idling. */
@@ -47,6 +51,8 @@ export const IC = {
   setAskWhen: 'identity:set-ask-when',
   speakChallenge: 'identity:speak-challenge',
   changed: 'identity:changed',
+  hello: 'identity:hello',
+  setHello: 'identity:set-hello',
 } as const
 
 export interface IdentityBridge {
@@ -62,6 +68,10 @@ export interface IdentityBridge {
   /** Speaks the fixed "is that you?" line; null when speech is off. */
   speakChallenge(language: 'en' | 'ur-Latn' | 'ur-Arab'): Promise<{ replyId: string } | null>
   onChanged(cb: (v: IdentityView) => void): () => void
+  /** Confirm with Windows Hello: Windows' own dialog; true when Windows says it is the owner. */
+  hello(): Promise<{ ok: boolean; result: string }>
+  /** Use Windows Hello for the owner check (the typed code stays as the fallback). */
+  setHello(on: boolean): Promise<IdentityView>
 }
 
 /**
@@ -90,7 +100,7 @@ export const isAskWhen = (v: unknown): v is AskWhen => typeof v === 'string' && 
 
 /** Fixed challenge lines, so nothing personal goes through the model. */
 export const CHALLENGE: Record<'en' | 'ur-Latn' | 'ur-Arab', (name: string) => string> = {
-  en: name => `Hi${name ? ` ${name}` : ''}, is that you? Please say or type our security code.`,
-  'ur-Latn': name => `Salam${name ? ` ${name}` : ''}, kya ye aap hain? Apna security code bolein ya likhein.`,
-  'ur-Arab': name => `سلام${name ? ` ${name}` : ''}، کیا یہ آپ ہیں؟ اپنا سیکیورٹی کوڈ بولیں یا لکھیں۔`,
+  en: name => `Hi${name ? ` ${name}` : ''}, is that you? Please confirm.`,
+  'ur-Latn': name => `Salam${name ? ` ${name}` : ''}, kya ye aap hain? Confirm karein.`,
+  'ur-Arab': name => `سلام${name ? ` ${name}` : ''}، کیا یہ آپ ہیں؟ تصدیق کریں۔`,
 }

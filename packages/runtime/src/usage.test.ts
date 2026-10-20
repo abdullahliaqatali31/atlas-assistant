@@ -131,7 +131,8 @@ describe('per-call breakdown', () => {
     expect(s.byModel[0]).toMatchObject({ cacheWrite: 500 })
   })
 
-  it('keeps only the newest thousand calls', () => {
+  // A thousand database writes: under a full parallel test run this takes more than 5 s.
+  it('keeps only the newest thousand calls', { timeout: 30_000 }, () => {
     const { memory } = setup()
     for (let i = 0; i < 1005; i++) memory.addCall({ at: i, model: 'm', purpose: 'chat', input: 1, output: 1, cached: 0, cacheWrite: 0, parts: {} })
     const recent = memory.recentCalls(2000)

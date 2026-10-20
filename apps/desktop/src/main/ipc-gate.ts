@@ -14,6 +14,7 @@ import { PCC } from '../shared/system.ts'
 import { BR } from '../shared/brain.ts'
 import { PWC } from '../shared/powerup.ts'
 import { HB } from '../shared/habits.ts'
+import { IC } from '../shared/identity.ts'
 
 export const OWNER_ONLY: ReadonlySet<string> = new Set([
   // Provider, key and server address: a swap would send conversations elsewhere.
@@ -73,6 +74,8 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   PWC.preview,
   PCC.setMap,
   PCC.setNotifications,
+  // Turning Windows Hello on or off changes how the owner is checked.
+  IC.setHello,
   // Browsing history is the owner's alone.
   HB.state,
   HB.setEnabled,

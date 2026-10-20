@@ -135,6 +135,8 @@ export interface StartupView {
   /** Only the installed app can register itself. */
   available: boolean
   enabled: boolean
+  /** At login, open the window (true) or start quietly in the tray. */
+  show: boolean
 }
 
 /** What the cost meter shows (same shape as the runtime's usage summary). */
@@ -238,7 +240,7 @@ export type ReplyEvent =
   /** The assistant is speaking up on its own; the reply that follows belongs to this item. */
   | { replyId: string; type: 'initiative'; item: InitiativeItem }
   /** After a reply: short things the owner might say next (buttons in the chat and the widget). */
-  | { replyId: string; type: 'suggestions'; text: string; options: string[] }
+  | { replyId: string; type: 'suggestions'; text: string; options: string[]; /** The topic looks finished: stop listening, offer nothing. */ ended: boolean }
 
 /** Channel names, shared so main and preload cannot drift apart. */
 export const CH = {
@@ -308,7 +310,7 @@ export interface AssistantBridge {
   setBudget(usd: number): Promise<void>
   /** Start with Windows (installed app only), in the tray. */
   startup(): Promise<StartupView>
-  setStartup(on: boolean): Promise<StartupView>
+  setStartup(on: boolean, show?: boolean): Promise<StartupView>
   setPrice(model: string, price: { input: number; output: number; cacheRead?: number | undefined } | null): Promise<void>
   answerApproval(id: string, approved: boolean): Promise<void>
   initiativeAction(id: string, action: InitiativeAction): Promise<void>

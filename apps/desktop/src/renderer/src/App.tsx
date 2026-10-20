@@ -16,6 +16,7 @@ import {
   FolderOpen,
   Globe2,
   Fingerprint,
+  Keyboard,
   Home as HomeIcon,
   ListTodo,
   Maximize2,
@@ -72,6 +73,7 @@ import { LockScreen } from "./LockScreen.tsx";
 import { Setup } from "./Setup.tsx";
 import { useCounts, type CountKey } from "./shell/counts.ts";
 import { STRIP_W, usePanelLayout } from "./shell/panelLayout.ts";
+import { ShortcutBoard } from "./shell/ShortcutBoard.tsx";
 import { Rail, type RailItem } from "./shell/Rail.tsx";
 import { useAlerts } from "./shell/alerts.ts";
 import { AlertsTimeline } from "./shell/AlertsTimeline.tsx";
@@ -246,6 +248,7 @@ export function App() {
     ["setup", "controls", "learning", "news", "projects"].includes(drawer ?? ""),
   );
   const [placeMenu, setPlaceMenu] = useState(false);
+  const [board, setBoard] = useState(false);
   const [compact, setCompact] = useState(false);
   const [map3d, setMap3d] = useState(false);
   const [onTop, setOnTop] = useState(false);
@@ -329,6 +332,8 @@ export function App() {
       if (c.side !== undefined) setLayout((l) => setSide(l, c.side ?? null));
       if (c.browser?.mode) setBrowserModeRef.current(c.browser.mode);
       if (c.browser?.driving !== undefined) setDriving(c.browser.driving);
+      if (c.palette) setPalette(true);
+      if (c.shortcuts) setBoard(true);
       if (c.news) {
         open("news");
         requestNewsFocus(c.news);
@@ -386,7 +391,10 @@ export function App() {
       if (typing || e.ctrlKey || e.metaKey || e.altKey || palette || compact)
         return;
       if (e.key === "Escape" && drawer && !pinned) open(null);
-      else if (e.key === "/") {
+      else if (e.key === "?") {
+        e.preventDefault();
+        setBoard(true);
+      } else if (e.key === "/") {
         e.preventDefault();
         focusAsk();
       } else if (e.key === "g" || e.key === "G") gRef.current = Date.now();
@@ -529,6 +537,13 @@ export function App() {
       onClick: () => void setWindow({ size: "compact" }),
       peek: peek("compact"),
     },
+    {
+      id: "shortcuts",
+      label: "Shortcuts",
+      icon: <Keyboard />,
+      active: board,
+      onClick: () => setBoard(true),
+    },
     item("setup", "Settings", <Settings2 />),
   ];
 
@@ -542,6 +557,14 @@ export function App() {
     window.dispatchEvent(new CustomEvent(ASK_EVENT, { detail: text }));
   const look = currentAppearance();
   const commands: Command[] = [
+    {
+      id: "shortcuts",
+      group: "Do",
+      label: "Keyboard shortcuts",
+      icon: <Keyboard />,
+      keywords: "keys hotkeys shortcut board",
+      run: () => setBoard(true),
+    },
     ...[...top, ...items].map((i) => ({
       id: `go-${i.id}`,
       group: "Go to",
@@ -1104,6 +1127,7 @@ export function App() {
           <Rail top={top} items={items} bottom={bottom} horizontal />
         )}
       </div>
+      {board && <ShortcutBoard onClose={() => setBoard(false)} />}
       <CommandPalette
         open={palette}
         onClose={() => setPalette(false)}

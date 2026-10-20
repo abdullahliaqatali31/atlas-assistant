@@ -1,4 +1,4 @@
-import { Archive, Download, Ear, KeyRound, Mic, Plus, Square, Trash2, Upload, X } from 'lucide-react'
+import { Archive, Download, Ear, Fingerprint, KeyRound, Mic, Plus, Square, Trash2, Upload, X } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import type { AskWhen, IdentityView } from '../../shared/identity.ts'
@@ -71,9 +71,31 @@ function CodeCard() {
   return (
     <Card icon={<KeyRound className="size-[18px]" />} title="Security code">
       <p className="text-xs text-muted">
-        When the assistant isn’t sure it’s you, it asks for this word or sentence before sharing anything private. It’s stored only as a scrambled hash on
-        this computer and is never sent to the AI. It is a friendly check, not a password: anyone who overhears it could repeat it.
+        When the assistant isn’t sure it’s you, it asks you to type this word or sentence before sharing anything private (it no longer asks aloud). It’s
+        stored only as a scrambled hash on this computer and is never sent to the AI.
       </p>
+
+      <label className={`flex items-start gap-2 rounded-xl border border-border p-2.5 text-sm ${view.helloAvailable ? '' : 'opacity-60'}`}>
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={view.hello}
+          disabled={!view.configured || !view.helloAvailable}
+          onChange={e => void run(() => window.identity.setHello(e.target.checked), e.target.checked ? 'Windows Hello is on.' : 'Windows Hello is off.')}
+        />
+        <span>
+          <span className="flex items-center gap-1.5 font-medium">
+            <Fingerprint className="size-4 text-accent" aria-hidden /> Windows Hello: face, fingerprint or PIN
+          </span>
+          <span className="block text-xs text-muted">
+            {!view.helloAvailable
+              ? 'Not set up on this PC: Windows Settings › Accounts › Sign-in options.'
+              : !view.configured
+                ? 'Set a typed code first: it stays the fallback.'
+                : 'Windows’ own dialog appears by itself when Atlas checks it’s you; the typed code still works. Atlas never sees your face or finger, only Windows’ yes or no.'}
+          </span>
+        </span>
+      </label>
 
       <div className="flex items-center gap-3">
         <span className="text-sm">Ask</span>

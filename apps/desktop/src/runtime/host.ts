@@ -421,8 +421,8 @@ const offerReplies = (replyId: string, reply: string) => {
   const llm = suggester
   if (!llm || !reply.trim()) return
   void suggestReplies(llm, lastOwnerText, reply, AbortSignal.timeout(20_000)).then(
-    options => {
-      if (options.length) post({ type: 'suggestions', replyId, text: reply.slice(-400), options })
+    ({ options, done }) => {
+      if (options.length || done) post({ type: 'suggestions', replyId, text: reply.slice(-400), options, ended: done })
     },
     error => log('warn', `Quick replies failed: ${error instanceof Error ? error.message : String(error)}`),
   )

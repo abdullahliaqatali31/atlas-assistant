@@ -1,5 +1,5 @@
 /**
- * Browser profiles and habits: what each Chrome, Edge or Brave profile is
+ * Browser profiles and habits: what each browser profile (Chrome, Edge, Comet, Firefox…) is
  * used for, when, and what does not belong where. Main reads each profile's
  * own history file on this PC (once the owner turns it on) and this module
  * turns the visits into time per site, category, hour and day, a guess at

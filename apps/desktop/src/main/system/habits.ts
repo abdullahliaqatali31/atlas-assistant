@@ -1,6 +1,7 @@
 /**
  * Browser profiles and habits, main side (shared/habits.ts does the sums).
- * Once the owner turns it on, this finds every Chrome, Edge and Brave
+ * Once the owner turns it on, this finds every Chromium browser (Chrome, Edge,
+ * Brave, Comet, Arc, Opera, Vivaldi…) and Firefox-family browser
  * profile on the PC (names, colours and pictures from the browser's own
  * "Local State"), copies each recently used profile's history file into
  * Atlas's folder (the browser keeps it locked) and reads the last 30 days of
@@ -8,7 +9,7 @@
  * changed. Nothing leaves the PC; Atlas gets a text summary of the profiles
  * the owner shares.
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -38,11 +39,75 @@ const WINDOW_DAYS = 30
 const REFRESH_MS = 10 * 60_000
 const MAX_VISITS = 60_000
 
-const BROWSERS: { id: string; name: string; dir: string }[] = [
+type Kind = 'chromium' | 'firefox'
+
+/** Chromium-family browsers (one "User Data" folder, profiles listed in its Local State), under %LOCALAPPDATA% unless noted. */
+const CHROMIUM: { id: string; name: string; dir: string; roaming?: boolean }[] = [
   { id: 'chrome', name: 'Chrome', dir: join('Google', 'Chrome', 'User Data') },
+  { id: 'chrome-beta', name: 'Chrome Beta', dir: join('Google', 'Chrome Beta', 'User Data') },
+  { id: 'chrome-canary', name: 'Chrome Canary', dir: join('Google', 'Chrome SxS', 'User Data') },
   { id: 'edge', name: 'Edge', dir: join('Microsoft', 'Edge', 'User Data') },
+  { id: 'edge-beta', name: 'Edge Beta', dir: join('Microsoft', 'Edge Beta', 'User Data') },
+  { id: 'edge-dev', name: 'Edge Dev', dir: join('Microsoft', 'Edge Dev', 'User Data') },
   { id: 'brave', name: 'Brave', dir: join('BraveSoftware', 'Brave-Browser', 'User Data') },
+  { id: 'comet', name: 'Comet', dir: join('Perplexity', 'Comet', 'User Data') },
+  { id: 'vivaldi', name: 'Vivaldi', dir: join('Vivaldi', 'User Data') },
+  { id: 'yandex', name: 'Yandex', dir: join('Yandex', 'YandexBrowser', 'User Data') },
+  { id: 'chromium', name: 'Chromium', dir: join('Chromium', 'User Data') },
+  { id: 'thorium', name: 'Thorium', dir: join('Thorium', 'User Data') },
+  { id: 'opera', name: 'Opera', dir: join('Opera Software', 'Opera Stable'), roaming: true },
+  { id: 'opera-gx', name: 'Opera GX', dir: join('Opera Software', 'Opera GX Stable'), roaming: true },
 ]
+
+/** Firefox-family browsers: profiles listed in profiles.ini under %APPDATA%. */
+const FIREFOX: { id: string; name: string; dir: string }[] = [
+  { id: 'firefox', name: 'Firefox', dir: join('Mozilla', 'Firefox') },
+  { id: 'zen', name: 'Zen', dir: 'zen' },
+  { id: 'floorp', name: 'Floorp', dir: 'Floorp' },
+  { id: 'librewolf', name: 'LibreWolf', dir: 'librewolf' },
+  { id: 'waterfox', name: 'Waterfox', dir: 'Waterfox' },
+]
+
+/** Arc installs as a Store app: its User Data sits inside the package folder. */
+const arcRoot = (local: string): string | null => {
+  try {
+    const pkg = readdirSync(join(local, 'Packages')).find(d => /^TheBrowserCompany\.Arc_/.test(d))
+    return pkg ? join(local, 'Packages', pkg, 'LocalCache', 'Local', 'Arc', 'User Data') : null
+  } catch {
+    return null
+  }
+}
+
+/** profiles.ini → each profile's name and folder. */
+const firefoxProfiles = (root: string): { name: string; path: string }[] => {
+  let ini = ''
+  try {
+    ini = readFileSync(join(root, 'profiles.ini'), 'utf8')
+  } catch {
+    return []
+  }
+  const out: { name: string; path: string }[] = []
+  for (const block of ini.split(/^\[/m)) {
+    if (!/^Profile\d+\]/.test(block)) continue
+    const get = (k: string) => new RegExp(`^${k}=(.*)$`, 'm').exec(block)?.[1]?.trim() ?? ''
+    const path = get('Path')
+    if (!path) continue
+    out.push({ name: get('Name') || path, path: get('IsRelative') === '0' ? path : join(root, path) })
+  }
+  return out
+}
+
+/** Search words from a search page's address (Google, Bing, DuckDuckGo, Yahoo, Perplexity). */
+const searchTerm = (url: string): string | null => {
+  try {
+    const u = new URL(url)
+    if (!/(^|\.)(google\.[a-z.]+|bing\.com|duckduckgo\.com|search\.yahoo\.com|perplexity\.ai|search\.brave\.com)$/.test(u.hostname)) return null
+    const q = u.searchParams.get('q') ?? u.searchParams.get('p')
+    return q?.trim() ? q.trim().slice(0, 100) : null
+  } catch {
+    return null
+  }
+}
 
 /** Fallback colours for profiles without their own (one per profile, in order). */
 const FALLBACK = ['#38bdf8', '#f472b6', '#a3e635', '#fbbf24', '#c084fc', '#2dd4bf', '#fb923c', '#94a3b8']
@@ -56,6 +121,7 @@ interface Saved {
 }
 
 interface Found extends ProfileInfo {
+  kind: Kind
   /** The account holder's name (to tell a person's name from a business name). */
   person: string
   history: string
@@ -182,14 +248,20 @@ export class HabitsService {
   private discover(): Found[] {
     const out: Found[] = []
     const local = process.env.LOCALAPPDATA ?? ''
-    for (const b of BROWSERS) {
-      const root = join(local, b.dir)
+    const roaming = process.env.APPDATA ?? ''
+    const roots = CHROMIUM.map(b => ({ id: b.id, name: b.name, root: join(b.roaming ? roaming : local, b.dir) }))
+    const arc = arcRoot(local)
+    if (arc) roots.push({ id: 'arc', name: 'Arc', root: arc })
+    for (const b of roots) {
+      const root = b.root
       let cache: Record<string, Record<string, unknown>> = {}
       try {
         cache = ((JSON.parse(readFileSync(join(root, 'Local State'), 'utf8')) as { profile?: { info_cache?: typeof cache } }).profile?.info_cache ?? {}) as typeof cache
       } catch {
         continue
       }
+      // Opera keeps one profile and may not list it: look in its own folder.
+      if (!Object.keys(cache).length) cache = existsSync(join(root, 'Default', 'History')) ? { Default: { name: b.name } } : existsSync(join(root, 'History')) ? { '': { name: b.name } } : {}
       for (const [dir, info] of Object.entries(cache)) {
         const history = join(root, dir, 'History')
         let mtime = 0
@@ -207,7 +279,8 @@ export class HabitsService {
         }
         const name = String(info.name || info.gaia_name || dir)
         out.push({
-          key: `${b.id}:${dir}`,
+          kind: 'chromium',
+          key: `${b.id}:${dir || 'main'}`,
           browser: b.name,
           name,
           account: typeof info.user_name === 'string' ? info.user_name : '',
@@ -217,6 +290,20 @@ export class HabitsService {
           history,
           mtime,
         })
+      }
+    }
+    for (const b of FIREFOX) {
+      for (const p of firefoxProfiles(join(roaming, b.dir))) {
+        const history = join(p.path, 'places.sqlite')
+        let mtime = 0
+        try {
+          // The journal changes as you browse; the main file only now and then.
+          mtime = Math.max(statSync(history).mtimeMs, existsSync(`${history}-wal`) ? statSync(`${history}-wal`).mtimeMs : 0)
+        } catch {
+          continue
+        }
+        const name = p.name.replace(/^default(-release)?$/i, b.name)
+        out.push({ kind: 'firefox', key: `${b.id}:${p.name}`, browser: b.name, name, account: '', color: FALLBACK[out.length % FALLBACK.length]!, picture: null, person: '', history, mtime })
       }
     }
     return out
@@ -237,6 +324,23 @@ export class HabitsService {
     }
     const db = new DatabaseSync(copy, { readOnly: true })
     try {
+      if (p.kind === 'firefox') {
+        // Firefox: microseconds since 1970, no measured time per visit; searches come from search-page addresses.
+        const rows = db
+          .prepare(
+            `SELECT v.visit_date / 1000 AS t, p.url AS url, p.title AS title FROM moz_historyvisits v JOIN moz_places p ON p.id = v.place_id
+             WHERE v.visit_date / 1000 > ? AND v.visit_type NOT IN (4, 8) ORDER BY v.visit_date LIMIT ${MAX_VISITS}`,
+          )
+          .all(since) as unknown as { t: number; url: string; title: string | null }[]
+        const visits: Visit[] = rows.map(r => ({ t: Number(r.t), dur: 0, url: r.url, title: r.title ?? '' }))
+        const counts = new Map<string, number>()
+        for (const v of visits) {
+          const term = searchTerm(v.url)
+          if (term) counts.set(term, (counts.get(term) ?? 0) + 1)
+        }
+        const searches = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([term, count]) => ({ term, count }))
+        return { mtime: p.mtime, spent: estimate(visits, own), searches }
+      }
       // Chrome's times are microseconds since 1601; converted in SQL so they stay small numbers.
       const rows = db
         .prepare(
@@ -291,7 +395,7 @@ export class HabitsService {
         // Let the window breathe between profiles.
         await sleep(15)
       }
-      if (!this.found.length) error = 'No Chrome, Edge or Brave profiles were found on this PC.'
+      if (!this.found.length) error = 'No browser profiles were found on this PC.'
     } catch (e) {
       error = e instanceof Error ? e.message : String(e)
     }

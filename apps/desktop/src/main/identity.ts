@@ -18,9 +18,11 @@ interface Stored {
   verifiedDay: string | null
   failures: number
   lockoutUntil: number | null
+  /** Windows Hello may confirm the owner too. */
+  hello: boolean
 }
 
-const EMPTY: Stored = { v: 1, salt: null, hash: null, askWhen: 'daily', verifiedDay: null, failures: 0, lockoutUntil: null }
+const EMPTY: Stored = { v: 1, salt: null, hash: null, askWhen: 'daily', verifiedDay: null, failures: 0, lockoutUntil: null, hello: false }
 const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
 
 const hashOf = (normalized: string, salt: Buffer) => scryptSync(normalized, salt, 32, SCRYPT)
@@ -77,6 +79,8 @@ export class IdentityGate {
       attemptsLeft: Math.max(0, MAX_ATTEMPTS - this.s.failures),
       lockoutUntil,
       askNow: this.lockedNow ? this.askNow : null,
+      hello: this.s.hello,
+      helloAvailable: false,
     }
   }
 
@@ -108,6 +112,25 @@ export class IdentityGate {
     if (!this.lockedNow || this.askNow !== null) return false
     this.askNow = this.now()
     return true
+  }
+
+  get hello() {
+    return this.s.hello
+  }
+
+  setHello(on: boolean): IdentityView {
+    this.s.hello = on
+    this.save()
+    return this.view()
+  }
+
+  /** Windows Hello said it is the owner: the same as the right code. */
+  passHello() {
+    this.s.failures = 0
+    this.s.lockoutUntil = null
+    this.s.verifiedDay = localDay(this.now())
+    this.lockedNow = false
+    this.save()
   }
 
   /** Compares a typed or transcribed code; three wrong answers pause attempts for ten minutes. */

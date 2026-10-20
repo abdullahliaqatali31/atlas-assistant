@@ -216,7 +216,7 @@ function DayRibbon({ view, profiles, tip }: { view: HabitsView; profiles: Profil
               <div key={p.key} className="flex items-center gap-2">
                 <div className="flex w-[124px] shrink-0 items-center gap-2" title={`${p.name} · ${p.browser}`}>
                   <Avatar p={p} size={20} />
-                  <span className="truncate text-xs">{p.name}</span>
+                  <span className="min-w-0 leading-tight"><span className="block truncate text-xs">{p.name}</span><span className="block truncate text-[9px] text-muted">{p.browser}</span></span>
                 </div>
                 <div className="relative h-6 flex-1 overflow-hidden rounded-md" style={{ background: 'var(--heat-0)' }}>
                   {w.days.includes(dayOfWeek) && (
@@ -668,7 +668,7 @@ function Intro({ onOn, busy }: { onOn: () => void; busy: boolean }) {
       </div>
       <div>
         <h2 className="text-2xl font-semibold tracking-tight">Your browser profiles, understood</h2>
-        <p className="mt-2 text-sm text-muted">Atlas reads the history of your Chrome, Edge and Brave profiles and shows what each one is for, when you use it, and what is out of place.</p>
+        <p className="mt-2 text-sm text-muted">Atlas reads the history of your browser profiles (Chrome, Edge, Brave, Comet, Arc, Opera, Vivaldi, Firefox and more) and shows what each one is for, when you use it, and what is out of place.</p>
       </div>
       <div className="grid w-full gap-3 text-left @min-[640px]:grid-cols-3">
         {points.map(([icon, title, text]) => (
@@ -699,6 +699,8 @@ export function HabitsPage() {
   const [range, setRange] = useState<RangeDays>(7)
   const [settings, setSettings] = useState(false)
   const [busy, setBusy] = useState(false)
+  /** Show only one browser's profiles (from the Browsers strip). */
+  const [onlyBrowser, setOnlyBrowser] = useState<string | null>(null)
   const [tip, setTip] = useState<Tip | null>(null)
 
   useEffect(() => {
@@ -804,12 +806,13 @@ export function HabitsPage() {
           )}
 
           {r && <Summary r={r} />}
+          {r && r.profiles.length > 0 && <Browsers r={r} only={onlyBrowser} onPick={setOnlyBrowser} />}
           <DayRibbon view={view} profiles={ribbonProfiles} tip={showTip} />
 
           {r && r.profiles.length > 0 && (
             <div className="grid gap-3 @min-[1000px]:grid-cols-[minmax(0,1fr)_340px]">
               <div className="grid content-start gap-3 @min-[700px]:grid-cols-2">
-                {r.profiles.map(p => (
+                {r.profiles.filter(p => !onlyBrowser || p.browser === onlyBrowser).map(p => (
                   <ProfileCard
                     key={p.key}
                     p={p}
@@ -855,5 +858,79 @@ function Summary({ r }: { r: HabitsRange }) {
         sub={top ? `Most used: ${top.name}` : undefined}
       />
     </div>
+  )
+}
+
+/** A browser's mark: its first letter in its own colour. */
+const BROWSER_COLOR: Record<string, string> = {
+  Chrome: '#4285f4',
+  Edge: '#0c8ce9',
+  Brave: '#fb542b',
+  Comet: '#20808d',
+  Arc: '#ff5f5f',
+  Opera: '#ff1b2d',
+  'Opera GX': '#fa1e4e',
+  Vivaldi: '#ef3939',
+  Firefox: '#ff7139',
+  Zen: '#a78bfa',
+  Yandex: '#fc3f1d',
+}
+
+/** Every browser used in the period, most used first: time, share and profiles; click one to see only its profiles. */
+function Browsers({ r, only, onPick }: { r: HabitsRange; only: string | null; onPick: (b: string | null) => void }) {
+  const total = r.profiles.reduce((a, p) => a + p.totalMs, 0)
+  const byBrowser = new Map<string, { ms: number; profiles: ProfileHabits[] }>()
+  for (const p of r.profiles) {
+    const b = byBrowser.get(p.browser) ?? { ms: 0, profiles: [] }
+    b.ms += p.totalMs
+    b.profiles.push(p)
+    byBrowser.set(p.browser, b)
+  }
+  const list = [...byBrowser].sort((a, b) => b[1].ms - a[1].ms)
+  return (
+    <section className="tile space-y-2 p-3" aria-label="Browsers">
+      <div className="flex items-center gap-2">
+        <h3 className="text-sm font-medium">Browsers</h3>
+        <span className="text-xs text-muted">most used first · click one to see only its profiles</span>
+        {only && (
+          <button type="button" className="ml-auto text-xs text-accent hover:underline" onClick={() => onPick(null)}>
+            Show all
+          </button>
+        )}
+      </div>
+      <div className="grid gap-2 @min-[700px]:grid-cols-3 @min-[1100px]:grid-cols-5">
+        {list.map(([name, b], i) => {
+          const share = total ? b.ms / total : 0
+          const on = only === name
+          return (
+            <button
+              key={name}
+              type="button"
+              aria-pressed={on}
+              onClick={() => onPick(on ? null : name)}
+              className={`flex min-w-0 flex-col gap-1.5 rounded-xl border p-2.5 text-left transition-colors ${on ? 'border-accent bg-accent-soft' : 'border-border hover:border-edge hover:bg-surface-strong'} ${only && !on ? 'opacity-60' : ''}`}
+            >
+              <span className="flex items-center gap-2">
+                <span className="grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: BROWSER_COLOR[name] ?? '#64748b' }} aria-hidden>
+                  {name.charAt(0)}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
+                {i === 0 && <span className="rounded-full bg-accent/15 px-1.5 text-[10px] text-accent">most used</span>}
+              </span>
+              <span className="flex items-baseline justify-between gap-2">
+                <span className="text-lg font-semibold tabular-nums">{fmtDuration(b.ms)}</span>
+                <span className="text-xs tabular-nums text-muted">{Math.round(share * 100)}%</span>
+              </span>
+              <span className="h-1 overflow-hidden rounded-full" style={{ background: 'var(--heat-0)' }}>
+                <span className="habits-grow block h-full rounded-full bg-accent" style={{ width: `${Math.max(2, share * 100)}%` }} />
+              </span>
+              <span className="truncate text-[11px] text-muted">
+                {b.profiles.length} profile{b.profiles.length === 1 ? '' : 's'} · {b.profiles.slice(0, 3).map(p => p.name).join(', ')}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </section>
   )
 }

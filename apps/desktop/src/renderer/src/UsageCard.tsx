@@ -13,27 +13,32 @@ const noSubmit = (e: KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && e.
  * At the budget, Atlas stops its background work and its own speak-ups;
  * answering you keeps working.
  */
-/** Start with Windows, in the tray. */
+/** Start with Windows: window open (the default), or quietly in the tray. */
 export function StartupToggle() {
-  const [s, setS] = useState<{ available: boolean; enabled: boolean } | null>(null)
+  const [s, setS] = useState<{ available: boolean; enabled: boolean; show: boolean } | null>(null)
   const [error, setError] = useState('')
   useEffect(() => {
     void window.assistant.startup().then(setS, () => undefined)
   }, [])
   if (!s) return null
+  const set = (on: boolean, show: boolean) =>
+    void window.assistant.setStartup(on, show).then(setS, err => setError(err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'That did not work.'))
   return (
     <section className="tile space-y-1 p-4">
       <label className={`flex items-center gap-2 text-sm ${s.available ? '' : 'opacity-60'}`}>
-        <input
-          type="checkbox"
-          checked={s.enabled}
-          disabled={!s.available}
-          onChange={e =>
-            void window.assistant.setStartup(e.target.checked).then(setS, err => setError(err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'That did not work.'))
-          }
-        />
-        Start Atlas when Windows starts (quietly, in the tray)
+        <input type="checkbox" checked={s.enabled} disabled={!s.available} onChange={e => set(e.target.checked, s.show)} />
+        Start Atlas when Windows starts
       </label>
+      {s.available && s.enabled && (
+        <div className="flex flex-wrap gap-3 pl-6 text-xs" role="radiogroup" aria-label="How it starts">
+          <label className="flex items-center gap-1.5">
+            <input type="radio" name="startup-show" checked={s.show} onChange={() => set(true, true)} /> Open its window
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="radio" name="startup-show" checked={!s.show} onChange={() => set(true, false)} /> Quietly, in the tray
+          </label>
+        </div>
+      )}
       <p className="text-[11px] text-muted">
         {s.available
           ? 'Your morning briefing, reminders, wake word and scheduled skills then work without opening the app first.'

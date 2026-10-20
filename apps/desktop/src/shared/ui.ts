@@ -100,6 +100,10 @@ export interface PageCommand {
   browser?: { mode?: BrowserMode | undefined; driving?: boolean | undefined } | undefined
   /** Open the News page on this tab, scrolled to this story (from the glass panel). */
   news?: { tab: string; focus: string | null } | undefined
+  /** Open the command palette (a global shortcut). */
+  palette?: boolean | undefined
+  /** Open the shortcut board. */
+  shortcuts?: boolean | undefined
 }
 
 export const UC = {

@@ -47,7 +47,7 @@ const cleanError = (err: unknown, fallback: string) =>
 /** A voice conversation ends after this long with nobody speaking. */
 const IDLE_MS = 30_000
 /** Saying one of these ends the conversation after the assistant's reply. */
-const END_PHRASE = /^\s*(bas|bas karo|bas kro|stop|that'?s all|that is all|thank you|thanks|shukriya|ok bye|bye|goodbye|khuda hafiz|allah hafiz|chup)\b[\s.!,]*$/i
+const END_PHRASE = /^\s*(bas|bas karo|bas kro|stop|that'?s all|that is all|thank you|thanks|shukriya|ok bye|bye|goodbye|khuda hafiz|allah hafiz|chup|chup karo|khamosh|shut up|be quiet|enough|kuch nahi|nothing else|bas theek hai)\b[\s.!,]*$/i
 
 const MIC_HELP = 'Microphone unavailable. Allow it in Windows Settings › Privacy & security › Microphone. You can still type.'
 
@@ -116,7 +116,13 @@ export function Companion({
       }
       // Quick replies for a finished answer: buttons under it while it is the last thing said.
       if (e.type === 'suggestions') {
-        if (linesRef.current.at(-1)?.id === e.replyId) setSuggest({ replyId: e.replyId, options: e.options })
+        const last = linesRef.current.at(-1)?.id === e.replyId
+        if (last && e.options.length) setSuggest({ replyId: e.replyId, options: e.options })
+        // The topic is done: a voice conversation stops listening (now, or once the reply has been spoken).
+        if (last && e.ended && conversationRef.current) {
+          if (recordingRef.current) endConversationRef.current()
+          else endAfterReplyRef.current = true
+        }
         return
       }
       // An onboarding question being read aloud: only its audio matters.
