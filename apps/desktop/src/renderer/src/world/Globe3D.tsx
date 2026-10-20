@@ -38,12 +38,13 @@ import { cameraFeatures, deadReckon, fireFeatures, flightFeatures, flightLabel, 
 import { DisplayFx, HudChip, TacticalHud, type HudSource } from './Display.tsx'
 import { HoverOverlay } from './HoverCard.tsx'
 import { hoverInfo } from './hover.ts'
-import { MODE_FILTER, type DisplayPrefs } from './hud.ts'
+import { MODE_FILTER, sunElevation, type DisplayPrefs } from './hud.ts'
 import type { WorldSnapshot } from '../../../shared/world.ts'
 import { CATEGORY_COLOR, type IntelEvent } from '../../../shared/intel.ts'
 import { MODEL_HEADING_OFFSET, headingTape, heightForZoom, modelFor, type ModelId } from './models3d.ts'
 import { Satellites3D } from './sats3d.ts'
 import { Traffic3D } from './traffic3d.ts'
+import { defaultLength, shipGltf, shipKind } from './ship3d.ts'
 import { IncidentCard, TrafficPill, type TrafficStatus } from './TrafficLayer2D.tsx'
 import type { TrafficIncident } from '../../../shared/traffic.ts'
 import { Atmos } from './Atmos.tsx'
@@ -117,6 +118,25 @@ interface SatRide {
   mode: 'follow' | 'eye'
 }
 
+/** Riding a ship: around it (orbit, 360°) or from its bridge. */
+interface ShipRide {
+  mmsi: number
+  mode: 'orbit' | 'bridge'
+}
+
+/** The 3D ship models' bow points along the model's x axis; headings count from north. */
+const SHIP_HEADING_OFFSET = -Math.PI / 2
+
+/** Where a ship is now: its last report carried on along its course at its speed (at most 10 minutes). */
+const shipNow = (s: Ship) => {
+  const dt = Math.min(600, Math.max(0, (Date.now() - s.at) / 1000))
+  const course = s.heading ?? s.course
+  const v = s.speed > 60 ? 0 : s.speed * 0.514
+  const c = (course * Math.PI) / 180
+  const d = v * dt
+  return { lat: s.lat + (d * Math.cos(c)) / 111_320, lon: s.lon + (d * Math.sin(c)) / (111_320 * Math.max(0.2, Math.cos((s.lat * Math.PI) / 180))), course }
+}
+
 export default function Globe3D({
   start,
   onClose,
@@ -169,6 +189,16 @@ export default function Globe3D({
   const [, tick] = useState(0)
   const [counts, setCounts] = useState<Counts>({ flights: 0, ships: 0, sats: 0, cables: 0, cameras: 0, news: 0, radio: 0 })
   followRef.current = follow
+  const [shipRide, setShipRide] = useState<ShipRide | null>(null)
+  const shipRideRef = useRef<ShipRide | null>(null)
+  shipRideRef.current = shipRide
+  const [shipPick, setShipPick] = useState<number | null>(null)
+  /** The ships the 3D view holds (for the bridge display). */
+  const shipsRef = useRef<Map<number, Ship>>(new Map())
+  /** Free look from a cockpit, a bridge or a satellite's eye: drag turns the head, the wheel zooms the lens. */
+  const lookRef = useRef({ yaw: 0, pitch: 0 })
+  /** The orbit rig: which vehicle the camera rides and that vehicle's heading last frame (the camera turns with it). */
+  const rigRef = useRef<{ key: string; last: number } | null>(null)
   const [layers, setLayers] = useState(readLayers)
   const layersRef = useRef(layers)
   layersRef.current = layers
@@ -202,7 +232,7 @@ export default function Globe3D({
   const applyRender = () => {
     const w = viewerRef.current
     if (!w || w.isDestroyed()) return
-    w.scene.requestRenderMode = !(nearHold.current || trafficLive.current || followRef.current || satRideRef.current || orbitRef.current)
+    w.scene.requestRenderMode = !(nearHold.current || trafficLive.current || followRef.current || satRideRef.current || shipRideRef.current || orbitRef.current)
     w.scene.requestRender()
   }
   /** Orbit: circling a point on the ground, or spinning the whole globe. */
@@ -244,7 +274,7 @@ export default function Globe3D({
       document.addEventListener('visibilitychange', onVisible)
       cleanups.push(() => document.removeEventListener('visibilitychange', onVisible))
       // A handle for driving the view from the debugger, on the dev server only.
-      if (location.protocol === 'http:') (window as unknown as { __globe3d?: unknown }).__globe3d = { viewer, Cesium, parts: () => parts.current }
+      if (location.protocol === 'http:') (window as unknown as { __globe3d?: unknown }).__globe3d = { viewer, Cesium, parts: () => parts.current, ships: () => shipsRef.current, flights: () => flights.current.list, ride: { ship: (mmsi: number, mode: ShipRide['mode']) => setShipRide({ mmsi, mode }), flight: (hex: string, mode: Follow['mode']) => setFollow({ hex, mode }), sat: (i: number, mode: SatRide['mode']) => setSatRide({ i, mode }), stop: () => (setShipRide(null), setFollow(null), setSatRide(null)) }, look: lookRef }
       const scene = viewer.scene
       // No night side: the user looks at their own night too, and a black globe reads as broken.
       scene.globe.enableLighting = false
@@ -454,8 +484,12 @@ export default function Globe3D({
       const shipBills = scene.primitives.add(new Cesium.BillboardCollection({ scene })) as Cesium.BillboardCollection
       const shipById = new Map<number, Cesium.Billboard>()
       const shipData = new Map<number, Ship>()
+      shipsRef.current = shipData
       const shipColor = Cesium.Color.fromCssColorString('#34d399')
-      const drawShips = (list: Ship[]) => {
+      const drawShips = (fresh: Ship[]) => {
+        // The ship being ridden stays, even when the view's answer no longer has it.
+        const riding = shipRideRef.current ? shipData.get(shipRideRef.current.mmsi) : undefined
+        const list = riding && !fresh.some(x => x.mmsi === riding.mmsi) ? [...fresh, riding] : fresh
         const keep = new Set<number>()
         shipData.clear()
         for (const s of list.slice(0, 4000)) {
@@ -471,6 +505,67 @@ export default function Globe3D({
         setCounts(x => ({ ...x, ships: list.length }))
         scene.requestRender()
       }
+
+      // ── ships as 3D models when the camera is low: the nearest 30 within 25 km, and the one being ridden ──
+      const shipModels = new Map<number, Cesium.Model>()
+      const shipLoading = new Set<number>()
+      const shipMatrix = (sh: Ship, out?: ReturnType<typeof Cesium.Matrix4.clone>) => {
+        const p = shipNow(sh)
+        Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0, Cesium.Ellipsoid.WGS84, scratch)
+        const o = new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(p.course) + SHIP_HEADING_OFFSET, 0, 0)
+        return Transforms.headingPitchRollToFixedFrame(scratch, o, Cesium.Ellipsoid.WGS84, undefined, out)
+      }
+      const shipLength = (sh: Ship) => (sh.length && sh.length > 5 ? sh.length : defaultLength[shipKind(sh.category, sh.type)])
+      const shipPass = () => {
+        if (!viewer || viewer.isDestroyed() || document.hidden) return
+        const cam = viewer.camera.positionCartographic
+        const want = new Set<number>()
+        if (layersRef.current.ships && cam.height < 30_000) {
+          const at = { lat: Cesium.Math.toDegrees(cam.latitude), lon: Cesium.Math.toDegrees(cam.longitude) }
+          for (const n of [...shipData.values()]
+            .map(sh => ({ sh, km: kmBetween(at, sh) }))
+            .filter(x => x.km < 25)
+            .sort((a, b) => a.km - b.km)
+            .slice(0, 30))
+            want.add(n.sh.mmsi)
+        }
+        const riding = shipRideRef.current?.mmsi
+        if (riding !== undefined && shipData.has(riding)) want.add(riding)
+        for (const [mmsi, model] of shipModels)
+          if (!want.has(mmsi)) {
+            scene.primitives.remove(model)
+            shipModels.delete(mmsi)
+            const b = shipById.get(mmsi)
+            if (b) b.show = true
+          }
+        for (const mmsi of want) {
+          const sh = shipData.get(mmsi)!
+          const have = shipModels.get(mmsi)
+          const b = shipById.get(mmsi)
+          if (have) {
+            have.modelMatrix = shipMatrix(sh, have.modelMatrix)
+            if (b) b.show = false
+            continue
+          }
+          if (shipLoading.has(mmsi)) continue
+          shipLoading.add(mmsi)
+          // An in-memory glTF (the engine takes one; its types only list a url).
+          void Cesium.Model.fromGltfAsync({ gltf: shipGltf(shipKind(sh.category, sh.type)), modelMatrix: shipMatrix(sh), scale: shipLength(sh), minimumPixelSize: 28, maximumScale: 400, id: { kind: 'ship', mmsi } } as unknown as Parameters<typeof Cesium.Model.fromGltfAsync>[0]).then(
+            model => {
+              shipLoading.delete(mmsi)
+              if (!viewer || viewer.isDestroyed() || !shipData.has(mmsi)) return void model.destroy()
+              scene.primitives.add(model)
+              shipModels.set(mmsi, model)
+              const bb = shipById.get(mmsi)
+              if (bb) bb.show = false
+              scene.requestRender()
+            },
+            () => shipLoading.delete(mmsi),
+          )
+        }
+        if (want.size) scene.requestRender()
+      }
+      timers.push(setInterval(shipPass, 1000))
 
       // Only the newest poll may draw (an older answer arriving late would put back a view the camera has left).
       let pollSeq = 0
@@ -551,6 +646,35 @@ export default function Globe3D({
       // ── fly with it: the camera rides the followed aircraft every frame ──
       const enu = new Cesium.Matrix4()
       const camScratch = new Cesium.Cartesian3()
+      const offScratch = new Cesium.Cartesian3()
+      /** Leave any frame the camera was riding in, so a first-person view is in world terms. */
+      const unframe = () => {
+        if (viewer && !Cesium.Matrix4.equals(viewer.camera.transform, Cesium.Matrix4.IDENTITY)) viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
+      }
+      /**
+       * Orbit 360°: the camera rides in the vehicle's frame and turns with it, so "behind" stays behind;
+       * dragging circles it and the wheel comes closer, and both are kept from frame to frame.
+       */
+      const orbitRide = (key: string, pos: ReturnType<typeof Cesium.Cartesian3.fromDegrees>, h: number, back: number, up: number) => {
+        if (!viewer) return
+        const cam = viewer.camera
+        Transforms.eastNorthUpToFixedFrame(pos, Cesium.Ellipsoid.WGS84, enu)
+        const rig = rigRef.current
+        if (!rig || rig.key !== key) {
+          rigRef.current = { key, last: h }
+          cam.lookAtTransform(enu, new Cesium.Cartesian3(-Math.sin(h) * back, -Math.cos(h) * back, up))
+          return
+        }
+        const d = h - rig.last
+        rig.last = h
+        const off = Cesium.Cartesian3.clone(cam.position, offScratch)
+        const c = Math.cos(-d)
+        const sn = Math.sin(-d)
+        const x = off.x * c - off.y * sn
+        off.y = off.x * sn + off.y * c
+        off.x = x
+        cam.lookAtTransform(enu, off)
+      }
       scene.preRender.addEventListener(() => {
         fastPass()
         const ot = orbitRef.current
@@ -563,7 +687,8 @@ export default function Globe3D({
           }
           return
         }
-        // Riding a satellite: follow it (the camera keeps its offset, so it can still be turned), or look straight down from it.
+        const look = lookRef.current
+        // Riding a satellite: around it (drag circles it), or through its eye (drag looks around).
         const ride = satRideRef.current
         const rs = ride ? sats.list[ride.i] : undefined
         if (ride && rs && viewer) {
@@ -571,8 +696,28 @@ export default function Globe3D({
           if (!w) return
           const pos = Cesium.Cartesian3.fromDegrees(w.lon, w.lat, w.altM)
           rs.point.position = pos
-          if (ride.mode === 'eye') viewer.camera.setView({ destination: pos, orientation: { heading: Cesium.Math.toRadians(w.heading), pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 } })
-          else viewer.camera.lookAtTransform(Transforms.eastNorthUpToFixedFrame(pos, Cesium.Ellipsoid.WGS84, enu))
+          if (ride.mode === 'eye') {
+            unframe()
+            viewer.camera.setView({ destination: pos, orientation: { heading: Cesium.Math.toRadians(w.heading) + look.yaw, pitch: Cesium.Math.clamp(-Cesium.Math.PI_OVER_TWO + look.pitch, -Cesium.Math.PI_OVER_TWO, 0.35), roll: 0 } })
+          } else viewer.camera.lookAtTransform(Transforms.eastNorthUpToFixedFrame(pos, Cesium.Ellipsoid.WGS84, enu))
+          return
+        }
+        // Riding a ship: around it, or from its bridge.
+        const sr = shipRideRef.current
+        const rideShip = sr ? shipData.get(sr.mmsi) : undefined
+        if (sr && rideShip && viewer) {
+          const p = shipNow(rideShip)
+          const model = shipModels.get(sr.mmsi)
+          if (model) model.modelMatrix = shipMatrix(rideShip, model.modelMatrix)
+          const h = Cesium.Math.toRadians(p.course)
+          const len = shipLength(rideShip)
+          if (sr.mode === 'bridge') {
+            // On the bridge: aft of midships, above the deck, looking over the bow.
+            unframe()
+            const back = len * 0.3
+            const at = Cesium.Cartesian3.fromDegrees(p.lon - (Math.sin(h) * back) / (111_320 * Math.max(0.2, Math.cos((p.lat * Math.PI) / 180))), p.lat - (Math.cos(h) * back) / 111_320, Math.max(6, len * 0.17))
+            viewer.camera.setView({ destination: at, orientation: { heading: h + look.yaw, pitch: Cesium.Math.clamp(Cesium.Math.toRadians(-5) + look.pitch, -1.4, 1.2), roll: 0 } })
+          } else orbitRide(`ship:${sr.mmsi}`, Cesium.Cartesian3.fromDegrees(p.lon, p.lat, len * 0.05), h, len * 2.4, len * 0.8)
           return
         }
         const fol = followRef.current
@@ -581,13 +726,14 @@ export default function Globe3D({
         if (!raw) return
         const f = deadReckon(raw, raw.seen + (Date.now() - flights.current.at) / 1000)
         const h = Cesium.Math.toRadians(f.track)
-        const pos = Cesium.Cartesian3.fromDegrees(f.lon, f.lat, altM(f) + (fol.mode === 'cockpit' ? 4 : 0))
+        if (fol.mode === 'chase') return orbitRide(`flight:${fol.hex}`, Cesium.Cartesian3.fromDegrees(f.lon, f.lat, altM(f)), h, 350, 80)
+        // The cockpit: a little ahead of the model's centre; drag looks around.
+        unframe()
+        const pos = Cesium.Cartesian3.fromDegrees(f.lon, f.lat, altM(f) + 4)
         Transforms.eastNorthUpToFixedFrame(pos, Cesium.Ellipsoid.WGS84, enu)
-        const back = fol.mode === 'chase' ? 350 : -25
-        const up = fol.mode === 'chase' ? 80 : 0
-        const cam = Cesium.Matrix4.multiplyByPoint(enu, new Cesium.Cartesian3(-Math.sin(h) * back, -Math.cos(h) * back, up), camScratch)
+        const cam = Cesium.Matrix4.multiplyByPoint(enu, new Cesium.Cartesian3(Math.sin(h) * 25, Math.cos(h) * 25, 0), camScratch)
         const climb = f.verticalRate ? Math.atan2(f.verticalRate * 0.00508, Math.max(30, f.speed * 0.514)) : 0
-        viewer.camera.setView({ destination: Cesium.Cartesian3.clone(cam), orientation: { heading: h, pitch: fol.mode === 'chase' ? Cesium.Math.toRadians(-11) : climb - Cesium.Math.toRadians(3), roll: 0 } })
+        viewer.camera.setView({ destination: Cesium.Cartesian3.clone(cam), orientation: { heading: h + look.yaw, pitch: Cesium.Math.clamp(climb - Cesium.Math.toRadians(3) + look.pitch, -1.4, 1.2), roll: 0 } })
       })
 
       // ── picking ──
@@ -671,6 +817,7 @@ export default function Globe3D({
         onSelectRef.current?.(selectionFor(id))
         setSatPick(id?.kind === 'sat' && typeof id.i === 'number' ? id.i : null)
         setCamPick(id?.kind === 'cam' && typeof id.i === 'number' ? id.i : null)
+        setShipPick(id?.kind === 'ship' && typeof id.mmsi === 'number' ? id.mmsi : null)
         setRadioPick(id?.kind === 'radio' && typeof id.i === 'number' ? id.i : null)
         setNewsPick(id?.kind === 'news' && typeof id.i === 'number' ? id.i : null)
         setLanding(id?.kind === 'landing' ? (id.name ?? null) : null)
@@ -1064,6 +1211,22 @@ export default function Globe3D({
         setFollow(fo => (fo ? { ...fo, hex: next.f.hex } : fo))
         return `Now with ${flightLabel(next.f)}${aircraftName(next.f.type) ? ` (${aircraftName(next.f.type)})` : ''}, ${Math.round(next.km)} km from the last one.`
       }
+      case 'ride_ship': {
+        if (!layersRef.current.ships) setLayers(l => ({ ...l, ships: true }))
+        const ships = [...shipsRef.current.values()]
+        if (!ships.length) throw new Error('No ships in view yet (they come from the AISStream key, near the coasts). Fly closer to a port or a strait first.')
+        const q = (op.query ?? 'nearest').toLowerCase()
+        const c = widget!.camera.positionCartographic
+        const at = { lat: Cesium.Math.toDegrees(c.latitude), lon: Cesium.Math.toDegrees(c.longitude) }
+        const found = q === 'nearest' || !q ? ships.map(x => ({ x, km: kmBetween(at, x) })).sort((a, b) => a.km - b.km)[0]!.x : (ships.find(x => x.name.toLowerCase() === q) ?? ships.find(x => x.name.toLowerCase().includes(q)) ?? ships.find(x => String(x.mmsi) === q))
+        if (!found) throw new Error(`No ship called "${op.query}" in view; ${ships.length} ships are: ${ships.slice(0, 8).map(x => x.name || x.mmsi).join(', ')}.`)
+        setFollow(null)
+        setSatRide(null)
+        orbitRef.current = null
+        setOrbit(false)
+        setShipRide({ mmsi: found.mmsi, mode: op.mode === 'bridge' ? 'bridge' : 'orbit' })
+        return `Riding with ${found.name || `MMSI ${found.mmsi}`}${found.destination ? `, bound for ${found.destination}` : ''}: ${found.speed > 60 ? 'speed unknown' : `${found.speed.toFixed(1)} knots`} heading ${compass(found.heading ?? found.course)}, ${op.mode === 'bridge' ? 'from its bridge (the owner can drag to look around)' : 'around it (the owner can drag to circle it 360°)'}.`
+      }
       case 'follow_sat': {
         if (!layersRef.current.sats) setLayers(l => ({ ...l, sats: true }))
         const q = (op.query ?? '').toLowerCase()
@@ -1152,10 +1315,77 @@ export default function Globe3D({
     }
   }, [controlRef, widget])
 
+  // Free look (cockpit, bridge, satellite's eye): the mouse turns the head, the wheel zooms the lens, a double-click looks ahead again.
+  const freeLook = follow?.mode === 'cockpit' || satRide?.mode === 'eye' || shipRide?.mode === 'bridge'
+  useEffect(() => {
+    const w = widget
+    if (!w || w.isDestroyed()) return
+    lookRef.current = { yaw: 0, pitch: 0 }
+    const ctl = w.scene.screenSpaceCameraController
+    const frustum = w.camera.frustum as { fov?: number }
+    const baseFov = Cesium.Math.toRadians(60)
+    if (!freeLook) {
+      ctl.enableInputs = true
+      if (frustum.fov !== undefined) frustum.fov = baseFov
+      return
+    }
+    ctl.enableInputs = false
+    const el = w.canvas
+    let drag: { x: number; y: number } | null = null
+    const down = (e: PointerEvent) => {
+      if (e.button === 0) drag = { x: e.clientX, y: e.clientY }
+    }
+    const move = (e: PointerEvent) => {
+      if (!drag) return
+      const k = (frustum.fov ?? baseFov) / Math.max(300, el.clientWidth)
+      const l = lookRef.current
+      l.yaw -= (e.clientX - drag.x) * k
+      l.pitch = Cesium.Math.clamp(l.pitch + (e.clientY - drag.y) * k, -1.3, 1.5)
+      drag = { x: e.clientX, y: e.clientY }
+      w.scene.requestRender()
+    }
+    const up = () => (drag = null)
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault()
+      if (frustum.fov !== undefined) frustum.fov = Cesium.Math.clamp(frustum.fov * (e.deltaY > 0 ? 1.08 : 0.92), Cesium.Math.toRadians(12), Cesium.Math.toRadians(100))
+      w.scene.requestRender()
+    }
+    const dbl = () => {
+      lookRef.current = { yaw: 0, pitch: 0 }
+      if (frustum.fov !== undefined) frustum.fov = baseFov
+    }
+    el.addEventListener('pointerdown', down)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    el.addEventListener('wheel', wheel, { passive: false })
+    el.addEventListener('dblclick', dbl)
+    return () => {
+      el.removeEventListener('pointerdown', down)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      el.removeEventListener('wheel', wheel)
+      el.removeEventListener('dblclick', dbl)
+      if (!w.isDestroyed()) {
+        ctl.enableInputs = true
+        if (frustum.fov !== undefined) frustum.fov = baseFov
+      }
+    }
+  }, [widget, freeLook])
+
+  // A new ride starts its rig afresh; riding nothing, the camera leaves the vehicle's frame.
+  useEffect(() => {
+    rigRef.current = null
+    const w = widget
+    if (!w || w.isDestroyed()) return
+    if (!follow && !shipRide && !satRide && !Cesium.Matrix4.equals(w.camera.transform, Cesium.Matrix4.IDENTITY)) w.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
+    applyRender()
+  }, [widget, follow?.hex, follow?.mode, shipRide?.mmsi, shipRide?.mode, satRide])
+
   // Escape steps back: stop riding, then close what is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      if (shipRideRef.current) return setShipRide(null)
       if (satRideRef.current) return setSatRide(null)
       if (followRef.current) return setFollow(null)
       setPicked(null)
@@ -1227,6 +1457,7 @@ export default function Globe3D({
     setFollow(null)
     const v = viewerRef.current
     const f = follow ? flights.current.byHex.get(follow.hex) : null
+    v?.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
     if (v && f) v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(f.lon, f.lat - 0.25, altM(f) + 25_000), orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 }, duration: 1.2 })
   }
 
@@ -1272,7 +1503,7 @@ export default function Globe3D({
           <Box className="size-3.5 text-accent" aria-hidden /> 3D · {tier ? TIER_LABEL[tier] : 'loading…'}
         </span>
         {displayButton}
-        {display?.hud && hudSource ? (
+        {display?.hud && hudSource && !follow && !satRide && !shipRide ? (
           <HudChip map={hudSource} mode={display.mode} counts={{ flights: counts.flights, ships: counts.ships, satellites: counts.sats, cameras: counts.cameras }} />
         ) : (
           <span className={`rounded-full px-3 py-1 text-[10px] text-accent/80 ${panel} ${mono}`}>
@@ -1348,6 +1579,8 @@ export default function Globe3D({
               </dd>
               <dt className="text-white/50">Over</dt>
               <dd className="font-mono">{latLonLabel(satNow)}</dd>
+              <dt className="text-white/50">Light</dt>
+              <dd className="font-mono">{sunElevation(satNow.lat, satNow.lon, new Date()) > -Cesium.Math.toDegrees(Math.acos(6371 / (6371 + satNow.altKm))) ? 'In sunlight' : 'In Earth’s shadow'}</dd>
             </dl>
           )}
           <div className="flex gap-1.5">
@@ -1359,7 +1592,7 @@ export default function Globe3D({
             </button>
           </div>
           <p className="flex items-center gap-1 text-[10px] text-white/45">
-            <Orbit className="size-3" aria-hidden /> {satRide?.mode === 'eye' ? 'Looking straight down from it, as it flies. Esc to stop.' : 'The ring is its orbit: one full revolution.'}
+            <Orbit className="size-3" aria-hidden /> {satRide?.mode === 'eye' ? 'Through its eye: drag to look around, scroll to zoom, double-click to look down again. Esc to stop.' : satRide?.mode === 'follow' ? 'Drag to circle it, scroll to come closer. The ring is its orbit.' : 'The ring is its orbit: one full revolution.'}
           </p>
         </div>
       )}
@@ -1494,7 +1727,7 @@ export default function Globe3D({
               <ChevronLeft className="size-4" aria-hidden />
             </button>
             <button type="button" onClick={() => setFollow(fo => (fo ? { ...fo, mode: fo.mode === 'chase' ? 'cockpit' : 'chase' } : fo))} className={`rounded-full px-3 py-2 text-xs ${panel}`}>
-              {follow.mode === 'chase' ? 'Cockpit view' : 'Chase view'}
+              {follow.mode === 'chase' ? 'Cockpit view' : 'Orbit 360°'}
             </button>
             <button type="button" onClick={stopFollow} className={`rounded-full px-3 py-2 text-xs text-warm ${panel}`}>
               Stop flying
@@ -1505,6 +1738,71 @@ export default function Globe3D({
           </div>
         </>
       )}
+      {/* Riding hint for any vehicle. */}
+      {(follow || satRide || shipRide) && (
+        <p className={`pointer-events-none absolute bottom-[4.6rem] left-1/2 -translate-x-1/2 rounded-full bg-black/45 px-3 py-1 text-[10px] text-white/70 ${mono}`}>
+          {freeLook ? 'Drag to look around · scroll to zoom · double-click to look ahead' : 'Drag to circle it 360° · scroll to come closer'}
+        </p>
+      )}
+
+      {/* A picked ship: ride with it. */}
+      {shipPick !== null && !shipRide && !follow && !satRide && shipsRef.current.get(shipPick) && (
+        <div className="absolute bottom-24 left-1/2 flex -translate-x-1/2 items-center gap-2">
+          <button type="button" onClick={() => setShipRide({ mmsi: shipPick, mode: 'orbit' })} className={`flex items-center gap-1.5 rounded-full px-3 py-2 text-xs ${panel}`}>
+            <Orbit className="size-3.5 text-accent" aria-hidden /> Ride around it (360°)
+          </button>
+          <button type="button" onClick={() => setShipRide({ mmsi: shipPick, mode: 'bridge' })} className={`flex items-center gap-1.5 rounded-full px-3 py-2 text-xs ${panel}`}>
+            <Eye className="size-3.5 text-accent" aria-hidden /> Bridge view
+          </button>
+        </div>
+      )}
+
+      {/* Riding a ship: the bridge display. */}
+      {shipRide &&
+        (() => {
+          const sh = shipsRef.current.get(shipRide.mmsi)
+          if (!sh) return null
+          const p = shipNow(sh)
+          const kind = shipKind(sh.category, sh.type)
+          return (
+            <>
+              <div className="pointer-events-none absolute inset-x-0 top-14 flex justify-center">
+                <div className="relative h-8 w-80 overflow-hidden rounded-full border border-accent/30 bg-black/40">
+                  {headingTape(p.course).map(t => (
+                    <span key={`${t.deg}-${t.offset}`} className={`absolute top-1.5 -translate-x-1/2 text-[11px] ${mono} ${/[NESW]/.test(t.label) ? 'text-accent' : 'text-white/70'}`} style={{ left: `${(t.offset + 0.5) * 100}%` }}>
+                      {t.label}
+                    </span>
+                  ))}
+                  <span className="absolute left-1/2 top-0 h-2 w-px bg-accent" />
+                </div>
+              </div>
+              <div className={`pointer-events-none absolute bottom-40 left-1/2 flex -translate-x-1/2 items-end gap-10 ${mono}`}>
+                <div className="text-center">
+                  <p className="text-[10px] text-accent/70">Speed · kn</p>
+                  <p className="text-4xl font-light text-white [text-shadow:0_0_12px_rgba(0,0,0,0.9)]">{sh.speed > 60 ? '—' : sh.speed.toFixed(1)}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] text-accent/70">Course</p>
+                  <p className="text-4xl font-light text-white [text-shadow:0_0_12px_rgba(0,0,0,0.9)]">{Math.round(p.course)}°</p>
+                </div>
+              </div>
+              <div className={`absolute left-3 top-14 w-64 space-y-1.5 p-3 ${panel}`}>
+                <p className="text-sm font-semibold">{sh.name || `MMSI ${sh.mmsi}`}</p>
+                <p className="text-[11px] capitalize text-white/60">{[sh.category || kind, sh.length ? `${Math.round(sh.length)} m` : '', `MMSI ${sh.mmsi}`].filter(Boolean).join(' · ')}</p>
+                <p className="text-[11px] text-white/80">{sh.destination ? `Bound for ${sh.destination}` : 'No destination given'}</p>
+                <p className={`text-[10px] text-white/45 ${mono}`}>{latLonLabel(p)} · seen {Math.max(0, Math.round((Date.now() - sh.at) / 60_000))} min ago</p>
+              </div>
+              <div className="absolute bottom-24 left-1/2 flex -translate-x-1/2 items-center gap-1.5">
+                <button type="button" onClick={() => setShipRide(r => (r ? { ...r, mode: r.mode === 'orbit' ? 'bridge' : 'orbit' } : r))} className={`rounded-full px-3 py-2 text-xs ${panel}`}>
+                  {shipRide.mode === 'orbit' ? 'Bridge view' : 'Orbit 360°'}
+                </button>
+                <button type="button" onClick={() => setShipRide(null)} className={`rounded-full px-3 py-2 text-xs text-warm ${panel}`}>
+                  Leave the ship
+                </button>
+              </div>
+            </>
+          )
+        })()}
       <p className="pointer-events-none absolute bottom-1 right-2 text-[9px] text-white/40">
         {tier === 'google' ? 'Google Map Tiles' : tier === 'ion' ? 'Cesium ion · Esri World Imagery' : 'Esri World Imagery · Re:Earth terrain'} · CesiumJS · aircraft models CC BY 4.0 (see credits){layers.sats ? ' · CelesTrak' : ''}
         {layers.cables ? ' · Submarine Cable Map © TeleGeography' : ''}

@@ -259,7 +259,7 @@ export class HostUi {
       ),
       tool(
         'map_3d',
-        `The World's 3D view (God's Eye style): a real 3D Earth with live aircraft at their altitude, ships, satellites by group, public cameras with their live view, submarine cables and the Sun/Moon ring. action open: show it (optionally at a place or lat/lon, zoom 2 world - 16 streets); close: back to the flat map; layers: show/hide ${GLOBE3D_LAYERS.join(', ')} (sats = satellites, celestial = Sun, Moon, day and night); fly_with: ride an aircraft (query a callsign or registration, or "nearest"; mode chase or cockpit) with its speed, altitude, route and nearby contacts; next_contact: jump to the next aircraft around it (previous: true for the one before); follow_sat: follow a satellite by name (query "ISS", "Hubble", "Starlink", "GPS"…; mode eye looks straight down from it); camera: open a public camera (query its name, or "nearest" to the view or to place) with its view cone and live frame in 3D; orbit: slowly circle the view (on: false stops); stop: stop riding; state: what the 3D view shows now. Use for "3D mein dikhao", "is plane ke sath udo", "ISS follow karo", "cables dikhao", "is jagah ka camera dikhao".`,
+        `The World's 3D view (God's Eye style): a real 3D Earth with live aircraft at their altitude, ships, satellites by group, public cameras with their live view, submarine cables and the Sun/Moon ring. action open: show it (optionally at a place or lat/lon, zoom 2 world - 16 streets); close: back to the flat map; layers: show/hide ${GLOBE3D_LAYERS.join(', ')} (sats = satellites, celestial = Sun, Moon, day and night); fly_with: ride an aircraft (query a callsign or registration, or "nearest"; mode chase or cockpit) with its speed, altitude, route and nearby contacts; next_contact: jump to the next aircraft around it (previous: true for the one before); follow_sat: follow a satellite by name (query "ISS", "Hubble", "Starlink", "GPS"…; mode follow circles it, mode eye looks out from it and the owner can drag to look around); ride_ship: ride a ship in view (query its name, or "nearest"; mode orbit goes round it 360°, mode bridge looks out from its bridge); camera: open a public camera (query its name, or "nearest" to the view or to place) with its view cone and live frame in 3D; orbit: slowly circle the view (on: false stops); stop: stop riding; state: what the 3D view shows now. Use for "3D mein dikhao", "is plane ke sath udo", "ISS follow karo", "cables dikhao", "is jagah ka camera dikhao".`,
         {
           action: { type: 'string', enum: [...GLOBE3D_ACTIONS] },
           place: { type: 'string', description: 'A city, country or landmark (open, camera).' },
@@ -268,7 +268,7 @@ export class HostUi {
           zoom: { type: 'number' },
           label: { type: 'string' },
           query: { type: 'string' },
-          mode: { type: 'string', enum: ['chase', 'cockpit', 'follow', 'eye'] },
+          mode: { type: 'string', enum: ['chase', 'cockpit', 'follow', 'eye', 'orbit', 'bridge'] },
           show: { type: 'array', items: { type: 'string', enum: [...GLOBE3D_LAYERS] } },
           hide: { type: 'array', items: { type: 'string', enum: [...GLOBE3D_LAYERS] } },
           previous: { type: 'boolean' },

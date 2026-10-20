@@ -56,7 +56,7 @@ export const MAX_STORY_ITEMS = 20
 /** The 3D view's layers (its own rail), and what the assistant can do there. */
 export const GLOBE3D_LAYERS = ['flights', 'ships', 'sats', 'cameras', 'news', 'radio', 'cables', 'celestial'] as const
 export type Globe3dLayer = (typeof GLOBE3D_LAYERS)[number]
-export const GLOBE3D_ACTIONS = ['open', 'close', 'layers', 'fly_with', 'next_contact', 'follow_sat', 'camera', 'orbit', 'stop', 'state'] as const
+export const GLOBE3D_ACTIONS = ['open', 'close', 'layers', 'fly_with', 'next_contact', 'follow_sat', 'ride_ship', 'camera', 'orbit', 'stop', 'state'] as const
 export type Globe3dAction = (typeof GLOBE3D_ACTIONS)[number]
 
 export interface Map3dOp {
@@ -68,8 +68,8 @@ export interface Map3dOp {
   label?: string | undefined
   /** A callsign, satellite or camera name; "nearest" for the closest one. */
   query?: string | undefined
-  /** fly_with: chase | cockpit; follow_sat: follow | eye. */
-  mode?: 'chase' | 'cockpit' | 'follow' | 'eye' | undefined
+  /** fly_with: chase | cockpit; follow_sat: follow | eye; ride_ship: orbit | bridge. */
+  mode?: 'chase' | 'cockpit' | 'follow' | 'eye' | 'orbit' | 'bridge' | undefined
   show: Globe3dLayer[]
   hide: Globe3dLayer[]
   /** next_contact: 1 next, -1 previous. orbit: 1 on, 0 off. */
@@ -215,7 +215,7 @@ export const mapOpFromTool = (tool: string, input: Record<string, unknown>): Map
       if (action === 'layers' && !show.length && !hide.length) throw new Error(`Name 3D layers to show or hide: ${GLOBE3D_LAYERS.join(', ')}.`)
       const query = text(input.query, 60)
       if (action === 'follow_sat' && !query) throw new Error('Which satellite? A name such as "ISS", "Hubble" or "GPS".')
-      const mode = (['chase', 'cockpit', 'follow', 'eye'] as const).find(m => m === input.mode)
+      const mode = (['chase', 'cockpit', 'follow', 'eye', 'orbit', 'bridge'] as const).find(m => m === input.mode)
       return { kind: '3d', action, lat, lon, zoom: num(input.zoom, 0, 20), label: text(input.label, 80), query, mode, show, hide, direction: action === 'next_contact' ? (input.previous === true ? -1 : 1) : action === 'orbit' ? (input.on === false ? 0 : 1) : undefined }
     }
     case 'map_tour': {
