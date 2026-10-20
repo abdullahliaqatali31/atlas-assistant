@@ -248,13 +248,13 @@ export function Brain(props: BrainProps) {
         px[i * 3 + 1] = q.y
         px[i * 3 + 2] = q.z
         const tw = 0.6 + 0.4 * Math.sin(t * (0.6 + d.s) + d.s * 40)
-        ctx.fillStyle = `rgba(125,211,252,${(0.09 + 0.24 * depthA(q.z) * tw * dim).toFixed(3)})`
-        const sz = 0.8 + q.k * 0.7
+        ctx.fillStyle = `rgba(125,211,252,${(0.18 + 0.42 * depthA(q.z) * tw * dim).toFixed(3)})`
+        const sz = 1 + q.k * 0.8
         ctx.fillRect(q.x, q.y, sz, sz)
       }
       // Synapses in three depth bands, one path each.
       ctx.lineWidth = 0.6
-      for (const [lo, hi, a] of [[-9, -0.25, 0.06], [-0.25, 0.3, 0.12], [0.3, 9, 0.2]] as const) {
+      for (const [lo, hi, a] of [[-9, -0.25, 0.12], [-0.25, 0.3, 0.22], [0.3, 9, 0.34]] as const) {
         ctx.beginPath()
         for (const [i, j] of s.synapses) {
           const z = (px[i * 3 + 2]! + px[j * 3 + 2]!) / 2
@@ -313,7 +313,7 @@ export function Brain(props: BrainProps) {
         }
       }
       fires.length = kept
-      ctx.lineWidth = 1
+      ctx.lineWidth = 1.3
       for (const line of s.folds) {
         ctx.beginPath()
         let front = 0
@@ -323,7 +323,7 @@ export function Brain(props: BrainProps) {
           if (i) ctx.lineTo(q.x, q.y)
           else ctx.moveTo(q.x, q.y)
         })
-        ctx.strokeStyle = `rgba(125,211,252,${(0.07 + 0.11 * depthA(front / line.length) * dim).toFixed(3)})`
+        ctx.strokeStyle = `rgba(125,211,252,${(0.16 + 0.24 * depthA(front / line.length) * dim).toFixed(3)})`
         ctx.stroke()
       }
 
