@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { browserOpFromTool, clampRatio, dropSurface, setSide, showSurface, toUrl, type StageLayout } from './browser.ts'
+import { browserOpFromTool, clampRatio, dropSurface, orderTabs, parseTabAction, setSide, showSurface, tabsOpFromTool, toUrl, type BrowserTab, type StageLayout } from './browser.ts'
 
 describe('browser addresses', () => {
   it('opens web addresses, searches words, refuses other schemes', () => {
@@ -42,5 +42,26 @@ describe('panes', () => {
     expect(dropSurface({ main: 'browser', side: null, ratio: 0.5 }, 'browser').main).toBe('home')
     expect(clampRatio(0.9)).toBe(0.75)
     expect(clampRatio(Number.NaN)).toBe(0.5)
+  })
+})
+
+describe('browser tabs', () => {
+  const tab = (id: string, o: Partial<BrowserTab> = {}): BrowserTab => ({ id, url: 'https://a.com', title: id, pinned: false, group: null, byAtlas: false, opened: 0, lastUsed: 0, ...o })
+
+  it('orders pinned first, then each group together, then the rest', () => {
+    const tabs = [tab('t-one'), tab('t-two', { group: 'g-b' }), tab('t-three', { pinned: true }), tab('t-four', { group: 'g-a' }), tab('t-five', { group: 'g-b' })]
+    expect(orderTabs({ tabs, groups: [], active: null }).map(t => t.id)).toEqual(['t-three', 't-two', 't-five', 't-four', 't-one'])
+  })
+
+  it('checks the tabs tool and the tab strip’s actions', () => {
+    expect(tabsOpFromTool({ action: 'close', tabs: [2, 3, -1, 1.5] })).toEqual({ kind: 'close', ns: [2, 3] })
+    expect(tabsOpFromTool({ action: 'switch', tab: 4 })).toEqual({ kind: 'switch', n: 4 })
+    expect(tabsOpFromTool({ action: 'group', tabs: [1], group: ' Daily work ' })).toEqual({ kind: 'group', ns: [1], name: 'Daily work', color: undefined })
+    expect(typeof tabsOpFromTool({ action: 'group', tabs: [1] })).toBe('string')
+    expect(typeof tabsOpFromTool({ action: 'explode' })).toBe('string')
+    expect(browserOpFromTool('browser', { action: 'open', url: 'x.com', new_tab: true })).toEqual({ kind: 'open', target: 'x.com', newTab: true })
+    expect(parseTabAction({ kind: 'activate', id: 'tabc123' })).toEqual({ kind: 'activate', id: 'tabc123' })
+    expect(parseTabAction({ kind: 'activate', id: '../../x' })).toBeNull()
+    expect(parseTabAction({ kind: 'nope' })).toBeNull()
   })
 })

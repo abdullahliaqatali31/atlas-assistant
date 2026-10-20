@@ -69,7 +69,8 @@ export const toUrl = (input: string): string | null => {
 
 /** The model's browser requests. */
 export type BrowserOp =
-  | { kind: 'open'; target: string }
+  | { kind: 'open'; target: string; newTab?: boolean | undefined }
+  | { kind: 'tabs'; op: TabsOp }
   | { kind: 'read' }
   | { kind: 'click'; n?: number | undefined; text?: string | undefined }
   | { kind: 'type'; n?: number | undefined; text: string; enter?: boolean | undefined }
@@ -95,7 +96,7 @@ export const browserOpFromTool = (tool: 'browser' | 'browser_act', input: Record
     switch (action) {
       case 'open': {
         const target = typeof input.url === 'string' ? input.url : typeof input.query === 'string' ? input.query : ''
-        return target.trim() ? { kind: 'open', target: target.slice(0, 2000) } : 'Give a url or a query to open.'
+        return target.trim() ? { kind: 'open', target: target.slice(0, 2000), ...(input.new_tab === true ? { newTab: true } : {}) } : 'Give a url or a query to open.'
       }
       case 'read':
       case 'back':
@@ -120,4 +121,136 @@ export const browserOpFromTool = (tool: 'browser' | 'browser_act', input: Record
     default:
       return `action must be one of ${BROWSER_ACT_ACTIONS.join(', ')}.`
   }
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────
+
+/** One tab of Atlas's browser. Tabs survive restarts; a tab that has not been opened since wakes when switched to. */
+export interface BrowserTab {
+  id: string
+  url: string
+  title: string
+  pinned: boolean
+  /** Its group's id, or null. */
+  group: string | null
+  /** Atlas opened it (the owner can tell its tabs from theirs). */
+  byAtlas: boolean
+  opened: number
+  lastUsed: number
+}
+
+/** A named, coloured group of tabs (e.g. "Daily work"). */
+export interface TabGroup {
+  id: string
+  name: string
+  color: string
+  collapsed: boolean
+}
+
+export interface BrowserTabsState {
+  tabs: BrowserTab[]
+  groups: TabGroup[]
+  active: string | null
+}
+
+export const EMPTY_TABS: BrowserTabsState = { tabs: [], groups: [], active: null }
+export const MAX_TABS = 30
+/** Tabs kept loaded at once (the rest sleep until opened). */
+export const AWAKE_TABS = 8
+export const GROUP_COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#f87171', '#94a3b8'] as const
+
+/** The owner's own tab actions (from the tab strip). */
+export type TabAction =
+  | { kind: 'new'; url?: string | undefined }
+  | { kind: 'activate'; id: string }
+  | { kind: 'close'; ids: string[] }
+  | { kind: 'close-others'; id: string }
+  | { kind: 'pin'; id: string; pinned: boolean }
+  | { kind: 'group'; ids: string[]; group: string | null; name?: string | undefined }
+  | { kind: 'group-rename'; group: string; name: string }
+  | { kind: 'group-collapse'; group: string; collapsed: boolean }
+
+/** Atlas's tab requests: tabs by their number in the list (1 is the first), groups by name. */
+export type TabsOp =
+  | { kind: 'list' }
+  | { kind: 'new'; target: string; group?: string | undefined; pin?: boolean | undefined }
+  | { kind: 'switch'; n: number }
+  | { kind: 'close'; ns: number[] }
+  | { kind: 'pin'; ns: number[]; pinned: boolean }
+  | { kind: 'group'; ns: number[]; name: string; color?: string | undefined }
+  | { kind: 'ungroup'; ns: number[] }
+
+/** The tab strip's order: pinned first, then each group together (in the order they first appear), then the rest. */
+export const orderTabs = (s: BrowserTabsState): BrowserTab[] => {
+  const pinned = s.tabs.filter(t => t.pinned)
+  const rest = s.tabs.filter(t => !t.pinned)
+  const groups = [...new Set(rest.map(t => t.group).filter((g): g is string => g !== null))]
+  return [...pinned, ...groups.flatMap(g => rest.filter(t => t.group === g)), ...rest.filter(t => t.group === null)]
+}
+
+export const parseTabAction = (v: unknown): TabAction | null => {
+  const o = (v ?? {}) as Record<string, unknown>
+  const id = (x: unknown) => (typeof x === 'string' && /^[\w-]{4,40}$/.test(x) ? x : null)
+  const ids = (x: unknown) => (Array.isArray(x) ? x.map(id).filter((y): y is string => y !== null).slice(0, MAX_TABS) : [])
+  switch (o.kind) {
+    case 'new':
+      return { kind: 'new', url: typeof o.url === 'string' ? o.url.slice(0, 2000) : undefined }
+    case 'activate':
+      return id(o.id) ? { kind: 'activate', id: id(o.id)! } : null
+    case 'close':
+      return { kind: 'close', ids: ids(o.ids) }
+    case 'close-others':
+      return id(o.id) ? { kind: 'close-others', id: id(o.id)! } : null
+    case 'pin':
+      return id(o.id) ? { kind: 'pin', id: id(o.id)!, pinned: o.pinned === true } : null
+    case 'group':
+      return { kind: 'group', ids: ids(o.ids), group: o.group === null ? null : id(o.group), name: typeof o.name === 'string' ? o.name.trim().slice(0, 40) : undefined }
+    case 'group-rename':
+      return id(o.group) && typeof o.name === 'string' && o.name.trim() ? { kind: 'group-rename', group: id(o.group)!, name: o.name.trim().slice(0, 40) } : null
+    case 'group-collapse':
+      return id(o.group) ? { kind: 'group-collapse', group: id(o.group)!, collapsed: o.collapsed === true } : null
+  }
+  return null
+}
+
+/** The tabs tool's input, checked. */
+export const tabsOpFromTool = (input: Record<string, unknown>): TabsOp | string => {
+  const nums = (v: unknown) => (Array.isArray(v) ? v : typeof v === 'number' ? [v] : []).filter((x): x is number => typeof x === 'number' && Number.isInteger(x) && x > 0).slice(0, MAX_TABS)
+  const ns = nums(input.tabs ?? input.tab)
+  switch (input.action) {
+    case 'list':
+      return { kind: 'list' }
+    case 'new': {
+      const target = typeof input.url === 'string' ? input.url : typeof input.query === 'string' ? input.query : ''
+      return target.trim() ? { kind: 'new', target: target.slice(0, 2000), group: typeof input.group === 'string' ? input.group.slice(0, 40) : undefined, pin: input.pin === true } : 'Give a url or query for the new tab.'
+    }
+    case 'switch':
+      return ns[0] ? { kind: 'switch', n: ns[0] } : 'Which tab? Its number from list.'
+    case 'close':
+      return ns.length ? { kind: 'close', ns } : 'Which tabs? Their numbers from list.'
+    case 'pin':
+    case 'unpin':
+      return ns.length ? { kind: 'pin', ns, pinned: input.action === 'pin' } : 'Which tabs? Their numbers from list.'
+    case 'group':
+      return ns.length && typeof input.group === 'string' && input.group.trim() ? { kind: 'group', ns, name: input.group.trim().slice(0, 40), color: typeof input.color === 'string' ? input.color : undefined } : 'Give the tabs (numbers) and a group name.'
+    case 'ungroup':
+      return ns.length ? { kind: 'ungroup', ns } : 'Which tabs? Their numbers from list.'
+  }
+  return 'action must be one of list, new, switch, close, pin, unpin, group, ungroup.'
+}
+
+export const BRT = {
+  state: 'browser-tabs:state',
+  get: 'browser-tabs:get',
+  act: 'browser-tabs:act',
+  report: 'browser-tabs:report',
+} as const
+
+/** The page's side of the tabs (window.atlasTabs). */
+export interface BrowserTabsBridge {
+  get(): Promise<BrowserTabsState>
+  onState(cb: (s: BrowserTabsState) => void): () => void
+  act(a: TabAction): Promise<void>
+  /** A tab's page told its webContents id (on load), its address and title. */
+  report(r: { id: string; wcId?: number | undefined; url?: string | undefined; title?: string | undefined }): void
 }

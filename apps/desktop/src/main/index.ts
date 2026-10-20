@@ -615,7 +615,11 @@ const atlasBrowser: BrowserService = new BrowserService({
   },
   mode: (): BrowserMode => ui.browserMode(),
   log: (level, message) => log(level, message),
+  handle: (channel, fn) => handle(channel, fn),
+  toRenderer,
+  file: join(app.getPath('userData'), 'browser-tabs.json'),
 })
+atlasBrowser.register()
 const ui = new UiService({
   window: () => win,
   open: async () => {

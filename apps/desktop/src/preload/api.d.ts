@@ -19,6 +19,7 @@ import type { GlassBridge } from '../shared/glass.ts'
 import type { PcBridge } from '../shared/system.ts'
 import type { BrainBridge } from '../shared/brain.ts'
 import type { PowerUpBridge } from '../shared/powerup.ts'
+import type { BrowserTabsBridge } from '../shared/browser.ts'
 
 declare global {
   interface Window {
@@ -46,5 +47,6 @@ declare global {
     brain: BrainBridge
     mapOps: MapOpsBridge
     world: WorldBridge
+    atlasTabs: BrowserTabsBridge
   }
 }

@@ -24,6 +24,7 @@ import { PRS, type PresenceCommand, type PresenceHostBridge } from '../shared/pr
 import { PCC, type PcBridge, type PcState } from '../shared/system.ts'
 import { BR, type BrainBridge, type MemoryUseWhy } from '../shared/brain.ts'
 import { PWC, type PowerUpBridge } from '../shared/powerup.ts'
+import { BRT, type BrowserTabsBridge, type BrowserTabsState } from '../shared/browser.ts'
 
 const subscribe = <T>(channel: string, cb: (v: T) => void) => {
   const listener = (_e: IpcRendererEvent, v: T) => cb(v)
@@ -344,3 +345,12 @@ const powerup: PowerUpBridge = {
   previewVoice: (provider, voice) => ipcRenderer.invoke(PWC.preview, provider, voice),
 }
 contextBridge.exposeInMainWorld('powerup', powerup)
+
+/** Atlas's browser tabs: the list, the owner's clicks, and each tab's page reporting in. */
+const atlasTabs: BrowserTabsBridge = {
+  get: () => ipcRenderer.invoke(BRT.get),
+  onState: cb => subscribe<BrowserTabsState>(BRT.state, cb),
+  act: a => ipcRenderer.invoke(BRT.act, a),
+  report: r => void ipcRenderer.invoke(BRT.report, r).catch(() => undefined),
+}
+contextBridge.exposeInMainWorld('atlasTabs', atlasTabs)
