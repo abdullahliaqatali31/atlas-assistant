@@ -4,6 +4,7 @@
  * with an error, so the renderer never waits forever.
  */
 import { randomUUID } from 'node:crypto'
+import type { PcNotification } from '../shared/notifications.ts'
 
 import type { LlmProviderId } from '@assistant/providers/llm-presets'
 import { utilityProcess, type UtilityProcess } from 'electron'
@@ -330,6 +331,13 @@ export class RuntimeSupervisor {
     if (this.child) this.post({ type: 'system-snapshot', snapshot, changes })
   }
 
+  /** Recent Windows notifications, kept (as background) for a restarted runtime too. */
+  private lastNotifications: PcNotification[] = []
+  notifications(items: PcNotification[], fresh: boolean) {
+    this.lastNotifications = [...this.lastNotifications, ...items].slice(-60)
+    if (this.child) this.post({ type: 'notifications', items, fresh })
+  }
+
   /** Atlas's own window, kept for a restarted runtime too. */
   ui(state: Extract<HostRequest, { type: 'ui-snapshot' }>['state']) {
     this.lastUi = state
@@ -387,6 +395,7 @@ export class RuntimeSupervisor {
           if (this.lastNews.length) this.post({ type: 'news-snapshot', headlines: this.lastNews })
           if (this.lastUi) this.post({ type: 'ui-snapshot', state: this.lastUi })
           if (this.lastSystem) this.post(this.lastSystem)
+          if (this.lastNotifications.length) this.post({ type: 'notifications', items: this.lastNotifications, fresh: false })
         }
         this.deps.onStatus(e)
         break

@@ -1,4 +1,4 @@
-import { Battery, BatteryCharging, Zap, Bluetooth, BluetoothOff, FolderX, Map as MapIcon, RefreshCw, Shield, Wifi, WifiOff } from 'lucide-react'
+import { Battery, BatteryCharging, Bell, Zap, Bluetooth, BluetoothOff, FolderX, Map as MapIcon, RefreshCw, Shield, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { FullControlMode, FullControlView } from '../../shared/control.ts'
@@ -185,6 +185,31 @@ export function ThisPc({ run }: { run: <T>(fn: () => Promise<T>) => Promise<T | 
               </button>
             </div>
           </>
+        )}
+      </section>
+
+      <section className="tile space-y-2 p-3">
+        <h3 className="flex items-center gap-2 font-medium">
+          <Bell className="size-4 text-accent" aria-hidden /> Notifications
+          <label className="ml-auto flex items-center gap-2 text-xs font-normal">
+            <input type="checkbox" checked={s.notifications.enabled} onChange={e => void act(() => window.pc.setNotifications(e.target.checked))} />
+            {s.notifications.enabled ? 'On' : 'Off'}
+          </label>
+        </h3>
+        <p className="text-xs text-muted">
+          Lets Atlas see the notifications Windows shows: WhatsApp, Teams, Webex, Outlook, Windows itself and other apps. When someone writes, Atlas knows at once and can tell you (quiet hours, Focus and Away are respected; clients and family you have told it about come first), and you can ask “kis ka message aya?”. Replies are only sent when you say so. Read on this PC from Windows’ own list; nothing is uploaded. Apps whose notifications are off in Windows, or that hide message text, show less.
+        </p>
+        {s.notifications.enabled && (
+          <p className="text-sm">
+            {s.notifications.error ? (
+              <span className="text-danger">Could not read them: {s.notifications.error}</span>
+            ) : (
+              <>
+                <b>{s.notifications.seen}</b> seen since Atlas started
+                {s.notifications.lastAt && <span className="text-xs text-muted"> · latest {ago(s.notifications.lastAt)}</span>}
+              </>
+            )}
+          </p>
         )}
       </section>
     </div>

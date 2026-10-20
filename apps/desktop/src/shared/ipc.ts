@@ -5,6 +5,7 @@
  */
 
 import { isLlmProvider, type LlmProviderId } from '@assistant/providers/llm-presets'
+import type { PcNotification } from './notifications.ts'
 
 import type { ActivityHostEvent, ActivityHostRequest } from './activity.ts'
 import type { CodeOp, CodeProjectView, RunView } from './code.ts'
@@ -426,6 +427,8 @@ export type HostRequest =
   | { type: 'set-chat-model'; choice: ChatModelChoice }
   /** The PC's Wi-Fi, Bluetooth and battery, pushed by main with what changed. */
   | { type: 'system-snapshot'; snapshot: SystemSnapshot; changes: SystemChange[] }
+  /** Windows notifications main read (once the owner turned them on); fresh ones may be spoken. */
+  | { type: 'notifications'; items: PcNotification[]; fresh: boolean }
   /** Answer to a window tool's request. */
   | { type: 'ui-result'; requestId: string; result?: string | undefined; error?: string | undefined }
   /** Answer to a desktop-app tool's request. */

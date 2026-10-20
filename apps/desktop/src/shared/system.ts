@@ -1,6 +1,7 @@
 import type { FullControlMode } from './control.ts'
 import type { OpenWith, SheetSpec } from './pcactions.ts'
 import type { MapKind } from './sysmap.ts'
+import type { NotificationsView } from './notifications.ts'
 
 /**
  * What Atlas knows about the PC itself: Wi-Fi, Bluetooth, battery, VPN.
@@ -231,12 +232,14 @@ export interface PcState {
   status: SystemSnapshot | null
   changes: SystemChange[]
   map: { enabled: boolean; building: boolean; builtAt: number | null; counts: { apps: number; projects: number; folders: number }; excluded: string[] }
+  notifications: NotificationsView
 }
 
 export const PCC = {
   state: 'pc:state',
   changed: 'pc:changed',
   setMap: 'pc:set-map',
+  setNotifications: 'pc:set-notifications',
   rebuild: 'pc:rebuild',
   addExcluded: 'pc:add-excluded',
   removeExcluded: 'pc:remove-excluded',
@@ -246,6 +249,8 @@ export interface PcBridge {
   state(): Promise<PcState>
   onChanged(cb: (s: PcState) => void): () => void
   setMap(enabled: boolean): Promise<PcState>
+  /** Let Atlas see Windows notifications (read on this PC only). */
+  setNotifications(enabled: boolean): Promise<PcState>
   rebuild(): Promise<PcState>
   /** Pick a folder the map must never index. */
   addExcluded(): Promise<PcState>

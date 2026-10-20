@@ -42,6 +42,7 @@ import { registerStartupIpc, startedHidden } from './startup.ts'
 import { registerLearningIpc } from './learning.ts'
 import { registerBrainIpc } from './brain.ts'
 import { BrowserService } from './browser.ts'
+import { NotificationWatcher } from './system/notifications.ts'
 import type { BrowserMode } from '../shared/browser.ts'
 import { NewsService, newsSchemePrivileges } from './news.ts'
 import { modelSchemePrivileges, WakeService } from './wake.ts'
@@ -321,7 +322,15 @@ const sysmap = new SystemMapService({
   log: (level, message) => log(level, message),
   onChange: () => publishPc(),
 })
-const pcState = (): PcState => ({ status: pcSystem.current, changes: pcSystem.changes, map: sysmap.view() })
+/** Windows notifications, once the owner turns them on: read here, passed to Atlas. */
+const pcNotifications = new NotificationWatcher({
+  file: join(app.getPath('userData'), 'notifications.json'),
+  cacheDir: join(app.getPath('userData'), 'notifications-cache'),
+  onNew: (items, fresh) => supervisor.notifications(items, fresh),
+  onChange: () => publishPc(),
+  log: (level, message) => log(level, message),
+})
+const pcState = (): PcState => ({ status: pcSystem.current, changes: pcSystem.changes, map: sysmap.view(), notifications: pcNotifications.view() })
 const publishPc = () => toRenderer(PCC.changed, pcState())
 
 const pcActions = new PcActions({ map: () => sysmap.map, foreground: () => pcSystem.foreground() })
@@ -791,6 +800,11 @@ handle(PWC.preview, (provider, voice) => powerUp.previewVoice(provider, voice, s
 handle(PCC.setMap, on => {
   if (typeof on !== 'boolean') throw new Error('On or off.')
   sysmap.setEnabled(on)
+  return pcState()
+})
+handle(PCC.setNotifications, on => {
+  if (typeof on !== 'boolean') throw new Error('On or off.')
+  pcNotifications.setEnabled(on)
   return pcState()
 })
 handle(PCC.rebuild, () => {

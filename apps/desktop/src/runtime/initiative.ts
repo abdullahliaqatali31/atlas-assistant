@@ -96,6 +96,12 @@ export class InitiativeService {
     this.back(change.idleMs)
   }
 
+  /** Something arrived from outside (a chat message): deliver it as the policy allows. */
+  raise(event: InitiativeEvent) {
+    this.enqueue(event)
+    void this.drain()
+  }
+
   /** Raise due reminders and expired snoozes, then deliver what the policy allows. */
   async tick() {
     if (!this.away) {

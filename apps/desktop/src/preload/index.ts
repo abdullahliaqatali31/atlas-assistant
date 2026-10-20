@@ -330,6 +330,7 @@ const pc: PcBridge = {
   state: () => ipcRenderer.invoke(PCC.state),
   onChanged: cb => subscribe<PcState>(PCC.changed, cb),
   setMap: enabled => ipcRenderer.invoke(PCC.setMap, enabled),
+  setNotifications: enabled => ipcRenderer.invoke(PCC.setNotifications, enabled),
   rebuild: () => ipcRenderer.invoke(PCC.rebuild),
   addExcluded: () => ipcRenderer.invoke(PCC.addExcluded),
   removeExcluded: path => ipcRenderer.invoke(PCC.removeExcluded, path),
