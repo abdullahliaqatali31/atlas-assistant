@@ -106,7 +106,7 @@ export const parseChatModelChoice = (v: unknown): ChatModelChoice | null => {
   return null
 }
 
-export const VOICE_PROVIDERS = ['elevenlabs', 'azure'] as const
+export const VOICE_PROVIDERS = ['elevenlabs', 'azure', 'openai'] as const
 export type VoiceProviderChoice = (typeof VOICE_PROVIDERS)[number]
 
 /** For the provider picker: what each one needs and suggests. */
@@ -118,6 +118,13 @@ export const VOICE_PROVIDER_INFO: Record<VoiceProviderChoice, { label: string; v
     needsRegion: true,
     suggestedVoices: ['ur-PK-UzmaNeural', 'ur-PK-AsadNeural'],
     note: 'The free F0 tier works and includes Pakistani Urdu voices.',
+  },
+  openai: {
+    label: 'ChatGPT (OpenAI)',
+    voiceLabel: 'OpenAI voice',
+    needsRegion: false,
+    suggestedVoices: ['marin', 'cedar', 'coral', 'nova', 'alloy'],
+    note: 'Uses your OpenAI key, the same one as Live voice: about $0.015 a minute of speech. No other voice service needed.',
   },
 }
 

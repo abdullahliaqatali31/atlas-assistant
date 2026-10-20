@@ -64,7 +64,25 @@ export interface HudSource {
   off(type: 'move', fn: () => void): unknown
 }
 
-export function TacticalHud({ map, mode, counts }: { map: HudSource | MapLibre | null; mode: DisplayMode; counts: Partial<Record<LayerId, number>> }) {
+/** The reticle over the map's centre: a still cross inside a slowly turning ring. */
+export function TacticalHud() {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[2]" aria-hidden>
+      <span className="absolute left-1/2 top-1/2 h-4 w-px -translate-x-1/2 -translate-y-1/2 bg-accent/60" />
+      <span className="absolute left-1/2 top-1/2 h-px w-4 -translate-x-1/2 -translate-y-1/2 bg-accent/60" />
+      <span className="absolute left-1/2 top-1/2 -ml-7 -mt-7 size-14">
+        <span className="hud-reticle block size-full rounded-full border border-dashed border-accent/35" />
+      </span>
+    </div>
+  )
+}
+
+/**
+ * The HUD's readout, as one chip in the map's toolbar (so it wraps with the
+ * other buttons and never sits under them): live time, mode and zoom, then
+ * counts, ground resolution and sun as the pane's width allows.
+ */
+export function HudChip({ map, mode, counts }: { map: HudSource | MapLibre | null; mode: DisplayMode; counts: Partial<Record<LayerId, number>> }) {
   const [, tick] = useState(0)
   const [blink, setBlink] = useState(true)
   useEffect(() => {
@@ -93,45 +111,29 @@ export function TacticalHud({ map, mode, counts }: { map: HudSource | MapLibre |
   const stats = Object.entries(LABEL)
     .filter(([k]) => typeof counts[k as LayerId] === 'number')
     .map(([k, v]) => [v, counts[k as LayerId]!] as const)
-  const chip = 'flex items-center gap-2 rounded-full border border-accent/25 bg-slate-950/55 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-accent/90 shadow-[0_0_18px_rgba(0,0,0,0.35)] backdrop-blur-sm'
-
   return (
-    <div className="pointer-events-none absolute inset-0 z-[2]" aria-hidden>
-      {/* The reticle: a still cross inside a slowly turning ring. */}
-      <span className="absolute left-1/2 top-1/2 h-4 w-px -translate-x-1/2 -translate-y-1/2 bg-accent/60" />
-      <span className="absolute left-1/2 top-1/2 h-px w-4 -translate-x-1/2 -translate-y-1/2 bg-accent/60" />
-      <span className="absolute left-1/2 top-1/2 -ml-7 -mt-7 size-14">
-        <span className="hud-reticle block size-full rounded-full border border-dashed border-accent/35" />
+    <span className="pointer-events-none flex h-8 min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-full border border-accent/25 bg-slate-950/60 px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-accent/90 backdrop-blur-sm" aria-hidden>
+      <span className={blink ? 'text-red-500' : 'text-red-500/30'}>●</span>
+      <span>{now.toISOString().slice(11, 19)}Z</span>
+      <span className="text-accent/70">
+        {MODE_LABEL[mode]} Z{z.toFixed(1)}
       </span>
-      {/* One strip under the toolbar: live, the time, the mode and zoom; counts, resolution and sun when there is room. */}
-      <div className="absolute inset-x-0 top-[6.4rem] hidden justify-center px-3 @min-[640px]:flex @min-[1200px]:top-[3.6rem]">
-        <div className={chip}>
-          <span className={blink ? 'text-red-500' : 'text-red-500/30'}>●</span>
-          <span>Live {now.toISOString().slice(11, 19)}Z</span>
-          <span className="text-accent/50">·</span>
-          <span className="text-accent/70">
-            {MODE_LABEL[mode]} Z{z.toFixed(1)}
-          </span>
-          {stats.length > 0 && (
-            <span className="hidden gap-2 @min-[1000px]:flex">
-              <span className="text-accent/50">·</span>
-              {stats.map(([k, v]) => (
-                <span key={k}>
-                  <span className="text-accent/55">{k}</span> {v!.toLocaleString()}
-                </span>
-              ))}
+      {stats.length > 0 && (
+        <span className="hidden gap-2 @min-[1100px]:flex">
+          {stats.map(([k, v]) => (
+            <span key={k}>
+              <span className="text-accent/55">{k}</span> {v.toLocaleString()}
             </span>
-          )}
-          <span className="hidden gap-2 @min-[1300px]:flex">
-            <span className="text-accent/50">·</span>
-            <span>GSD {metres(gsd)}</span>
-            <span className="text-accent/70">
-              Sun {sun >= 0 ? '+' : ''}
-              {sun.toFixed(0)}° {sun < -6 ? 'night' : sun < 0 ? 'dusk' : 'day'}
-            </span>
-          </span>
-        </div>
-      </div>
-    </div>
+          ))}
+        </span>
+      )}
+      <span className="hidden gap-2 @min-[1500px]:flex">
+        <span>GSD {metres(gsd)}</span>
+        <span className="text-accent/70">
+          Sun {sun >= 0 ? '+' : ''}
+          {sun.toFixed(0)}° {sun < -6 ? 'night' : sun < 0 ? 'dusk' : 'day'}
+        </span>
+      </span>
+    </span>
   )
 }

@@ -22,6 +22,8 @@ interface Stored {
   azureRegion: string
   /** Azure voice name; empty means the runtime default (ur-PK-UzmaNeural). */
   azureVoice: string
+  /** OpenAI voice name; empty means marin. */
+  openaiVoice?: string
   /** Speak replies aloud when a voice provider is configured. */
   speakReplies: boolean
   /** Empty: follow the environment (Claude by default). */
@@ -81,6 +83,8 @@ export const saveSetup = (input: SetupInput, provider: VoiceProviderChoice) => {
   if (provider === 'azure') {
     if (input.azureRegion !== undefined) next.azureRegion = input.azureRegion
     if (AZURE_VOICE.test(input.voiceId)) next.azureVoice = input.voiceId
+  } else if (provider === 'openai') {
+    if (/^[a-z]{2,20}$/.test(input.voiceId)) next.openaiVoice = input.voiceId
   } else if (input.voiceId && !AZURE_VOICE.test(input.voiceId)) {
     next.voiceId = input.voiceId
   }
@@ -90,7 +94,7 @@ export const saveSetup = (input: SetupInput, provider: VoiceProviderChoice) => {
 export const saveSpeakReplies = (speakReplies: boolean) => write({ ...readSetup(), speakReplies })
 export const saveLiveVoice = (liveVoice: LiveVoiceSettings) => write({ ...readSetup(), liveVoice })
 
-const RUNTIME_VARS = /^(ASSISTANT_|ELEVENLABS_|AZURE_SPEECH_)|^(ANTHROPIC|OPENAI|GEMINI|OPENROUTER|GROQ|DEEPSEEK|MISTRAL|XAI|LLM)_API_KEY$/
+const RUNTIME_VARS = /^(ASSISTANT_|ELEVENLABS_|AZURE_SPEECH_|OPENAI_TTS_)|^(ANTHROPIC|OPENAI|GEMINI|OPENROUTER|GROQ|DEEPSEEK|MISTRAL|XAI|LLM)_API_KEY$/
 
 /**
  * Environment for `loadConfig` in the host: assistant-related variables from
@@ -129,6 +133,7 @@ export const runtimeEnv = (devEnvFile: string | null): Record<string, string> =>
   if (s.voiceId) env.ELEVENLABS_VOICE_ID = s.voiceId
   if (s.azureRegion) env.AZURE_SPEECH_REGION = s.azureRegion
   if (s.azureVoice) env.AZURE_SPEECH_VOICE = s.azureVoice
+  if (s.openaiVoice) env.OPENAI_TTS_VOICE = s.openaiVoice
   env.ASSISTANT_DATA_DIR ??= join(app.getPath('userData'), 'data')
   env.ASSISTANT_MCP_CONFIG ??= join(app.getPath('userData'), 'mcp.servers.json')
   return env
@@ -146,7 +151,7 @@ export const setupSummary = (env: Record<string, string>, keys: { llm: boolean; 
     llmQuickModel: env.ASSISTANT_LLM_QUICK_MODEL ?? '',
     llmRouting: env.ASSISTANT_LLM_ROUTING === 'main' ? 'main' : 'auto',
     voiceProvider,
-    voiceId: voiceProvider === 'azure' ? (env.AZURE_SPEECH_VOICE ?? DEFAULT_AZURE_VOICE) : (env.ELEVENLABS_VOICE_ID ?? ''),
+    voiceId: voiceProvider === 'azure' ? (env.AZURE_SPEECH_VOICE ?? DEFAULT_AZURE_VOICE) : voiceProvider === 'openai' ? (env.OPENAI_TTS_VOICE ?? 'marin') : (env.ELEVENLABS_VOICE_ID ?? ''),
     azureRegion: voiceProvider === 'azure' ? (env.AZURE_SPEECH_REGION ?? '') : '',
     hasLlmKey: keys.llm,
     hasVoiceKey: keys.voice,

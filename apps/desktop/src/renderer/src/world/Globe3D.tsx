@@ -35,7 +35,7 @@ import { newsFeatures } from './newsmap.ts'
 import type { FC } from './geo.ts'
 import { CelestialRing } from './CelestialRing.tsx'
 import { cameraFeatures, deadReckon, fireFeatures, flightFeatures, flightLabel, planeIcon, radioFeatures, satelliteFeatures, shipFeatures, shipIcon } from './geo.ts'
-import { DisplayFx, TacticalHud, type HudSource } from './Display.tsx'
+import { DisplayFx, HudChip, TacticalHud, type HudSource } from './Display.tsx'
 import { HoverOverlay } from './HoverCard.tsx'
 import { hoverInfo } from './hover.ts'
 import { MODE_FILTER, type DisplayPrefs } from './hud.ts'
@@ -46,7 +46,7 @@ import { Satellites3D } from './sats3d.ts'
 import { Traffic3D } from './traffic3d.ts'
 import { IncidentCard, TrafficPill, type TrafficStatus } from './TrafficLayer2D.tsx'
 import type { TrafficIncident } from '../../../shared/traffic.ts'
-import { AtlasLoader, Atmos } from './Atmos.tsx'
+import { Atmos } from './Atmos.tsx'
 import { MAP_VIEW_EVENT } from '../../../shared/map.ts'
 import { latLonLabel } from './sky.ts'
 
@@ -162,7 +162,6 @@ export default function Globe3D({
   const flights = useRef<{ list: Flight[]; at: number; byHex: Map<string, Flight> }>({ list: [], at: 0, byHex: new Map() })
   const followRef = useRef<Follow | null>(null)
   const [tier, setTier] = useState<Tier | null>(null)
-  const [load3d, setLoad3d] = useState(0.3)
   const [error, setError] = useState('')
   const [picked, setPicked] = useState<Flight | null>(null)
   const [follow, setFollow] = useState<Follow | null>(null)
@@ -223,17 +222,8 @@ export default function Globe3D({
       // Cesium stops drawing after an error: say so in Atlas's own words.
       viewer.scene.renderError.addEventListener((_scene: unknown, e: unknown) => setError(`The 3D view stopped drawing (${e instanceof Error ? e.message.slice(0, 80) : 'error'}). Go back to 2D and open 3D again.`))
       viewerRef.current = viewer
-      setLoad3d(0.45)
       // The loader follows the ground's tiles until the first view is in.
       {
-        let most = 0
-        const offTiles = viewer.scene.globe.tileLoadProgressEvent.addEventListener((queued: number) => {
-          most = Math.max(most, queued)
-          if (most > 0) setLoad3d(queued === 0 ? 1 : 0.45 + 0.55 * (1 - queued / most))
-        })
-        cleanups.push(offTiles)
-        const safety = setTimeout(() => setLoad3d(1), 15_000)
-        cleanups.push(() => clearTimeout(safety))
         // Where the camera looks, for the mini globe in the corner widget.
         const cam = viewer.camera
         let last = 0
@@ -1259,8 +1249,7 @@ export default function Globe3D({
       <div ref={box} className="absolute inset-0" style={{ filter: display ? MODE_FILTER[display.mode] : undefined }} />
       {display && <DisplayFx mode={display.mode} scope={display.scope} />}
       <Atmos dim={!!follow || !!satRide} />
-      <AtlasLoader progress={load3d} label="Opening the 3D world" />
-      {display?.hud && hudSource && !follow && <TacticalHud map={hudSource} mode={display.mode} counts={{ flights: counts.flights, ships: counts.ships, satellites: counts.sats, cameras: counts.cameras }} />}
+      {display?.hud && hudSource && !follow && <TacticalHud />}
       {hover && world && box.current && <HoverOverlay itemKey={hover.key} info={hoverInfo(hover.sel.kind, hover.sel.props, world, clock ?? Date.now())} p={{ x: hover.x, y: hover.y }} w={box.current.clientWidth} h={box.current.clientHeight} />}
       <div ref={credits} className="hidden" />
       {layers.celestial && widget && !follow && !satRide && <CelestialRing widget={widget} />}
@@ -1270,10 +1259,14 @@ export default function Globe3D({
           <Box className="size-3.5 text-accent" aria-hidden /> 3D · {tier ? TIER_LABEL[tier] : 'loading…'}
         </span>
         {displayButton}
-        <span className={`rounded-full px-3 py-1 text-[10px] text-accent/80 ${panel} ${mono}`}>
-          FLT {counts.flights} · SHIP {counts.ships} · SAT {counts.sats}
-          {layers.cables && counts.cables ? ` · CBL ${counts.cables}` : ''}
-        </span>
+        {display?.hud && hudSource ? (
+          <HudChip map={hudSource} mode={display.mode} counts={{ flights: counts.flights, ships: counts.ships, satellites: counts.sats, cameras: counts.cameras }} />
+        ) : (
+          <span className={`rounded-full px-3 py-1 text-[10px] text-accent/80 ${panel} ${mono}`}>
+            FLT {counts.flights} · SHIP {counts.ships} · SAT {counts.sats}
+            {layers.cables && counts.cables ? ` · CBL ${counts.cables}` : ''}
+          </span>
+        )}
         {tier === 'keyless' && <span className="rounded-full bg-black/60 px-2.5 py-1 text-[10px] text-white/60">Add a Cesium ion or Google key in Setup › Power up for 3D buildings and cities</span>}
       </div>
       <button type="button" onClick={onClose} className={`absolute right-3 top-3 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs hover:border-accent ${panel}`}>

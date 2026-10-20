@@ -3,6 +3,7 @@ import {
   ArrowLeftRight,
   Bell,
   Brain,
+  ChevronDown,
   Columns2,
   Compass,
   CheckSquare,
@@ -38,7 +39,7 @@ import {
 
 import type { ControlState } from "../../shared/control.ts";
 import type { IdentityView } from "../../shared/identity.ts";
-import type { RuntimeStatus } from "../../shared/ipc.ts";
+import { MODES, type RuntimeStatus, type UiMode } from "../../shared/ipc.ts";
 import { MAP3D_STATE_EVENT, type UiChange, type View } from "../../shared/ui.ts";
 import {
   clampRatio,
@@ -1026,16 +1027,11 @@ function TitleBar({ status, tabs }: { status: RuntimeStatus | null; tabs?: React
         className="size-5 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]"
       />
       <span className="text-[13px] font-semibold tracking-wide">Assistant</span>
-      <span className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-muted">
-        <span
-          className={`size-1.5 rounded-full ${phase === "ready" ? "bg-ok" : phase === "setup" || phase === "stopped" ? "bg-danger" : "thinking-dot bg-warm"}`}
-          aria-hidden
-        />
-        {PHASE[phase]}
-        {status?.mode && phase === "ready" ? (
-          <span className="capitalize"> · {status.mode}</span>
-        ) : null}
-      </span>
+      <ModeChip
+        phase={phase}
+        label={PHASE[phase]}
+        mode={status?.mode ?? null}
+      />
       {tabs}
       {fullControl && (
         <button
@@ -1150,5 +1146,93 @@ function PaneDivider({
     >
       <span className={`h-12 w-1 rounded-full transition-colors ${drag ? "bg-accent" : "bg-border group-hover:bg-accent/60"}`} />
     </div>
+  );
+}
+
+const MODE_HINT: Record<UiMode, string> = {
+  companion: "Talks with you and speaks up when it helps",
+  work: "Task-first; still speaks up when it helps",
+  focus: "Only urgent things interrupt; the rest waits",
+  quiet: "Nothing spoken; urgent shown silently, the rest waits",
+};
+
+/** The status chip in the title bar: online state and mode; click to change the mode from anywhere. */
+function ModeChip({
+  phase,
+  label,
+  mode,
+}: {
+  phase: RuntimePhaseName;
+  label: string;
+  mode: UiMode | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const ready = phase === "ready";
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: Event) => {
+      if (!(e.target as HTMLElement | null)?.closest?.("[data-mode-chip]")) setOpen(false);
+    };
+    const key = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", key);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", key);
+    };
+  }, [open]);
+  return (
+    <span
+      data-mode-chip
+      className="relative"
+      style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
+    >
+      <button
+        type="button"
+        disabled={!ready}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={ready ? "Change mode" : label}
+        className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-muted hover:border-accent/60 hover:text-text disabled:hover:border-border"
+      >
+        <span
+          className={`size-1.5 rounded-full ${phase === "ready" ? "bg-ok" : phase === "setup" || phase === "stopped" ? "bg-danger" : "thinking-dot bg-warm"}`}
+          aria-hidden
+        />
+        {label}
+        {mode && ready ? <span className="capitalize"> · {mode}</span> : null}
+        {ready && <ChevronDown className="size-3" aria-hidden />}
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="glass absolute left-0 top-full z-50 mt-1.5 w-64 rounded-xl p-1 shadow-2xl"
+        >
+          {MODES.map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="menuitemradio"
+              aria-checked={mode === m}
+              onClick={() => {
+                setOpen(false);
+                void window.assistant.setMode(m).catch(() => undefined);
+              }}
+              className={`flex w-full items-start gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-surface-strong ${mode === m ? "text-accent" : ""}`}
+            >
+              <span
+                className={`mt-1.5 size-1.5 shrink-0 rounded-full ${mode === m ? "bg-accent" : "bg-border"}`}
+                aria-hidden
+              />
+              <span>
+                <span className="block text-xs font-medium capitalize">{m}</span>
+                <span className="block text-[10px] text-muted">{MODE_HINT[m]}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }

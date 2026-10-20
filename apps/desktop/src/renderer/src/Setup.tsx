@@ -19,6 +19,7 @@ const FIELD_FOR: Record<string, keyof SetupInput> = {
   AZURE_SPEECH_KEY: 'voiceKey',
   AZURE_SPEECH_REGION: 'azureRegion',
   AZURE_SPEECH_VOICE: 'voiceId',
+  OPENAI_TTS_VOICE: 'voiceId',
 }
 
 /** Common Azure Speech regions; any other region can be typed. */
@@ -32,6 +33,7 @@ const PROVIDER_ICON: Record<VoiceProviderChoice, ReactNode> = {
       <Cloud className="size-[18px]" aria-hidden />
     </span>
   ),
+  openai: <BrandIcon id="openai" size={34} />,
 }
 
 export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; onSaved: (s: RuntimeStatus) => void; onCancel?: () => void }) {
@@ -88,7 +90,8 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
   const provider: VoiceProviderChoice = form.voiceProvider ?? 'elevenlabs'
   const info = VOICE_PROVIDER_INFO[provider]
   // A stored key only counts for the provider it belongs to.
-  const keyStored = setup.hasVoiceKey && setup.voiceProvider === provider
+  // The ChatGPT voice uses the OpenAI key Live voice already has.
+  const keyStored = (setup.hasVoiceKey && setup.voiceProvider === provider) || (provider === 'openai' && status.speech.live.available)
 
   const problemFor = (field: keyof SetupInput) => problems.find(p => FIELD_FOR[p.key] === field)?.message
   const otherProblems = problems.filter(p => !FIELD_FOR[p.key])

@@ -7,6 +7,7 @@ import {
   AzureSpeechVoice,
   DEFAULT_AZURE_VOICE,
   ElevenLabsVoice,
+  OpenAiVoice,
   azureLocale,
   isAzureRegion,
   isAzureVoiceName,
@@ -29,12 +30,14 @@ export type VoiceConfig =
   | { provider: 'elevenlabs'; apiKey: string; voiceId: string }
   /** Azure AI Speech; the free F0 tier has Pakistani Urdu neural voices. voiceId is the voice name. */
   | { provider: 'azure'; apiKey: string; region: string; voiceId: string }
+  /** OpenAI (ChatGPT) voice, with the same key as Live voice. voiceId is the voice name (marin, cedar, coral…). */
+  | { provider: 'openai'; apiKey: string; voiceId: string }
 
-export const VOICE_PROVIDERS = ['elevenlabs', 'azure'] as const
+export const VOICE_PROVIDERS = ['elevenlabs', 'azure', 'openai'] as const
 export type VoiceProviderId = (typeof VOICE_PROVIDERS)[number]
 
 /** The credential-store name holding each voice provider's key. */
-export const VOICE_KEY_NAME = { elevenlabs: 'ELEVENLABS_API_KEY', azure: 'AZURE_SPEECH_KEY' } as const satisfies Record<VoiceProviderId, string>
+export const VOICE_KEY_NAME = { elevenlabs: 'ELEVENLABS_API_KEY', azure: 'AZURE_SPEECH_KEY', openai: 'OPENAI_API_KEY' } as const satisfies Record<VoiceProviderId, string>
 
 export const isVoiceProvider = (v: unknown): v is VoiceProviderId => typeof v === 'string' && (VOICE_PROVIDERS as readonly string[]).includes(v)
 
@@ -102,6 +105,11 @@ export const loadConfig = (
     else if (!isAzureRegion(region)) missing.push({ key: 'AZURE_SPEECH_REGION', message: `"${region}" is not an Azure region name (e.g. eastus).` })
     if (!isAzureVoiceName(voiceId)) missing.push({ key: 'AZURE_SPEECH_VOICE', message: `"${voiceId}" is not an Azure neural voice name (e.g. ${DEFAULT_AZURE_VOICE}).` })
     if (missing.length === 0) voice = { provider: 'azure', apiKey, region, voiceId }
+  } else if (voiceProvider === 'openai') {
+    const apiKey = env.OPENAI_API_KEY ?? ''
+    const voiceId = env.OPENAI_TTS_VOICE || 'marin'
+    if (!apiKey) missing.push({ key: 'OPENAI_API_KEY', message: 'An OpenAI key is required for the ChatGPT voice.' })
+    else voice = { provider: 'openai', apiKey, voiceId }
   } else {
     problems.push({ key: 'ASSISTANT_VOICE_PROVIDER', message: `Unsupported voice provider "${voiceProvider}" (supported: ${VOICE_PROVIDERS.join(', ')}).` })
   }
@@ -138,6 +146,7 @@ export const loadConfig = (
  */
 export const createVoice = (voice: VoiceConfig, languages: string[] = []): VoiceProvider => {
   if (voice.provider === 'elevenlabs') return new ElevenLabsVoice(voice.apiKey, voice.voiceId)
+  if (voice.provider === 'openai') return new OpenAiVoice(voice.apiKey, voice.voiceId)
   const locales = [...new Set(languages.map(azureLocale).filter((l): l is string => Boolean(l)))]
   return new AzureSpeechVoice(voice.apiKey, voice.region, voice.voiceId, locales.length ? locales : undefined)
 }

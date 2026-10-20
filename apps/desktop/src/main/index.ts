@@ -12,7 +12,7 @@ import { app, BrowserWindow, dialog, protocol, globalShortcut, ipcMain, Menu, na
 
 import {
   CH,
-  isMode,
+  isMode, MODES,
   parseApproval,
   parseChatsOp,
   parseInitiativeAction,
@@ -535,6 +535,18 @@ const updateTray = () => {
     Menu.buildFromTemplate([
       { label: 'Open assistant', click: () => createWindow() },
       { label: PHASE_LABEL[status.phase], enabled: false },
+      {
+        label: 'Mode',
+        submenu: MODES.map(m => ({
+          label: m[0]!.toUpperCase() + m.slice(1),
+          type: 'radio' as const,
+          checked: status.mode === m,
+          click: () => {
+            supervisor.setMode(m)
+            publish({ mode: m })
+          },
+        })),
+      },
       { type: 'separator' },
       controls.fullControlView.on
         ? { label: 'Full control is on: turn it off', click: () => controls.setFullControl(false) }

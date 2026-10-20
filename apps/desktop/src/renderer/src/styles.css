@@ -702,7 +702,7 @@ input[type='radio']:disabled {
 .atmos-hex {
   inset: -80px;
   background-color: var(--accent);
-  opacity: 0.05;
+  opacity: 0.03;
   -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'><path d='M28 0 56 16v32L28 64 0 48V16Z M28 64v33' fill='none' stroke='black' stroke-width='1'/></svg>");
   mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'><path d='M28 0 56 16v32L28 64 0 48V16Z M28 64v33' fill='none' stroke='black' stroke-width='1'/></svg>");
   -webkit-mask-size: 56px 97px;
@@ -713,14 +713,14 @@ input[type='radio']:disabled {
 .atmos-lines {
   inset: 0;
   background-image: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px);
-  opacity: 0.35;
+  opacity: 0.18;
 }
 .atmos-sweep {
   left: 0;
   right: 0;
   top: 0;
   height: 26%;
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--accent) 9%, transparent) 55%, color-mix(in srgb, var(--accent) 16%, transparent) 62%, transparent);
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--accent) 4%, transparent) 55%, color-mix(in srgb, var(--accent) 7%, transparent) 62%, transparent);
   animation: atmos-sweep 11s cubic-bezier(0.45, 0, 0.55, 1) infinite;
   will-change: transform;
 }
@@ -728,7 +728,7 @@ input[type='radio']:disabled {
   inset: -50%;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
   mix-blend-mode: overlay;
-  opacity: 0.09;
+  opacity: 0.05;
   animation: atmos-grain 0.8s steps(5) infinite;
 }
 .atmos-mark {
@@ -737,14 +737,14 @@ input[type='radio']:disabled {
   width: min(34vmin, 300px);
   height: min(34vmin, 300px);
   translate: -50% -50%;
-  opacity: 0.035;
+  opacity: 0.02;
   filter: drop-shadow(0 0 30px var(--accent));
   animation: atmos-breathe 14s ease-in-out infinite;
 }
 .atmos-vignette {
   inset: 0;
-  background: radial-gradient(ellipse at center, transparent 55%, rgba(2, 6, 23, 0.55) 100%);
-  box-shadow: inset 0 0 70px color-mix(in srgb, var(--accent) 10%, transparent);
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(2, 6, 23, 0.4) 100%);
+  box-shadow: inset 0 0 60px color-mix(in srgb, var(--accent) 6%, transparent);
 }
 .atmos-dim .atmos-mark,
 .atmos-dim .atmos-hex {
@@ -775,11 +775,11 @@ input[type='radio']:disabled {
 @keyframes atmos-breathe {
   0%,
   100% {
-    opacity: 0.03;
+    opacity: 0.015;
     scale: 1;
   }
   50% {
-    opacity: 0.055;
+    opacity: 0.03;
     scale: 1.04;
   }
 }
@@ -795,27 +795,6 @@ input[type='radio']:disabled {
   }
 }
 
-/* The loader: the mark in a turning ring, a bar and its percentage. */
-.atlas-loader {
-  position: absolute;
-  inset: 0;
-  z-index: 45;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-  background: radial-gradient(ellipse at center, #071018 0%, #03070b 70%);
-  transition: opacity 600ms ease;
-}
-.atlas-loader-out {
-  opacity: 0;
-  pointer-events: none;
-}
-.atlas-loader-arc {
-  transform-origin: 50px 50px;
-  animation: atlas-spin 1.4s linear infinite;
-}
 @keyframes atlas-spin {
   to {
     transform: rotate(360deg);
@@ -827,8 +806,7 @@ input[type='radio']:disabled {
   animation: atlas-spin 24s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .hud-reticle,
-  .atlas-loader-arc {
+  .hud-reticle {
     animation: none;
   }
 }
