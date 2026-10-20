@@ -22,3 +22,13 @@ describe('the aircraft card', () => {
     expect(isHex('../x12')).toBe(false)
   })
 })
+
+describe('Wikidata for ships and satellites', () => {
+  it('reads one notable thing, joining several operators, with a Commons thumbnail and credit page', async () => {
+    const { parseWikiThing, isWikiId } = await import('./world.ts')
+    const row = (op: string) => ({ item: { value: 'http://www.wikidata.org/entity/Q25271' }, itemLabel: { value: 'International Space Station' }, itemDescription: { value: 'modular space station' }, image: { value: 'http://commons.wikimedia.org/wiki/Special:FilePath/ISS%20(cropped).jpg' }, operatorLabel: { value: op }, launch: { value: '1998-11-20T00:00:00Z' } })
+    expect(parseWikiThing({ results: { bindings: [row('NASA'), row('ESA'), row('NASA')] } })).toEqual({ label: 'International Space Station', description: 'modular space station', image: 'https://commons.wikimedia.org/wiki/Special:FilePath/ISS%20(cropped).jpg?width=480', imagePage: 'https://commons.wikimedia.org/wiki/File:ISS%20(cropped).jpg', operator: 'NASA, ESA', country: '', since: '1998-11-20', wikidata: 'https://www.wikidata.org/entity/Q25271' })
+    expect(parseWikiThing({ results: { bindings: [] } })).toBeNull()
+    expect([isWikiId('ship', '353136000'), isWikiId('ship', '35313'), isWikiId('satellite', '25544'), isWikiId('satellite', '25544"}'), isWikiId('x', '1')]).toEqual([true, false, true, false, false])
+  })
+})

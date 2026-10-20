@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Plane, Satellite, Ship } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import type { AircraftInfo, FlightTrack } from '../../../shared/world.ts'
+import type { AircraftInfo, FlightTrack, WikiThing } from '../../../shared/world.ts'
 
 type Props = Record<string, string | number>
 
@@ -335,6 +335,7 @@ export function MiniDetail({ kind, p }: { kind: string; p: Props }) {
   if (kind === 'ships')
     return (
       <div className="space-y-1.5">
+        {str(p.mmsi) || num(p.mmsi) !== null ? <WikiFacts kind="ship" id={String(p.mmsi)} mini /> : null}
         <p className="truncate text-xs">
           {str(p.category) ?? 'Vessel'}
           {str(p.destination) && <span className="text-muted"> · to {str(p.destination)}</span>}
@@ -350,6 +351,7 @@ export function MiniDetail({ kind, p }: { kind: string; p: Props }) {
   const period = num(p.periodMin)
   return (
     <div className="space-y-1.5">
+      {str(p.norad) && <WikiFacts kind="satellite" id={str(p.norad)!} mini />}
       {num(p.nextPass) !== null && (
         <p className="truncate text-[11px] text-muted">
           Next over {str(p.passPlace) ?? 'you'}: {new Date(num(p.nextPass)!).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
@@ -380,4 +382,58 @@ function MiniPhoto({ hex }: { hex: string }) {
   }, [hex])
   if (!src) return null
   return <img src={src} alt="" className="h-11 w-16 shrink-0 rounded-md bg-surface object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => setSrc(null)} />
+}
+
+/** Wikidata on a notable ship or satellite: its picture (Wikimedia Commons, credited) and who runs it. Most have none. */
+export function WikiFacts({ kind, id, mini = false }: { kind: 'ship' | 'satellite'; id: string; mini?: boolean }) {
+  const [thing, setThing] = useState<WikiThing | null>(null)
+  const [broken, setBroken] = useState(false)
+  useEffect(() => {
+    let gone = false
+    setThing(null)
+    setBroken(false)
+    void window.world.wiki(kind, id).then(
+      t => !gone && setThing(t),
+      () => undefined,
+    )
+    return () => {
+      gone = true
+    }
+  }, [kind, id])
+  if (!thing) return null
+  const facts = [thing.operator, thing.country, thing.since ? `since ${thing.since.slice(0, 4)}` : ''].filter(Boolean).join(' · ')
+  if (mini)
+    return (
+      <div className="flex items-center gap-2">
+        {thing.image && !broken && <img src={thing.image} alt="" className="h-11 w-16 shrink-0 rounded-md bg-surface object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} />}
+        <div className="min-w-0">
+          <p className="truncate text-xs">{thing.label}</p>
+          <p className="truncate text-[11px] text-muted">{thing.description || facts}</p>
+        </div>
+      </div>
+    )
+  return (
+    <figure className="space-y-1">
+      {thing.image && !broken && <img src={thing.image} alt={thing.label} className="aspect-[3/2] w-full rounded-lg bg-surface object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} />}
+      <figcaption className="space-y-0.5 text-[11px] text-muted">
+        <p className="text-text">
+          {thing.label}
+          {thing.description && <span className="text-muted"> · {thing.description}</span>}
+        </p>
+        {facts && <p>{facts}</p>}
+        <p className="flex gap-2 text-[10px]">
+          {thing.imagePage && !broken && (
+            <a href={thing.imagePage} target="_blank" rel="noreferrer" className="hover:text-accent">
+              Photo: Wikimedia Commons
+            </a>
+          )}
+          {thing.wikidata && (
+            <a href={thing.wikidata} target="_blank" rel="noreferrer" className="hover:text-accent">
+              Wikidata
+            </a>
+          )}
+        </p>
+      </figcaption>
+    </figure>
+  )
 }

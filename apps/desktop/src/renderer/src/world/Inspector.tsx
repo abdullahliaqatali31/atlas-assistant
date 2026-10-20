@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PlaceStatus, WorldSnapshot } from '../../../shared/world.ts'
 import { ago } from '../Jarvis.tsx'
 import { ASK_EVENT } from '../shell/live.ts'
-import { FlightDetail, MiniDetail, moreLinks, RadioDetail, SatelliteDetail, ShipDetail } from './Details.tsx'
+import { FlightDetail, MiniDetail, moreLinks, RadioDetail, SatelliteDetail, ShipDetail, WikiFacts } from './Details.tsx'
 import { hoverInfo, type NearbyItem } from './hover.ts'
 import { layerDef, type LayerId } from './layers.ts'
 import { MAP3D_EVENT } from './mapops.ts'
@@ -300,9 +300,15 @@ export function Inspector({
         ) : sel.kind === 'flights' ? (
           <FlightDetail p={p} />
         ) : sel.kind === 'ships' ? (
-          <ShipDetail p={p} />
+          <>
+            {p.mmsi !== undefined && <WikiFacts kind="ship" id={String(p.mmsi)} />}
+            <ShipDetail p={p} />
+          </>
         ) : sel.kind === 'satellites' ? (
-          <SatelliteDetail p={p} />
+          <>
+            {p.norad !== undefined && <WikiFacts kind="satellite" id={String(p.norad)} />}
+            <SatelliteDetail p={p} />
+          </>
         ) : sel.kind === 'radio' ? (
           <RadioDetail key={String(p.id)} p={p} />
         ) : sel.kind === 'cameras' ? (

@@ -244,6 +244,46 @@ export const parseAdsbdbAircraft = (j: unknown): AircraftInfo | null => {
   return { type: s(a.type), icaoType: s(a.icao_type), manufacturer: s(a.manufacturer), registration: s(a.registration), owner: s(a.registered_owner), country: s(a.registered_owner_country_name), photo: https(a.url_photo), photoThumb: https(a.url_photo_thumbnail) }
 }
 
+/** What Wikidata knows about a ship (by MMSI) or a satellite (by NORAD number): only notable ones are there. */
+export interface WikiThing {
+  label: string
+  description: string
+  /** A Commons thumbnail (https) and its file page, for the credit. */
+  image: string | null
+  imagePage: string | null
+  operator: string
+  country: string
+  /** Launch or commissioning date, ISO day. */
+  since: string
+  wikidata: string
+}
+
+export const wikiQuery = (kind: 'ship' | 'satellite', id: string) => `SELECT ?item ?itemLabel ?itemDescription ?image ?operatorLabel ?countryLabel ?flagLabel ?launch WHERE { ?item wdt:${kind === 'ship' ? 'P587' : 'P377'} "${id}" . OPTIONAL { ?item wdt:P18 ?image } OPTIONAL { ?item wdt:P137 ?operator } OPTIONAL { ?item wdt:P17 ?country } OPTIONAL { ?item wdt:P8047 ?flag } OPTIONAL { ?item wdt:P619 ?launch } SERVICE wikibase:label { bd:serviceParam wikibase:language "en". } } LIMIT 8`
+
+/** Only ids that are what they claim: MMSI nine digits, NORAD up to nine. */
+export const isWikiId = (kind: unknown, id: unknown): id is string => typeof id === 'string' && (kind === 'ship' ? /^\d{9}$/.test(id) : kind === 'satellite' ? /^\d{1,9}$/.test(id) : false)
+
+export const parseWikiThing = (j: unknown): WikiThing | null => {
+  const rows = (j as { results?: { bindings?: Record<string, { value?: string }>[] } })?.results?.bindings
+  if (!Array.isArray(rows) || !rows.length) return null
+  const v = (r: Record<string, { value?: string }>, k: string) => (typeof r[k]?.value === 'string' ? r[k]!.value! : '')
+  const first = rows[0]!
+  const uniq = (k: string) => [...new Set(rows.map(r => v(r, k)).filter(Boolean))].join(', ')
+  const file = v(first, 'image').replace(/^https?:\/\/commons\.wikimedia\.org\/wiki\/Special:FilePath\//, '')
+  const item = v(first, 'item')
+  return {
+    label: v(first, 'itemLabel'),
+    description: v(first, 'itemDescription'),
+    image: file ? `https://commons.wikimedia.org/wiki/Special:FilePath/${file}?width=480` : null,
+    imagePage: file ? `https://commons.wikimedia.org/wiki/File:${file}` : null,
+    operator: uniq('operatorLabel'),
+    // Ships carry their flag as country of registry (P8047); satellites a country (P17).
+    country: uniq('flagLabel') || uniq('countryLabel'),
+    since: v(first, 'launch').slice(0, 10),
+    wikidata: /^http:\/\/www\.wikidata\.org\/entity\/Q\d+$/.test(item) ? item.replace('http://', 'https://') : '',
+  }
+}
+
 /** This flight's path so far (OpenSky): altitude over time, for the card's profile. */
 export interface FlightTrack {
   callsign: string
@@ -655,6 +695,7 @@ export const WLD = {
   flightsArea: 'world:flights-area',
   flightRoute: 'world:flight-route',
   aircraft: 'world:aircraft',
+  wiki: 'world:wiki',
   track: 'world:track',
   launches: 'world:launches',
   radio: 'world:radio',
@@ -685,6 +726,8 @@ export interface WorldBridge {
   flightRoute(callsign: string): Promise<FlightRoute | null>
   /** The airframe behind an ICAO hex: type, owner, a photo (adsbdb); null when unknown. */
   aircraft(hex: string): Promise<AircraftInfo | null>
+  /** Wikidata on a notable ship (MMSI) or satellite (NORAD number): photo, description, operator; null when unknown. */
+  wiki(kind: 'ship' | 'satellite', id: string): Promise<WikiThing | null>
   /** This flight's track so far (OpenSky, keyless, sparing): null when it has none. */
   track(hex: string): Promise<FlightTrack | null>
   /** Space launches: the next 30 days and the last 7 (Launch Library 2, keyless). */

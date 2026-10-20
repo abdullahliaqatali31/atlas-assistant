@@ -274,6 +274,7 @@ const world: WorldBridge = {
   flightsArea: box => ipcRenderer.invoke(WLD.flightsArea, box),
   flightRoute: callsign => ipcRenderer.invoke(WLD.flightRoute, callsign),
   aircraft: hex => ipcRenderer.invoke(WLD.aircraft, hex),
+  wiki: (kind, id) => ipcRenderer.invoke(WLD.wiki, kind, id),
   track: hex => ipcRenderer.invoke(WLD.track, hex),
   launches: () => ipcRenderer.invoke(WLD.launches),
   radio: () => ipcRenderer.invoke(WLD.radio),

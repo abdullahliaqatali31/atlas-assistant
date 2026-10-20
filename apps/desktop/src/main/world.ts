@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import type { HostEvent, HostRequest } from '../shared/ipc.ts'
 import { osCredentialStore } from '@assistant/runtime'
 
-import { EMPTY_WORLD, isHex, parseAdsbdbAircraft, parseOpenSkyTrack, type AircraftInfo, type FlightTrack, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
+import { EMPTY_WORLD, isHex, isWikiId, parseWikiThing, wikiQuery, type WikiThing, parseAdsbdbAircraft, parseOpenSkyTrack, type AircraftInfo, type FlightTrack, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
 import { isCableId, parseCableDetail, parseCables, parseLandings, SAT_GROUPS, type CableDetail, type CablesResult } from '../shared/space.ts'
 import { CameraDirectory } from './cameras.ts'
 import { AdsbFeed, FlightSweep, RouteBook } from './flights.ts'
@@ -59,6 +59,9 @@ export class WorldService {
   private cableCards = new Map<string, CableDetail | null>()
   private airframes = new Map<string, { at: number; info: AircraftInfo | null }>()
   private tracks = new Map<string, { at: number; track: FlightTrack | null }>()
+  private wikiCache = new Map<string, { at: number; thing: WikiThing | null }>()
+  private wikiQueue: Promise<unknown> = Promise.resolve()
+  private wikiPausedUntil = 0
   private readonly cams = new CameraDirectory((level, message) => this.deps.log?.(level, message))
   readonly webcams = new WebcamService({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
   private readonly adsb = new AdsbFeed(getJson)
@@ -249,6 +252,34 @@ export class WorldService {
     return track
   }
 
+  /**
+   * Wikidata on a ship or satellite, gently: one query at a time, 1.5 s apart,
+   * ten minutes off after a "slow down", remembered a week.
+   */
+  async wiki(kind: unknown, id: unknown): Promise<WikiThing | null> {
+    if (!isWikiId(kind, id)) return null
+    const key = `${String(kind)}:${id}`
+    const hit = this.wikiCache.get(key)
+    if (hit && Date.now() - hit.at < 7 * 86_400_000) return hit.thing
+    if (Date.now() < this.wikiPausedUntil) return null
+    const run = this.wikiQueue.then(async () => {
+      await new Promise(r => setTimeout(r, 1500))
+      const url = `https://query.wikidata.org/sparql?query=${encodeURIComponent(wikiQuery(kind as 'ship' | 'satellite', id))}`
+      const res = await fetch(url, { signal: AbortSignal.timeout(20_000), headers: { 'user-agent': 'Atlas personal assistant (open source desktop app)', accept: 'application/sparql-results+json' } })
+      if (res.status === 429 || res.status === 403) {
+        this.wikiPausedUntil = Date.now() + 10 * 60_000
+        return null
+      }
+      if (!res.ok) return null
+      return parseWikiThing(await res.json())
+    })
+    this.wikiQueue = run.catch(() => null)
+    const thing = await run.catch(() => null)
+    if (this.wikiCache.size > 1000) this.wikiCache.delete(this.wikiCache.keys().next().value!)
+    this.wikiCache.set(key, { at: Date.now(), thing })
+    return thing
+  }
+
   async cable(id: unknown): Promise<CableDetail | null> {
     if (!isCableId(id)) return null
     if (this.cableCards.has(id)) return this.cableCards.get(id) ?? null
@@ -366,6 +397,7 @@ export class WorldService {
     handle(WLD.flightsArea, raw => this.flightsArea(toBox(raw)))
     handle(WLD.flightRoute, callsign => (typeof callsign === 'string' ? this.routes.get(callsign) : null))
     handle(WLD.aircraft, hex => this.aircraft(hex))
+    handle(WLD.wiki, (kind, id) => this.wiki(kind, id))
     handle(WLD.track, hex => this.track(hex))
     handle(WLD.satellites, which => (which === 'all' ? this.satelliteListAll() : this.satelliteList()))
     handle(WLD.cables, () => this.cables())
