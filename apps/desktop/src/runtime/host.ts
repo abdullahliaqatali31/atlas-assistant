@@ -56,6 +56,7 @@ import { HostLearning } from './learning.ts'
 import { runProjectsOp } from './projects.ts'
 import { createSpeaker } from './speaker.ts'
 import { brainView } from './brain.ts'
+import { DailyFinder } from './discover.ts'
 import { startWindowSampler } from './window-sampler.ts'
 
 const port = process.parentPort
@@ -134,6 +135,8 @@ let initiative: InitiativeService | null = null
 let activity: HostActivity | null = null
 let learning: HostLearning | null = null
 let world: WorldWatch | null = null
+/** Today's find for the Home page. */
+let finder: DailyFinder | null = null
 /** When the owner last sent something; the agenda leaves them room after it. */
 let lastOwnerTurnAt = 0
 /** Sends the cost meter's totals to the window; set once the database is open. */
@@ -235,6 +238,14 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
       void speakUp(e, { id: `agenda:${e.key}`, kind: e.kind === 'task' ? 'task' : 'question', title: e.title, channel: 'speak', reason: e.evidence, at: e.at, canMute: false, expectsAnswer: e.expectsAnswer }),
     post: e => post(e),
     busy: () => current !== null,
+    log: (level, message) => log(level, message),
+  })
+  finder = new DailyFinder({
+    llm: meterLlm(createLlm(config.llm, 'background'), { purpose: 'background', memory, clock: systemClock, utcOffsetMin: config.owner.utcOffsetMin, onRecord: () => schedulePush() }),
+    memory,
+    file: `${config.dataDir}/todays-find.json`,
+    utcOffsetMin: config.owner.utcOffsetMin,
+    now: () => systemClock.now(),
     log: (level, message) => log(level, message),
   })
   const usageMemory = memory
@@ -526,6 +537,19 @@ port.on('message', ({ data }: { data: HostRequest }) => {
     case 'brain': {
       if (!memory) {
         post({ type: 'brain', requestId: data.requestId, error: 'The assistant is not ready yet.' })
+        break
+      }
+      if (data.op.kind === 'find') {
+        const requestId = data.requestId
+        if (!finder) post({ type: 'brain', requestId, find: null })
+        else
+          void finder.get(data.op.refresh === true).then(
+            find => post({ type: 'brain', requestId, find }),
+            (error: unknown) => {
+              log('warn', `Today's find: ${error instanceof Error ? error.message : String(error)}`)
+              post({ type: 'brain', requestId, error: "Couldn't find today's pick right now." })
+            },
+          )
         break
       }
       try {

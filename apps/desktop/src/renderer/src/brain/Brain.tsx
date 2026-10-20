@@ -15,6 +15,32 @@ import { cortexDust, gyri, homeOf, lobeLabelAt, mesh, relax, YOU, type P3 } from
 export type BrainMood = 'idle' | 'listening' | 'thinking' | 'speaking' | 'offline' | 'paused'
 
 const ACTIVE_MS = 12_000
+/** Seconds an impulse takes to cross one synapse. */
+const HOP = 0.055
+
+/** A repeatable random number from a seed (for lightning that flickers, not crawls). */
+const jit = (seed: number) => {
+  const x = Math.sin(seed * 12.9898) * 43758.5453
+  return x - Math.floor(x)
+}
+
+/** A jagged bolt between two points: re-struck with a new seed many times a second. */
+const bolt = (ax: number, ay: number, bx: number, by: number, seed: number, amp: number) => {
+  const dx = bx - ax
+  const dy = by - ay
+  const len = Math.hypot(dx, dy) || 1
+  const nx = -dy / len
+  const ny = dx / len
+  const n = Math.max(4, Math.min(12, Math.round(len / 16)))
+  const pts: [number, number][] = [[ax, ay]]
+  for (let i = 1; i < n; i++) {
+    const f = i / n
+    const off = (jit(seed + i * 7.13) - 0.5) * 2 * amp * Math.sin(Math.PI * f)
+    pts.push([ax + dx * f + nx * off, ay + dy * f + ny * off])
+  }
+  pts.push([bx, by])
+  return pts
+}
 const MAX_LINKS = 1800
 
 /** Pre-drawn soft glows, one per colour. */
@@ -77,14 +103,35 @@ export function Brain(props: BrainProps) {
       .map(n => n.id)
     const lite = isLite()
     const dust = cortexDust(lite ? 600 : 1500)
+    const synapses = mesh(dust)
+    const adj: number[][] = dust.map(() => [])
+    for (const [i, j] of synapses) {
+      adj[i]!.push(j)
+      adj[j]!.push(i)
+    }
+    // Each memory's nearest speck of cortex: where its impulses start.
+    const nearDust = new Map<string, number>()
+    for (const n of nodes) {
+      const q = pos.get(n.id)!
+      let best = 0
+      let bd = Infinity
+      for (let i = 0; i < dust.length; i++) {
+        const d = dust[i]!
+        const dd = (d.x - q.x) ** 2 + (d.y - q.y) ** 2 + (d.z - q.z) ** 2
+        if (dd < bd) (bd = dd), (best = i)
+      }
+      nearDust.set(n.id, best)
+    }
     return {
+      adj,
+      nearDust,
       nodes,
       byId: new Map(nodes.map(n => [n.id, n])),
       pos,
-      links: links.map((l, i) => ({ ...l, phase: (i * 0.6180339) % 1, sparks: Math.min(3, 1 + Math.floor(l.weight / 3)) })),
+      links: links.map((l, i) => ({ ...l, phase: (i * 0.6180339) % 1 })),
       yours,
       dust,
-      synapses: mesh(dust),
+      synapses,
       folds: gyri(lite ? 24 : 46),
     }
   }, [props.view])
@@ -122,6 +169,31 @@ export function Brain(props: BrainProps) {
 
     // Projected points of this frame, for hit testing.
     let shown: { id: string; x: number; y: number; r: number }[] = []
+    // Impulses running through the cortex: each crosses one synapse, then its trace fades.
+    const fires: { i: number; j: number; at: number; hot: boolean }[] = []
+    let nextFire = 0
+    const seenUse = new Map<string, number>()
+    const cascade = (start: number, at: number, depth: number, hot: boolean) => {
+      const adj = sceneRef.current.adj
+      let front = [start]
+      const seen = new Set(front)
+      for (let d = 0; d < depth && front.length; d++) {
+        const next: number[] = []
+        for (const i of front) {
+          const ns = adj[i] ?? []
+          const off = Math.floor(Math.random() * (ns.length || 1))
+          for (let k = 0; k < ns.length && k < (hot ? 3 : 2); k++) {
+            const j = ns[(k + off) % ns.length]!
+            if (seen.has(j)) continue
+            seen.add(j)
+            next.push(j)
+            fires.push({ i, j, at: at + d * HOP * (0.8 + Math.random() * 0.5), hot })
+          }
+        }
+        front = next.slice(0, hot ? 10 : 4)
+      }
+      if (fires.length > 1200) fires.splice(0, fires.length - 1200)
+    }
     let px = new Float32Array(0)
 
     const project = (p: P3, S: number, cx: number, cy: number) => {
@@ -193,6 +265,54 @@ export function Brain(props: BrainProps) {
         ctx.strokeStyle = `rgba(56,189,248,${(a * dim * (0.85 + 0.3 * moodPulse)).toFixed(3)})`
         ctx.stroke()
       }
+
+      // Neurons firing: cascades start on their own (more while Atlas thinks or talks),
+      // and from every memory that a turn just used.
+      if (!reduced && s.dust.length) {
+        const rate = p.mood === 'thinking' ? 7 : p.mood === 'speaking' ? 5 : p.mood === 'listening' ? 3.5 : p.mood === 'offline' || p.mood === 'paused' ? 0.3 : 1.6
+        if (t > nextFire) {
+          cascade(Math.floor(Math.random() * s.dust.length), t, 4 + Math.floor(Math.random() * 5), false)
+          nextFire = t + (0.4 + Math.random()) / rate
+        }
+      }
+      for (const [id, at] of p.used) {
+        if (seenUse.get(id) === at) continue
+        seenUse.set(id, at)
+        const from = s.nearDust.get(id)
+        if (from !== undefined && wall - at < 4000) for (let k = 0; k < 3; k++) cascade(from, t + k * 0.18, 9, true)
+      }
+      ctx.lineCap = 'round'
+      let kept = 0
+      for (let n = 0; n < fires.length; n++) {
+        const f = fires[n]!
+        const age = t - f.at
+        const life = f.hot ? 0.9 : 0.5
+        if (age > HOP + life) continue
+        fires[kept++] = f
+        if (age < 0) continue
+        const x1 = px[f.i * 3]!
+        const y1 = px[f.i * 3 + 1]!
+        const x2 = px[f.j * 3]!
+        const y2 = px[f.j * 3 + 1]!
+        const head = Math.min(1, age / HOP)
+        const fade = age < HOP ? 1 : Math.exp(-(age - HOP) / (life * 0.35))
+        const a = fade * depthA((px[f.i * 3 + 2]! + px[f.j * 3 + 2]!) / 2) * dim
+        const hx = x1 + (x2 - x1) * head
+        const hy = y1 + (y2 - y1) * head
+        ctx.strokeStyle = f.hot ? `rgba(240,249,255,${a.toFixed(3)})` : `rgba(125,211,252,${(0.8 * a).toFixed(3)})`
+        ctx.lineWidth = f.hot ? 1.5 : 0.9
+        ctx.beginPath()
+        ctx.moveTo(x1, y1)
+        ctx.lineTo(hx, hy)
+        ctx.stroke()
+        if (age < HOP + 0.06) {
+          const g = f.hot ? 12 : 7
+          ctx.globalAlpha = a
+          ctx.drawImage(glow(f.hot ? '#f0f9ff' : '#7dd3fc'), hx - g / 2, hy - g / 2, g, g)
+          ctx.globalAlpha = 1
+        }
+      }
+      fires.length = kept
       ctx.lineWidth = 1
       for (const line of s.folds) {
         ctx.beginPath()
@@ -227,31 +347,64 @@ export function Brain(props: BrainProps) {
         ctx.stroke()
       }
       for (const l of s.links) {
-        const a = proj.get(l.a)
-        const b = proj.get(l.b)
+        const flip = l.phase > 0.5
+        const a = proj.get(flip ? l.b : l.a)
+        const b = proj.get(flip ? l.a : l.b)
         if (!a || !b) continue
         const na = s.byId.get(l.a)!
+        const nb = s.byId.get(l.b)
         const hot = active(l.a) || active(l.b)
-        const breathe = 0.82 + 0.18 * Math.sin(t * 0.9 + l.phase * 6.28)
-        const alpha = (hot ? 0.7 : 0.16 + 0.2 * Math.min(1, l.weight / 4)) * depthA((a.z + b.z) / 2) * breathe * dim * Math.min(faded(na), faded(s.byId.get(l.b)))
-        ctx.strokeStyle = rgba(hot ? '#e0f2fe' : BRAIN_KIND_COLOR[na.kind], alpha)
-        ctx.lineWidth = hot ? 1.6 : 0.8
+        const color = BRAIN_KIND_COLOR[na.kind]
+        const depth = depthA((a.z + b.z) / 2)
+        const fade = dim * Math.min(faded(na), faded(nb))
+        // The axon itself.
+        ctx.strokeStyle = rgba(color, (hot ? 0.35 : 0.1 + 0.14 * Math.min(1, l.weight / 4)) * depth * fade)
+        ctx.lineWidth = 0.8
         ctx.beginPath()
         ctx.moveTo(a.x, a.y)
         ctx.lineTo(b.x, b.y)
         ctx.stroke()
-        if (reduced && !hot) continue
-        // Sparks travel the string: faster while thinking, blazing on a string in use.
-        const speed = hot ? 0.75 : p.mood === 'thinking' ? 0.32 : p.mood === 'speaking' ? 0.24 : 0.1
-        for (let k = 0; k < (hot ? 3 : l.sparks); k++) {
-          const f = (t * speed + l.phase + k / l.sparks) % 1
-          const x = a.x + (b.x - a.x) * f
-          const y = a.y + (b.y - a.y) * f
-          const sz = (hot ? 9 : 5) * Math.min(1.3, (a.k + b.k) / 2)
-          ctx.globalAlpha = (hot ? 0.95 : 0.35 * Math.min(1, l.weight / 3) + 0.15) * depthA((a.z + b.z) / 2) * dim * Math.min(faded(na), faded(s.byId.get(l.b)))
-          ctx.drawImage(glow(hot ? '#f0f9ff' : BRAIN_KIND_COLOR[na.kind]), x - sz / 2, y - sz / 2, sz, sz)
+        // In use: lightning, struck again and again.
+        if (hot) {
+          const pts = bolt(a.x, a.y, b.x, b.y, Math.floor(t * 16) + l.phase * 977, 7 * Math.min(1.4, (a.k + b.k) / 2))
+          for (const [width, style] of [
+            [4.5, rgba(color, 0.3 * depth * fade)],
+            [1.3, rgba('#f8fafc', 0.95 * depth * fade)],
+          ] as const) {
+            ctx.lineWidth = width
+            ctx.strokeStyle = style
+            ctx.beginPath()
+            pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)))
+            ctx.stroke()
+          }
         }
-        ctx.globalAlpha = 1
+        if (reduced && !hot) continue
+        // An impulse runs the axon now and then: a bright head with a fading tail.
+        const period = hot ? 0.45 : (p.mood === 'thinking' ? 1.4 : p.mood === 'speaking' ? 2 : 4.2) / (0.7 + 0.3 * Math.min(3, l.weight))
+        const ph = ((t + l.phase * 31) / period) % 1
+        const span = hot ? 1 : 0.3
+        if (ph < span) {
+          const f = ph / span
+          const tail = Math.max(0, f - 0.25)
+          const hx = a.x + (b.x - a.x) * f
+          const hy = a.y + (b.y - a.y) * f
+          const tx = a.x + (b.x - a.x) * tail
+          const ty = a.y + (b.y - a.y) * tail
+          const grad = ctx.createLinearGradient(tx, ty, hx, hy)
+          grad.addColorStop(0, rgba(color, 0))
+          grad.addColorStop(0.7, rgba(color, 0.6 * depth * fade))
+          grad.addColorStop(1, rgba('#f0f9ff', 0.95 * depth * fade))
+          ctx.strokeStyle = grad
+          ctx.lineWidth = hot ? 2.4 : 1.6
+          ctx.beginPath()
+          ctx.moveTo(tx, ty)
+          ctx.lineTo(hx, hy)
+          ctx.stroke()
+          const g = (hot ? 12 : 7) * Math.min(1.3, (a.k + b.k) / 2)
+          ctx.globalAlpha = depth * fade
+          ctx.drawImage(glow('#f0f9ff'), hx - g / 2, hy - g / 2, g, g)
+          ctx.globalAlpha = 1
+        }
       }
 
       // You, in the middle: breathing with Atlas's mood.

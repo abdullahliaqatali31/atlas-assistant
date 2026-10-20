@@ -46,7 +46,6 @@ import { LockScreen } from "./LockScreen.tsx";
 import { Setup } from "./Setup.tsx";
 import { useCounts, type CountKey } from "./shell/counts.ts";
 import { Rail, type RailItem } from "./shell/Rail.tsx";
-import { AskBar } from "./shell/AskBar.tsx";
 import { useAlerts } from "./shell/alerts.ts";
 import { AlertsTimeline } from "./shell/AlertsTimeline.tsx";
 import { CornerWidget } from "./shell/CornerWidget.tsx";
@@ -56,7 +55,7 @@ import {
   type Command,
   type CommandSource,
 } from "./shell/CommandPalette.tsx";
-import { ASK_EVENT, FOCUS_ASK_EVENT, requestNewsFocus } from "./shell/live.ts";
+import { ASK_EVENT, requestNewsFocus } from "./shell/live.ts";
 import { Peek, type PeekKind } from "./shell/Peek.tsx";
 import {
   changeAppearance,
@@ -208,6 +207,11 @@ export function App() {
     store("stage", s);
   };
   const openChat = (yes: boolean) => open(yes ? "chat" : null);
+  /** "/" and the palette: open the conversation with its box ready to type in. */
+  const focusAsk = () => {
+    open("chat");
+    setTimeout(() => document.querySelector<HTMLTextAreaElement>("aside textarea")?.focus(), 60);
+  };
 
   useEffect(() => {
     void window.assistant.status().then(setStatus);
@@ -290,7 +294,7 @@ export function App() {
       if (e.key === "Escape" && drawer && !pinned) open(null);
       else if (e.key === "/") {
         e.preventDefault();
-        if (drawer !== "chat") window.dispatchEvent(new Event(FOCUS_ASK_EVENT));
+        focusAsk();
       } else if (e.key === "g" || e.key === "G") gRef.current = Date.now();
       else if (
         Date.now() - gRef.current < 1200 &&
@@ -463,8 +467,7 @@ export function App() {
       label: "Ask Atlas",
       hint: "/",
       icon: <Sparkles />,
-      run: () =>
-        setTimeout(() => window.dispatchEvent(new Event(FOCUS_ASK_EVENT)), 0),
+      run: () => focusAsk(),
     },
     {
       id: "compact",
@@ -653,7 +656,7 @@ export function App() {
               >
                 {controls && <PausedBanner state={controls} />}
                 <div
-                  className={`min-h-0 flex-1 ${stage === "home" ? "pb-14" : ""}`}
+                  className="min-h-0 flex-1"
                 >
                   <Suspense fallback={<Loading />}>
                     {stage === "home" ? (
@@ -684,11 +687,6 @@ export function App() {
                     />
                   </div>
                 )}
-                <AskBar
-                  status={status}
-                  chatOpen={drawer === "chat"}
-                  onOpenChat={() => open("chat")}
-                />
               </main>
             )}
 

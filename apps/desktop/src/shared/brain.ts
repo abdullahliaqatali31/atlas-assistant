@@ -39,10 +39,22 @@ export interface BrainView {
   links: BrainLink[]
 }
 
-export type BrainOp = { kind: 'view' } | { kind: 'forget'; id: string }
+export type BrainOp = { kind: 'view' } | { kind: 'forget'; id: string } | { kind: 'find'; refresh?: boolean | undefined }
+
+/** Today's find: one true thing from today's Wikipedia feed, picked for the owner and told in their style. */
+export interface DailyFind {
+  /** The owner's local date, YYYY-MM-DD. */
+  date: string
+  title: string
+  fact: string
+  why: string
+  url: string | null
+  image: string | null
+  source: string
+}
 
 export type BrainHostRequest = { type: 'brain'; requestId: string; op: BrainOp }
-export type BrainHostEvent = { type: 'brain'; requestId: string; view?: BrainView | undefined; error?: string | undefined } | { type: 'memory-used'; ids: string[]; why: MemoryUseWhy }
+export type BrainHostEvent = { type: 'brain'; requestId: string; view?: BrainView | undefined; find?: DailyFind | null | undefined; error?: string | undefined } | { type: 'memory-used'; ids: string[]; why: MemoryUseWhy }
 
 export type MemoryUseWhy = 'context' | 'search' | 'saved'
 
@@ -50,11 +62,14 @@ export const BR = {
   view: 'brain:view',
   forget: 'brain:forget',
   used: 'brain:used',
+  find: 'brain:find',
 } as const
 
 export interface BrainBridge {
   view(): Promise<BrainView | null>
   forget(id: string): Promise<BrainView | null>
+  /** Today's find (made once a day; refresh makes a new one). */
+  find(refresh?: boolean): Promise<DailyFind | null>
   /** Memories a turn is using (light them up), or one just saved (it is born). */
   onUsed(cb: (e: { ids: string[]; why: MemoryUseWhy }) => void): () => void
 }

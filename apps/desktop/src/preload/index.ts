@@ -263,6 +263,7 @@ contextBridge.exposeInMainWorld('ui', ui)
 const brain: BrainBridge = {
   view: () => ipcRenderer.invoke(BR.view),
   forget: id => ipcRenderer.invoke(BR.forget, id),
+  find: refresh => ipcRenderer.invoke(BR.find, refresh === true),
   onUsed: cb => subscribe<{ ids: string[]; why: MemoryUseWhy }>(BR.used, cb),
 }
 contextBridge.exposeInMainWorld('brain', brain)

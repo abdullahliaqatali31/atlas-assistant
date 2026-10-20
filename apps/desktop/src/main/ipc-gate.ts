@@ -25,6 +25,7 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   // So are the memories in the brain view.
   BR.view,
   BR.forget,
+  BR.find,
   CH.listModels,
   CH.answerApproval,
   CH.initiativeAction,
