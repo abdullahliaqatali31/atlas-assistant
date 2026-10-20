@@ -28,7 +28,7 @@ const MAX_ROUTES = 500
 
 type GetJson = (url: string) => Promise<unknown>
 
-const SLOW = /HTTP (420|429)/
+const SLOW = /HTTP (403|420|429)/
 const ADSBFI_MAX_NM = 250
 
 /** Aircraft around a point (adsb.lol's v2 shape): adsb.lol, or adsb.fi for a minute after adsb.lol fails. Throws adsb.fi's error when both fail. */
@@ -37,9 +37,12 @@ export class AdsbFeed {
 
   constructor(private readonly getJson: GetJson) {}
 
-  point(lat: number, lon: number, nm: number): Promise<unknown> {
+  /** Aircraft around a point, and how far the answer really reaches (adsb.fi stops at 250 nm). */
+  async point(lat: number, lon: number, nm: number): Promise<{ data: unknown; coveredNm: number }> {
     const at = `lat/${lat.toFixed(3)}/lon/${lon.toFixed(3)}/dist/`
-    return this.get(`https://api.adsb.lol/v2/${at}${nm}`, `https://opendata.adsb.fi/api/v2/${at}${Math.min(ADSBFI_MAX_NM, nm)}`)
+    let covered = nm
+    const data = await this.get(`https://api.adsb.lol/v2/${at}${nm}`, `https://opendata.adsb.fi/api/v2/${at}${Math.min(ADSBFI_MAX_NM, nm)}`, () => (covered = Math.min(ADSBFI_MAX_NM, nm)))
+    return { data, coveredNm: covered }
   }
 
   /** Military aircraft worldwide. */
@@ -47,7 +50,7 @@ export class AdsbFeed {
     return this.get('https://api.adsb.lol/v2/mil', 'https://opendata.adsb.fi/api/v2/mil')
   }
 
-  private async get(lol: string, fi: string): Promise<unknown> {
+  private async get(lol: string, fi: string, onFallback?: () => void): Promise<unknown> {
     if (Date.now() >= this.lolPausedUntil)
       try {
         return await this.getJson(lol)
@@ -55,6 +58,7 @@ export class AdsbFeed {
         // Refused, throttled or down: adsb.fi for a minute.
         this.lolPausedUntil = Date.now() + BACKOFF_MS
       }
+    onFallback?.()
     // adsb.fi names the list "aircraft" on point queries and "ac" on /mil.
     const j = (await this.getJson(fi)) as { ac?: unknown[]; aircraft?: unknown[] }
     return { ac: j?.ac ?? j?.aircraft ?? [] }
@@ -62,6 +66,79 @@ export class AdsbFeed {
 }
 
 const inBox = (f: { lat: number; lon: number }, b: GeoBox) => f.lat >= b.south && f.lat <= b.north && f.lon >= b.west && f.lon <= b.east
+/** An area's answer older than this is not shown at all. */
+const STALE_MS = 10 * 60_000
+/** Nautical miles between two points. */
+const nm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+  const r = Math.PI / 180
+  const h = Math.sin(((b.lat - a.lat) * r) / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(((b.lon - a.lon) * r) / 2) ** 2
+  return 2 * 3440 * Math.asin(Math.min(1, Math.sqrt(h)))
+}
+
+/**
+ * A steady worldwide baseline from OpenSky (only with the owner's own API
+ * client): every aircraft OpenSky sees, once every 150 s while a map is
+ * open, about 2,300 of the 4,000 daily credits. The adsb feeds' fresher,
+ * richer answers win wherever they have the same aircraft; this only makes
+ * sure the map is never half empty while they fill in or throttle.
+ */
+export class OpenSkyBaseline {
+  private planes: Flight[] = []
+  private at = 0
+  private lastAsked = 0
+  private timer: NodeJS.Timeout | null = null
+  private day = { day: '', calls: 0 }
+
+  constructor(private readonly deps: { signedIn: () => boolean; getJson: (url: string) => Promise<unknown>; parse: (j: unknown) => Flight[]; log?: (level: 'info' | 'warn', message: string) => void }) {}
+
+  /** The aircraft in a box (positions aged by how old the snapshot is); keeps the baseline coming while asked. */
+  inBox(box: GeoBox): Flight[] {
+    this.touch()
+    return this.list().filter(f => inBox(f, box))
+  }
+
+  /** Within nm of a point. */
+  near(p: { lat: number; lon: number }, radiusNm: number): Flight[] {
+    this.touch()
+    return this.list().filter(f => nm(f, p) <= radiusNm)
+  }
+
+  private list(): Flight[] {
+    const age = (Date.now() - this.at) / 1000
+    if (!this.at || age > 6 * 60) return []
+    return age > 1 ? this.planes.map(f => ({ ...f, seen: f.seen + age })) : this.planes
+  }
+
+  private touch() {
+    this.lastAsked = Date.now()
+    if (this.timer || !this.deps.signedIn()) return
+    this.timer = setInterval(() => void this.fetch(), 150_000)
+    this.timer.unref?.()
+    void this.fetch()
+  }
+
+  private async fetch() {
+    if (Date.now() - this.lastAsked > 60_000 || !this.deps.signedIn()) {
+      if (this.timer) clearInterval(this.timer)
+      this.timer = null
+      return
+    }
+    const today = new Date().toISOString().slice(0, 10)
+    if (this.day.day !== today) this.day = { day: today, calls: 0 }
+    // 4 credits a call: stop at about 2,800 a day, leaving room for tracks and gap-fill.
+    if (this.day.calls >= 700) return
+    this.day.calls++
+    try {
+      const planes = this.deps.parse(await this.deps.getJson('https://opensky-network.org/api/states/all')).filter(f => f.hex && f.seen < 90)
+      if (planes.length) {
+        this.planes = planes
+        this.at = Date.now()
+      }
+    } catch (e) {
+      this.deps.log?.('warn', `OpenSky baseline: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+}
 
 export class FlightSweep {
   private cells = new Map<string, { at: number; flights: Flight[] }>()
@@ -86,18 +163,22 @@ export class FlightSweep {
       void this.step()
     }
     const list = sweepCells(box)
+    const now = Date.now()
     const seen = new Set<string>()
     const flights: Flight[] = []
     let loaded = 0
-    for (const c of list) {
+    cells: for (const c of list) {
       const hit = this.cells.get(c.id)
-      if (!hit) continue
+      // Too old to place a plane honestly: as good as not fetched.
+      if (!hit || now - hit.at > STALE_MS) continue
       loaded++
+      const age = (now - hit.at) / 1000
       for (const f of hit.flights) {
         if (seen.has(f.hex) || !inBox(f, box)) continue
         seen.add(f.hex)
-        flights.push(f)
-        if (flights.length >= MAX_FLIGHTS) break
+        // Its position is as old as the answer plus how long ago it was seen then (for dead reckoning).
+        flights.push(age > 1 ? { ...f, seen: f.seen + age } : f)
+        if (flights.length >= MAX_FLIGHTS) break cells
       }
     }
     return { flights, cells: list.length, loaded }
@@ -119,8 +200,16 @@ export class FlightSweep {
     if (!next) return
     this.busy = true
     try {
-      const raw = await this.feed.point(next.lat, next.lon, SWEEP_RADIUS_NM)
-      this.cells.set(next.id, { at: Date.now(), flights: parseFlights(raw) })
+      const { data, coveredNm } = await this.feed.point(next.lat, next.lon, SWEEP_RADIUS_NM)
+      const fresh = parseFlights(data)
+      if (coveredNm >= SWEEP_RADIUS_NM) this.cells.set(next.id, { at: Date.now(), flights: fresh })
+      else {
+        // The fallback only reaches the middle of this area: new planes there, the rest as they were, and try again soon.
+        const prev = this.cells.get(next.id)
+        const ids = new Set(fresh.map(f => f.hex))
+        const outside = (prev?.flights ?? []).filter(f => !ids.has(f.hex) && nm(f, next) > coveredNm)
+        this.cells.set(next.id, { at: Date.now() - BUSY_TTL + 15_000, flights: [...fresh, ...outside] })
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : ''
       if (SLOW.test(msg)) {

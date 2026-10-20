@@ -16,7 +16,7 @@ import { INSTRUMENTS, parseYahooChart, type Quote } from '../shared/markets.ts'
 import { parsePlaneAlert, parseRichest, RICHEST_QUERY, type RichPerson, type VipCategory, type VipFlying, type VipPlane } from '../shared/vip.ts'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { AdsbFeed, FlightSweep, RouteBook } from './flights.ts'
+import { AdsbFeed, FlightSweep, OpenSkyBaseline, RouteBook } from './flights.ts'
 import { ShipFeed } from './ships.ts'
 import { TrafficService } from './traffic.ts'
 import { OpenSkyAuth } from './opensky.ts'
@@ -61,15 +61,24 @@ export class WorldService {
   private openSkyCache: { at: number; lat: number; lon: number; flights: Flight[] } | null = null
   private openSkyDay = { day: '', calls: 0 }
   private openSkyPausedUntil = 0
+  /** Every aircraft OpenSky sees, every 150 s while a map is open (signed-in owners only). */
+  private readonly baseline: OpenSkyBaseline = new OpenSkyBaseline({
+    signedIn: () => this.openSkyAuth.signedIn,
+    getJson: url => this.openSkyJson(url, true),
+    parse: parseOpenSky,
+    log: (level, message) => this.deps.log?.(level, message),
+  })
   /** The owner's OpenSky API client, when set in Power up (else anonymous). */
   private readonly openSkyAuth = new OpenSkyAuth({ client: () => osCredentialStore().get('OPENSKY_CLIENT') ?? null })
 
   /** OpenSky JSON, signed in when the owner has a client (and anonymous if the client is refused). */
-  private async openSkyJson(url: string): Promise<unknown> {
+  private async openSkyJson(url: string, signedInOnly = false): Promise<unknown> {
     const headers = await this.openSkyAuth.headers().catch((e: unknown) => {
       this.deps.log?.('warn', `OpenSky sign-in: ${e instanceof Error ? e.message : String(e)}`)
       return {}
     })
+    // Worldwide calls cost 4 credits: never anonymously, where they would use up the small allowance.
+    if (signedInOnly && !('Authorization' in headers)) throw new Error('Not signed in to OpenSky.')
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return res.json()
@@ -155,32 +164,38 @@ export class WorldService {
     // Military aircraft come worldwide at any zoom; dist 0 asks for them alone (zoomed far out).
     const military = await this.military()
     if (dist <= 0) return military
-    const radius = Math.round(Math.min(FLIGHTS_MAX_NM, Math.max(10, dist)) / 50) * 50 || 50
+    // Rounded up, so the corners of the view are inside.
+    const radius = Math.ceil(Math.min(FLIGHTS_MAX_NM, Math.max(10, dist)) / 50) * 50 || 50
     const merge = async (regional: Flight[]) => {
       // Thin adsb.lol coverage here (Pakistan, much of Asia and Africa): the owner may let OpenSky fill in.
       const extra = fill && regional.length < OPENSKY_WHEN_FEWER ? await this.openSky(lat, lon, radius) : []
       const seen = new Set(regional.map(f => f.hex))
       const out = [...regional]
-      for (const f of [...extra, ...military]) if (!seen.has(f.hex)) (seen.add(f.hex), out.push(f))
+      // OpenSky's worldwide baseline (signed in) fills what adsb did not send.
+      const base = this.baseline.near({ lat, lon }, radius)
+      for (const f of [...extra, ...military, ...base]) if (!seen.has(f.hex)) (seen.add(f.hex), out.push(f))
       return out
     }
     const key = `${Math.round(lat)},${Math.round(lon)},${radius}`
     const hit = this.flightCache.get(key)
     const now = Date.now()
     if (hit && now - hit.at < FLIGHTS_TTL) return merge(hit.flights)
-    if (now < this.flightsPausedUntil || now - this.lastFlightCall < FLIGHTS_GAP) return merge(hit?.flights ?? this.lastFlights)
+    if (now < this.flightsPausedUntil || now - this.lastFlightCall < FLIGHTS_GAP) return merge(hit?.flights ?? [])
     this.lastFlightCall = now
     let raw: unknown
+    let covered = radius
     try {
-      raw = await this.adsb.point(lat, lon, radius)
+      const r = await this.adsb.point(lat, lon, radius)
+      raw = r.data
+      covered = r.coveredNm
     } catch (e) {
-      if (/HTTP (420|429)/.test(e instanceof Error ? e.message : '')) this.flightsPausedUntil = Date.now() + FLIGHTS_BACKOFF
-      if (hit || this.lastFlights.length || military.length || fill) return merge(hit?.flights ?? this.lastFlights)
-      throw e
+      if (/HTTP (403|420|429)/.test(e instanceof Error ? e.message : '')) this.flightsPausedUntil = Date.now() + FLIGHTS_BACKOFF
+      return merge(hit?.flights ?? [])
     }
     const flights = parseFlights(raw)
     this.lastFlights = flights
-    this.flightCache.set(key, { at: Date.now(), flights })
+    // A short answer (the fallback reaches 250 nm) is not remembered as the whole view.
+    if (covered >= radius) this.flightCache.set(key, { at: Date.now(), flights })
     if (this.flightCache.size > 50) this.flightCache.delete(this.flightCache.keys().next().value!)
     return merge(flights)
   }
@@ -428,7 +443,10 @@ export class WorldService {
     const area = this.sweep.view(box)
     const seen = new Set(area.flights.map(f => f.hex))
     const military = (await this.military()).filter(f => !seen.has(f.hex))
-    return { ...area, flights: [...area.flights, ...military] }
+    for (const f of military) seen.add(f.hex)
+    // OpenSky's worldwide baseline fills what the sweep has not reached yet.
+    const base = this.baseline.inBox(box).filter(f => !seen.has(f.hex))
+    return { ...area, flights: [...area.flights, ...military, ...base] }
   }
 
   /**

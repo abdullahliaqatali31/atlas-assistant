@@ -89,6 +89,36 @@ describe('FlightSweep', () => {
   })
 })
 
+describe('sweep with a short answer', () => {
+  it('keeps the outer planes of an area when only the fallback (250 nm) answered', async () => {
+    vi.useFakeTimers()
+    const centre = sweepCells({ south: 30, west: 60, north: 32, east: 62 })[0]!
+    const box = { south: centre.lat - 6, west: centre.lon - 3, north: centre.lat + 6, east: centre.lon + 3 }
+    let lolDown = false
+    const getJson = vi.fn(async (url: string) => {
+      if (url.includes('adsb.lol')) {
+        if (lolDown) throw new Error('HTTP 429')
+        return { ac: [aircraft('near', centre.lat, centre.lon), aircraft('far', centre.lat + 5, centre.lon)] }
+      }
+      return { aircraft: [aircraft('near', centre.lat, centre.lon + 0.1)] }
+    })
+    const sweep = new FlightSweep({ getJson })
+    sweep.view(box)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(sweep.view(box).flights.map(f => f.hex).sort()).toEqual(['far', 'near'])
+    // adsb.lol goes quiet; the areas come due again and only adsb.fi (250 nm) answers.
+    lolDown = true
+    for (let t = 0; t < 120_000; t += 5_000) {
+      sweep.view(box)
+      await vi.advanceTimersByTimeAsync(5_000)
+    }
+    expect(getJson.mock.calls.some(([u]) => String(u).includes('adsb.fi'))).toBe(true)
+    // The plane 300 nm out, which the fallback cannot see, is still there.
+    expect(sweep.view(box).flights.map(f => f.hex).sort()).toEqual(['far', 'near'])
+    sweep.stop()
+  })
+})
+
 describe('AdsbFeed', () => {
   it('uses adsb.fi while adsb.lol is throttling, in the same shape, then goes back to adsb.lol', async () => {
     vi.useFakeTimers()
@@ -99,14 +129,15 @@ describe('AdsbFeed', () => {
       return url.includes('adsb.fi') ? { now: 1, aircraft: [aircraft('fi1', 51, 0)] } : { ac: [aircraft('lol1', 51, 0)] }
     })
     const feed = new AdsbFeed(getJson)
-    expect(await feed.point(51, 0, 1000)).toEqual({ ac: [aircraft('fi1', 51, 0)] })
+    // The answer says it reaches only 250 nm.
+    expect(await feed.point(51, 0, 1000)).toEqual({ data: { ac: [aircraft('fi1', 51, 0)] }, coveredNm: 250 })
     // adsb.fi answers at most 250 nm.
     expect(urls[1]).toBe('https://opendata.adsb.fi/api/v2/lat/51.000/lon/0.000/dist/250')
     // Still throttled: straight to adsb.fi, no second knock on adsb.lol.
     await feed.point(51, 0, 100)
     expect(urls[2]).toBe('https://opendata.adsb.fi/api/v2/lat/51.000/lon/0.000/dist/100')
     await vi.advanceTimersByTimeAsync(61_000)
-    expect(await feed.point(51, 0, 100)).toEqual({ ac: [aircraft('lol1', 51, 0)] })
+    expect(await feed.point(51, 0, 100)).toEqual({ data: { ac: [aircraft('lol1', 51, 0)] }, coveredNm: 100 })
   })
 
   it('switches on any adsb.lol failure, and reports the adsb.fi error when both fail', async () => {

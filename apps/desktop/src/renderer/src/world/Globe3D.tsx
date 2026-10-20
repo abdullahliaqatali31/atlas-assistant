@@ -472,8 +472,11 @@ export default function Globe3D({
         scene.requestRender()
       }
 
+      // Only the newest poll may draw (an older answer arriving late would put back a view the camera has left).
+      let pollSeq = 0
       const poll = async () => {
         if (!viewer || viewer.isDestroyed() || document.hidden) return
+        const mine = ++pollSeq
         const rect = viewer.camera.computeViewRectangle()
         const c = viewer.camera.positionCartographic
         const lat = Cesium.Math.toDegrees(c.latitude)
@@ -481,10 +484,20 @@ export default function Globe3D({
         if (layersRef.current.flights)
           try {
           let list: Flight[]
-          if (rect && Cesium.Math.toDegrees(rect.north - rect.south) > 18) {
-            const r = await window.world.flightsArea({ south: Cesium.Math.toDegrees(rect.south), north: Cesium.Math.toDegrees(rect.north), west: Cesium.Math.toDegrees(rect.west), east: Cesium.Math.toDegrees(rect.east) })
-            list = r.flights
-          } else list = await window.world.flights(lat, lon, Math.min(1000, Math.max(80, c.height / 1852)), false)
+          const deg = Cesium.Math.toDegrees
+          // What is on screen (a tilted camera sees far beyond its height), else the whole Earth.
+          const box = rect ? { south: deg(rect.south), north: deg(rect.north), west: deg(rect.west), east: deg(rect.east) } : { south: -85, north: 85, west: -180, east: 180 }
+          const midLat = (box.south + box.north) / 2
+          const midLon = box.west <= box.east ? (box.west + box.east) / 2 : lon
+          const reachNm = kmBetween({ lat: midLat, lon: midLon }, { lat: box.north, lon: box.west <= box.east ? box.east : midLon + 10 }) / 1.852
+          if (box.west > box.east) {
+            // Across the date line: both sides.
+            const [a, b] = await Promise.all([window.world.flightsArea({ ...box, east: 180 }), window.world.flightsArea({ ...box, west: -180 })])
+            const seen = new Set<string>()
+            list = [...a.flights, ...b.flights].filter(f => !seen.has(f.hex) && !!seen.add(f.hex))
+          } else if (box.north - box.south > 18 || reachNm > 1000) list = (await window.world.flightsArea(box)).flights
+          else list = await window.world.flights(midLat, midLon, Math.min(1000, Math.max(80, reachNm)), false)
+          if (mine !== pollSeq || !viewer || viewer.isDestroyed()) return
           const f = followRef.current
           // Keep the followed aircraft even if the view moved off it.
           if (f && !list.some(x => x.hex === f.hex)) {

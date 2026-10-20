@@ -914,9 +914,12 @@ export function MapView({
     if (!m || !ready || !layers.flights) return
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | null = null
+    // Only the newest request may draw: an older answer arriving late would put back a view the map has left.
+    let seq = 0
     const load = async () => {
       if (timer) clearTimeout(timer)
       let again = 20_000
+      const mine = ++seq
       if (!stopped && !idle()) {
         const c = m.getCenter()
         const b = m.getBounds()
@@ -931,13 +934,13 @@ export function MapView({
         try {
           if (nm <= 1000 && m.getZoom() >= 3) {
             const flights = await window.world.flights(c.lat, c.lng, Math.ceil(nm), filtersNow.current.openSky)
-            if (stopped) return
+            if (stopped || mine !== seq) return
             show(flights)
             setFlightNote('Everything on screen, plus military aircraft worldwide')
           } else {
             const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
             const r = await window.world.flightsArea({ south: clamp(b.getSouth(), 90), north: clamp(b.getNorth(), 90), west: clamp(b.getWest(), 180), east: clamp(b.getEast(), 180) })
-            if (stopped) return
+            if (stopped || mine !== seq) return
             show(r.flights)
             if (r.loaded < r.cells) again = 4_000
             setFlightNote(r.loaded < r.cells ? `Filling in every flight on screen: ${r.loaded} of ${r.cells} areas so far, plus military aircraft worldwide` : 'Every flight on screen, plus military aircraft worldwide')
@@ -946,7 +949,7 @@ export function MapView({
           setFlightNote('Flights unavailable right now')
         }
       }
-      if (!stopped) timer = setTimeout(() => void load(), again)
+      if (!stopped && mine === seq) timer = setTimeout(() => void load(), again)
     }
     void load()
     // Between polls, planes glide on along their track (not in Lite mode, not for a crowded sky).
