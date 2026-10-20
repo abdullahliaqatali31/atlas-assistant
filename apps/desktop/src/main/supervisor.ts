@@ -414,6 +414,7 @@ export class RuntimeSupervisor {
       case 'audio':
       case 'speech-error':
       case 'initiative':
+      case 'suggestions':
         // A reply the assistant started on its own is in flight too.
         if (e.type === 'initiative') this.activeReply = e.replyId
         if (e.type === 'done' && this.activeReply === e.replyId) this.activeReply = null

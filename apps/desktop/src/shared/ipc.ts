@@ -237,6 +237,8 @@ export type ReplyEvent =
   | { replyId: string; type: 'speech-error'; message: string }
   /** The assistant is speaking up on its own; the reply that follows belongs to this item. */
   | { replyId: string; type: 'initiative'; item: InitiativeItem }
+  /** After a reply: short things the owner might say next (buttons in the chat and the widget). */
+  | { replyId: string; type: 'suggestions'; text: string; options: string[] }
 
 /** Channel names, shared so main and preload cannot drift apart. */
 export const CH = {

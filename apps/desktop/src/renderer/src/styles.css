@@ -464,6 +464,10 @@ input[type='radio']:disabled {
   animation: pop-in 180ms ease-out both;
   transform-origin: bottom center;
 }
+/* The widget's quick replies: they pop in one after another. */
+.pop-in {
+  animation: pop-in 220ms ease-out both;
+}
 
 /* The World map's own credit line: quiet text, readable over imagery. */
 .map-credit {

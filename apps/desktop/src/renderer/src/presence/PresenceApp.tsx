@@ -1,4 +1,4 @@
-import { Check, GripVertical, Mic, Square, X } from 'lucide-react'
+import { Check, GripVertical, Mic, MessageSquareReply, Square, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 
 import type { PresenceState } from '../../../shared/presence.ts'
@@ -83,7 +83,9 @@ export function PresenceApp() {
     void window.presence.menu()
   }
 
-  const shape = !s ? 'dot' : s.card ? 'card' : s.activity !== 'idle' && !s.glass ? 'pill' : 'dot'
+  // Quick replies pop up once Atlas has answered: while it listens for the answer, or after it goes quiet.
+  const replies = s?.replies && (s.activity === 'idle' || s.activity === 'listening') ? s.replies : null
+  const shape = !s ? 'dot' : s.card ? 'card' : replies ? 'replies' : s.activity !== 'idle' && !s.glass ? 'pill' : 'dot'
   const busy = s?.activity === 'thinking' || s?.activity === 'speaking'
 
   return (
@@ -132,6 +134,48 @@ export function PresenceApp() {
               <Square className="size-3 fill-current" aria-hidden /> Stop
             </button>
           )}
+        </div>
+      ) : shape === 'replies' && s && replies ? (
+        <div className="pop-in w-[360px] rounded-2xl border border-accent/40 bg-solid/95 shadow-xl shadow-[0_0_24px_var(--accent-soft)]">
+          <header {...plainDrag} className="flex cursor-grab touch-none select-none items-center gap-2 px-2 pt-2 active:cursor-grabbing">
+            <Orb state={ORB[s.activity]} level={s.level} size={28} />
+            <span className={`flex-1 text-xs font-medium ${s.activity === 'listening' ? 'text-warm' : 'text-text'}`} role="status">
+              {s.activity === 'listening' ? 'Listening… say it, or tap one' : `${s.name} replied`}
+            </span>
+            <GripVertical className="size-3.5 text-muted" aria-hidden />
+            <button type="button" data-nodrag className="icon-btn size-7" onClick={() => void window.presence.dismissReplies()} aria-label="Put away" title="Put away">
+              <X className="size-3.5" aria-hidden />
+            </button>
+          </header>
+          <div className="px-3 pb-3 pt-1.5">
+            <p className="line-clamp-3 text-sm leading-snug text-text" dir="auto">
+              {tail(replies.text, 200)}
+            </p>
+            <div className="mt-2.5 flex flex-wrap gap-1.5" role="group" aria-label="Quick replies">
+              {replies.options.map((o, i) => (
+                <button
+                  key={o}
+                  type="button"
+                  dir="auto"
+                  onClick={() => void window.presence.say(o)}
+                  className="pop-in rounded-full border border-accent/40 bg-accent-soft px-3 py-1 text-xs text-accent transition-colors hover:border-accent hover:bg-accent hover:text-accent-fg"
+                  style={{ animationDelay: `${i * 60}ms` }}
+                >
+                  {o}
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 flex items-center gap-1.5">
+              {s.activity !== 'listening' && (
+                <button type="button" className="btn h-8 gap-1 px-2.5 text-xs" onClick={() => void window.presence.talk()}>
+                  <Mic className="size-3.5" aria-hidden /> Say something else
+                </button>
+              )}
+              <button type="button" className="ml-auto flex h-8 items-center gap-1 rounded px-1.5 text-[11px] text-muted hover:text-text" onClick={() => void window.presence.open()}>
+                <MessageSquareReply className="size-3.5" aria-hidden /> Open Atlas
+              </button>
+            </div>
+          </div>
         </div>
       ) : s?.card ? (
         <div className="w-[360px] rounded-2xl border border-border bg-solid/95 shadow-xl">

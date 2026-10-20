@@ -8,7 +8,7 @@ import { mkdirSync } from 'node:fs'
 
 import { DEFAULT_PREFS } from '@assistant/initiative'
 import { MemoryStore } from '@assistant/memory'
-import { createLlm, isLlmProvider, listLlmModels, LLM_PROVIDERS, modelFor, type VoiceProvider } from '@assistant/providers'
+import { createLlm, isLlmProvider, listLlmModels, LLM_PROVIDERS, modelFor, type LlmProvider, type VoiceProvider } from '@assistant/providers'
 import {
   Assistant,
   createVoice,
@@ -51,6 +51,7 @@ import { WORLD_RULES, WorldWatch } from './world.ts'
 import { HostNews, NEWS_RULES } from './news.ts'
 import { HostNotifications, NOTIFICATION_RULES } from './notifications.ts'
 import { HABITS_RULES, HostHabits } from './habits.ts'
+import { suggestReplies } from './suggest.ts'
 import { HostControls } from './controls.ts'
 import { InitiativeService, parseQuietHours } from './initiative.ts'
 import { once, runPersonalityOp, sttPin } from './personality.ts'
@@ -145,6 +146,10 @@ let learning: HostLearning | null = null
 let world: WorldWatch | null = null
 /** Today's find for the Home page. */
 let finder: DailyFinder | null = null
+/** The cheap model that offers quick replies after each answer; set once the assistant is ready. */
+let suggester: LlmProvider | null = null
+/** What the owner said last (typed or heard), for the quick replies. */
+let lastOwnerText = ''
 
 /** Atlas tells today's find (the one on Home), or finds another. */
 const findTool = (): RuntimeTool => ({
@@ -263,6 +268,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
     busy: () => current !== null,
     log: (level, message) => log(level, message),
   })
+  suggester = meterLlm(createLlm(config.llm, 'background'), { purpose: 'background', memory, clock: systemClock, utcOffsetMin: config.owner.utcOffsetMin, onRecord: () => schedulePush() })
   finder = new DailyFinder({
     llm: meterLlm(createLlm(config.llm, 'background'), { purpose: 'background', memory, clock: systemClock, utcOffsetMin: config.owner.utcOffsetMin, onRecord: () => schedulePush() }),
     memory,
@@ -355,6 +361,7 @@ const begin = (replyId: string) => {
 /** `spoken`: the owner talked, so the reply is spoken too; a typed message gets a text reply only. */
 const send = async (replyId: string, text: string, abort = begin(replyId), spoken = false) => {
   if (!assistant) return post({ type: 'done', replyId, stopped: false, error: 'The assistant is not ready yet.' })
+  lastOwnerText = text
   await stream(replyId, abort, assistant.reply(text, abort.signal), spoken)
 }
 
@@ -364,6 +371,7 @@ const speakUp = async (event: InitiativeEvent, item: InitiativeItem) => {
   const replyId = randomUUID()
   const abort = begin(replyId)
   post({ type: 'initiative', replyId, item })
+  lastOwnerText = ''
   await stream(replyId, abort, assistant.speakUp(event, abort.signal))
 }
 
@@ -383,7 +391,9 @@ const stream = async (replyId: string, abort: AbortController, chunks: AsyncIter
           onError: message => post({ type: 'speech-error', replyId, message: redact(message) }),
         })
       : null
+  let said = ''
   const say = (text: string) => {
+    said += text
     post({ type: 'chunk', replyId, text })
     speaker?.push(text)
   }
@@ -395,6 +405,7 @@ const stream = async (replyId: string, abort: AbortController, chunks: AsyncIter
     }
     await speaker?.finish()
     post({ type: 'done', replyId, stopped: abort.signal.aborted })
+    if (!abort.signal.aborted) offerReplies(replyId, said)
   } catch (error) {
     if (abort.signal.aborted) post({ type: 'done', replyId, stopped: true })
     else post({ type: 'done', replyId, stopped: false, error: error instanceof Error ? error.message : 'The reply failed.' })
@@ -403,6 +414,18 @@ const stream = async (replyId: string, abort: AbortController, chunks: AsyncIter
     // Anything the assistant held back while the owner was talking gets its turn now.
     if (!current) setTimeout(() => void initiative?.drain(), 0)
   }
+}
+
+/** Quick replies for a finished answer, in the background (a failure just means no buttons). */
+const offerReplies = (replyId: string, reply: string) => {
+  const llm = suggester
+  if (!llm || !reply.trim()) return
+  void suggestReplies(llm, lastOwnerText, reply, AbortSignal.timeout(20_000)).then(
+    options => {
+      if (options.length) post({ type: 'suggestions', replyId, text: reply.slice(-400), options })
+    },
+    error => log('warn', `Quick replies failed: ${error instanceof Error ? error.message : String(error)}`),
+  )
 }
 
 /** A spoken message: transcribe it, show what was heard, then reply as if typed. */

@@ -44,8 +44,22 @@ const MAX_ITEMS = 120
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
+/** Scrollbars for every page in the browser: thin, translucent, rounded, on all sides. */
+const PAGE_SCROLLBARS = `
+::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgb(128 128 128 / 0.42); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgb(56 189 248 / 0.65); border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+`
+
 /** A plain Chrome user agent: some sites (Google sign-in among them) refuse embedded browsers that say otherwise. */
 const chromeAgent = () => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`
+
+/** What Google's sign-in accepts: a current Firefox (it does not check Firefox the way it checks embedded Chromium). */
+const FIREFOX_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:144.0) Gecko/20100101 Firefox/144.0'
+const SIGN_IN_URLS = ['https://accounts.google.com/*', 'https://accounts.youtube.com/*']
+const isSignIn = (url: string) => /^https:\/\/accounts\.(google|youtube)\.com\//.test(url)
 
 /** Runs in the page: its text, and the things on screen one can click or type into, numbered. */
 const READ_PAGE = `(() => {
@@ -428,6 +442,13 @@ export class BrowserService {
     this.prepared = true
     const s = session.fromPartition(BROWSER_PARTITION)
     s.setUserAgent(chromeAgent())
+    // Google refuses sign-in from browsers it takes for embedded ones ("this browser may not be secure").
+    // On its sign-in pages only, the browser presents as Firefox, without Chromium's client hints.
+    s.webRequest.onBeforeSendHeaders({ urls: SIGN_IN_URLS }, (details, done) => {
+      const headers: Record<string, string> = { ...details.requestHeaders, 'User-Agent': FIREFOX_AGENT }
+      for (const h of Object.keys(headers)) if (/^sec-ch-ua/i.test(h)) delete headers[h]
+      done({ requestHeaders: headers })
+    })
     s.setPermissionRequestHandler((_wc, permission, done) => done(permission === 'fullscreen' || permission === 'clipboard-sanitized-write'))
     s.setPermissionCheckHandler((_wc, permission) => permission === 'fullscreen' || permission === 'clipboard-sanitized-write')
   }
@@ -457,6 +478,14 @@ export class BrowserService {
       wc.on('will-navigate', (e, url) => {
         if (!/^(https?:|about:blank)/.test(url)) e.preventDefault()
       })
+      // The page's own navigator.userAgent follows the header: Firefox on Google's sign-in, Chrome everywhere else.
+      wc.on('did-start-navigation', details => {
+        if (!details.isMainFrame) return
+        const agent = isSignIn(details.url) ? FIREFOX_AGENT : chromeAgent()
+        if (wc.getUserAgent() !== agent) wc.setUserAgent(agent)
+      })
+      // Slim, rounded scrollbars that suit light and dark pages alike, instead of Windows' grey bars.
+      wc.on('dom-ready', () => void wc.insertCSS(PAGE_SCROLLBARS).catch(() => undefined))
     })
   }
 

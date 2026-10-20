@@ -24,6 +24,14 @@ import {
   Newspaper,
   Pin,
   PinOff,
+  ChevronsLeft,
+  ChevronsRight,
+  Expand,
+  GripVertical,
+  Move,
+  PanelLeft,
+  PanelRight,
+  Shrink,
   Settings2,
   SlidersHorizontal,
   X,
@@ -63,6 +71,7 @@ import { ActivityCard, NowCard, TodayCard, type Presence } from "./Jarvis.tsx";
 import { LockScreen } from "./LockScreen.tsx";
 import { Setup } from "./Setup.tsx";
 import { useCounts, type CountKey } from "./shell/counts.ts";
+import { STRIP_W, usePanelLayout } from "./shell/panelLayout.ts";
 import { Rail, type RailItem } from "./shell/Rail.tsx";
 import { useAlerts } from "./shell/alerts.ts";
 import { AlertsTimeline } from "./shell/AlertsTimeline.tsx";
@@ -215,6 +224,8 @@ export function App() {
   const [browserFloat, setBrowserFloat] = useState<"mini" | "full" | "hidden">("hidden");
   const [driving, setDriving] = useState(false);
   const panesRef = useRef<HTMLDivElement>(null);
+  /** The stage-and-panel area: the side panel docks to its edges or floats inside it. */
+  const areaRef = useRef<HTMLDivElement>(null);
   const stage = layout.main;
   const [drawer, setDrawer] = useState<DrawerId | null>(() => {
     const d = stored("drawer", "chat");
@@ -229,6 +240,12 @@ export function App() {
   });
   const roomy = useMedia(ROOMY);
   const phone = useMedia(PHONE);
+  const panel = usePanelLayout(
+    areaRef,
+    drawer ?? "chat",
+    ["setup", "controls", "learning", "news", "projects"].includes(drawer ?? ""),
+  );
+  const [placeMenu, setPlaceMenu] = useState(false);
   const [compact, setCompact] = useState(false);
   const [map3d, setMap3d] = useState(false);
   const [onTop, setOnTop] = useState(false);
@@ -705,19 +722,35 @@ export function App() {
 
   // The drawer sits beside the stage when pinned in a roomy window; otherwise it floats over the stage's edge.
   const docked = pinned && roomy && !phone;
-  const wideDrawer =
-    drawer === "setup" ||
-    drawer === "controls" ||
-    drawer === "learning" ||
-    drawer === "news" ||
-    drawer === "projects";
-  const drawerClass = compact
-    ? "mx-2 mb-2 flex-1"
-    : phone
-      ? `absolute inset-0 z-30 mx-2 mb-2 bg-solid ${drawer ? "" : "hidden"}`
-      : docked
-        ? `mb-2 mr-2 shrink-0 ${wideDrawer ? "w-[min(560px,40vw)]" : "w-[clamp(360px,30vw,440px)]"} ${drawer ? "" : "hidden"}`
-        : `absolute inset-y-0 right-0 z-30 mb-2 mr-2 ${wideDrawer ? "w-[min(620px,calc(100%-1rem))]" : "w-[min(440px,calc(100%-1rem))]"} bg-solid shadow-2xl ${drawer ? "" : "hidden"}`;
+  // Pinned panels can be docked left or right (resizable), floated anywhere over the stage,
+  // collapsed to a slim strip or expanded over the whole stage. Unpinned ones slide over the stage's edge.
+  const free = !compact && !phone;
+  const place = panel.layout.place;
+  const expanded = free && !!drawer && panel.layout.expanded;
+  const dockedSide = free && docked && place !== "float" && !expanded;
+  const floating = free && pinned && place === "float" && !expanded;
+  const collapsed = free && pinned && !!drawer && panel.layout.collapsed && !expanded;
+  const hide = drawer ? "" : "hidden";
+  let drawerStyle: CSSProperties | undefined;
+  let drawerClass: string;
+  if (compact) drawerClass = "mx-2 mb-2 flex-1";
+  else if (phone) drawerClass = `absolute inset-0 z-30 mx-2 mb-2 bg-solid ${hide}`;
+  else if (panel.drag) {
+    const r = panel.drag.rect;
+    drawerClass = "absolute z-40 bg-solid opacity-90 shadow-2xl ring-2 ring-accent/60";
+    drawerStyle = { left: r.x, top: r.y, width: r.w, height: r.h };
+  } else if (expanded) drawerClass = "absolute inset-0 z-30 mx-2 mb-2 bg-solid shadow-2xl";
+  else if (dockedSide) {
+    drawerClass = `relative mb-2 shrink-0 transition-[width] duration-150 ${place === "left" ? "ml-2" : "mr-2"} ${hide}`;
+    drawerStyle = { width: collapsed ? STRIP_W : panel.width, order: place === "left" ? 0 : 2 };
+  } else if (floating) {
+    const f = panel.float;
+    drawerClass = `absolute z-30 bg-solid shadow-2xl ${hide}`;
+    drawerStyle = { left: f.x, top: f.y, width: collapsed ? 260 : f.w, height: collapsed ? undefined : f.h };
+  } else {
+    drawerClass = `absolute inset-y-0 z-30 mb-2 bg-solid shadow-2xl ${place === "left" ? "left-0 ml-2" : "right-0 mr-2"} ${hide}`;
+    drawerStyle = { width: Math.min(panel.width, Math.max(320, panel.size.w - 16)) };
+  }
 
   return (
     <Frame
@@ -753,9 +786,18 @@ export function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Stage and drawer: a floating drawer covers the stage's edge, never the rail. */}
-          <div className="relative flex min-h-0 min-w-0 flex-1">
+          <div ref={areaRef} className="relative flex min-h-0 min-w-0 flex-1">
+            {/* Moving the panel: the edges it would dock to light up. */}
+            {panel.drag &&
+              (["left", "right"] as const).map((z) => (
+                <div
+                  key={z}
+                  aria-hidden
+                  className={`pointer-events-none absolute inset-y-0 z-30 mb-2 w-24 rounded-2xl border-2 border-dashed transition-colors ${z === "left" ? "left-2" : "right-2"} ${panel.drag?.zone === z ? "border-accent bg-accent/15" : "border-border bg-transparent"}`}
+                />
+              ))}
             {!compact && (
-              <div ref={panesRef} className={`relative flex min-h-0 min-w-0 flex-1 ${phone ? "mb-1" : "mb-2"}`}>
+              <div ref={panesRef} style={{ order: 1 }} className={`relative flex min-h-0 min-w-0 flex-1 ${phone ? "mb-1" : "mb-2"}`}>
                 {SURFACES.filter((x) => panes.includes(x)).map((x) => {
                   const at = panes.indexOf(x);
                   return (
@@ -850,7 +892,50 @@ export function App() {
                     : "Panel"
               }
               className={`glass flex min-h-0 flex-col overflow-hidden rounded-2xl ${drawerClass}`}
+              style={drawerStyle}
             >
+              {/* Resize: the docked panel's inner edge; a floating one's sides and corner. */}
+              {free && drawer && !collapsed && !expanded && !panel.drag && (
+                <>
+                  {(floating ? (["w", "e", "s", "se"] as const) : ([place === "left" ? "e" : "w"] as const)).map((edge) => (
+                    <div
+                      key={edge}
+                      role="separator"
+                      aria-orientation={edge === "s" ? "horizontal" : "vertical"}
+                      aria-label="Resize the panel"
+                      onPointerDown={(e) => panel.startResize(e, edge)}
+                      className={`group/rs absolute z-10 ${
+                        edge === "w"
+                          ? "inset-y-3 left-0 w-2 cursor-ew-resize"
+                          : edge === "e"
+                            ? "inset-y-3 right-0 w-2 cursor-ew-resize"
+                            : edge === "s"
+                              ? "inset-x-3 bottom-0 h-2 cursor-ns-resize"
+                              : "bottom-0 right-0 size-4 cursor-nwse-resize"
+                      }`}
+                    >
+                      {edge !== "se" && (
+                        <span
+                          className={`absolute rounded-full bg-accent/0 transition-colors group-hover/rs:bg-accent/70 ${edge === "s" ? "inset-x-1/3 bottom-0.5 h-1" : `inset-y-1/3 w-1 ${edge === "w" ? "left-0.5" : "right-0.5"}`}`}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
+              {collapsed && (
+                // Collapsed: a slim strip (docked) or a small bar (floating); click to open it again.
+                <button
+                  type="button"
+                  onClick={() => panel.update((l) => ({ ...l, collapsed: false }))}
+                  className={`flex flex-1 items-center gap-2 text-sm text-muted hover:text-text ${floating ? "px-3 py-2" : "flex-col py-3"}`}
+                  title="Open the panel again"
+                  aria-label={`Open ${drawer ? DRAWER_TITLE[drawer] : "the panel"} again`}
+                >
+                  {place === "left" ? <ChevronsRight className="size-4" aria-hidden /> : <ChevronsLeft className="size-4" aria-hidden />}
+                  <span className={floating ? "truncate" : "[writing-mode:vertical-rl]"}>{drawer ? DRAWER_TITLE[drawer] : ""}</span>
+                </button>
+              )}
               {compact ? (
                 <div className="flex items-center gap-1 border-b border-border px-2 py-1">
                   <span className="hud-label flex-1 pl-1">Compact</span>
@@ -883,10 +968,80 @@ export function App() {
                   </button>
                 </div>
               ) : (
-                <header className="flex items-center gap-2 border-b border-border px-3 py-1.5">
-                  <h2 className="flex-1 truncate text-sm font-medium">
+                <header
+                  onPointerDown={free ? panel.startMove : undefined}
+                  className={`relative flex items-center gap-1 border-b border-border px-2 py-1.5 ${free ? "cursor-grab touch-none select-none active:cursor-grabbing" : ""} ${collapsed ? "hidden" : ""}`}
+                  title={free ? "Drag to move: drop on the left or right edge to dock, anywhere else to float" : undefined}
+                >
+                  {free && <GripVertical className="size-3.5 shrink-0 text-muted" aria-hidden />}
+                  <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
                     {drawer ? DRAWER_TITLE[drawer] : ""}
                   </h2>
+                  {free && (
+                    <>
+                      <button
+                        type="button"
+                        className={`icon-btn size-7 ${placeMenu ? "text-accent" : ""}`}
+                        onClick={() => setPlaceMenu((v) => !v)}
+                        aria-expanded={placeMenu}
+                        aria-label="Where the panel sits"
+                        title="Dock left, dock right or float"
+                      >
+                        {place === "left" ? <PanelLeft className="size-3.5" aria-hidden /> : place === "right" ? <PanelRight className="size-3.5" aria-hidden /> : <Move className="size-3.5" aria-hidden />}
+                      </button>
+                      {placeMenu && (
+                        <div className="pop-in absolute right-2 top-full z-50 mt-1 w-44 rounded-xl border border-border bg-solid p-1 shadow-2xl" role="menu">
+                          {(
+                            [
+                              ["left", "Dock left", <PanelLeft key="l" className="size-3.5" aria-hidden />],
+                              ["right", "Dock right", <PanelRight key="r" className="size-3.5" aria-hidden />],
+                              ["float", "Float over the stage", <Move key="f" className="size-3.5" aria-hidden />],
+                            ] as const
+                          ).map(([p, label, icon]) => (
+                            <button
+                              key={p}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={place === p}
+                              onClick={() => {
+                                setPlaceMenu(false);
+                                if (!pinned) {
+                                  setPinned(true);
+                                  store("drawer.pinned", "true");
+                                }
+                                panel.update((l) => ({ ...l, place: p, expanded: false, collapsed: false }));
+                              }}
+                              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs hover:bg-surface-strong ${place === p ? "text-accent" : ""}`}
+                            >
+                              {icon}
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {pinned && !expanded && (
+                        <button
+                          type="button"
+                          className="icon-btn size-7"
+                          onClick={() => panel.update((l) => ({ ...l, collapsed: true }))}
+                          aria-label="Collapse the panel"
+                          title="Collapse"
+                        >
+                          {place === "left" ? <ChevronsLeft className="size-3.5" aria-hidden /> : <ChevronsRight className="size-3.5" aria-hidden />}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="icon-btn size-7"
+                        onClick={() => panel.update((l) => ({ ...l, expanded: !l.expanded, collapsed: false }))}
+                        aria-pressed={expanded}
+                        aria-label={expanded ? "Back to its size" : "Expand over the stage"}
+                        title={expanded ? "Back to its size" : "Expand"}
+                      >
+                        {expanded ? <Shrink className="size-3.5" aria-hidden /> : <Expand className="size-3.5" aria-hidden />}
+                      </button>
+                    </>
+                  )}
                   {!phone && (
                     <button
                       type="button"
@@ -922,7 +1077,7 @@ export function App() {
                 </header>
               )}
               <div
-                className={`min-h-0 flex-1 flex-col ${compact || drawer === "chat" ? "flex" : "hidden"}`}
+                className={`min-h-0 flex-1 flex-col ${(compact || drawer === "chat") && !collapsed ? "flex" : "hidden"}`}
               >
                 <Companion
                   status={status}
@@ -931,7 +1086,7 @@ export function App() {
                   onPresence={setPresence}
                 />
               </div>
-              {!compact && drawer && drawer !== "chat" && (
+              {!compact && !collapsed && drawer && drawer !== "chat" && (
                 <div className="drawer-body @container min-h-0 flex-1">
                   <Suspense fallback={<Loading />}>
                     {drawerContent(drawer)}

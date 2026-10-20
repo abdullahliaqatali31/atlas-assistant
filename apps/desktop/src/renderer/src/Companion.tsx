@@ -10,6 +10,7 @@ import { InitiativeControls, LaterList } from './Initiative.tsx'
 import { VoiceMode, type VoicePhase } from './VoiceMode.tsx'
 import { chime, toWav, WakeListener } from './wake/listener.ts'
 import type { Presence } from './Jarvis.tsx'
+import type { PresenceCommand } from '../../shared/presence.ts'
 import { ChatList } from './ChatList.tsx'
 import { ChatMenu } from './ChatMenu.tsx'
 import { ModelChip } from './ModelChip.tsx'
@@ -85,6 +86,8 @@ export function Companion({
   const recordingRef = useRef<Recording | null>(null)
   const playerRef = useRef<SentencePlayer | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
+  /** Short replies Atlas offered after its last answer. */
+  const [suggest, setSuggest] = useState<{ replyId: string; options: string[] } | null>(null)
   const ready = status.phase === 'ready'
   const voice = status.speech.available
 
@@ -109,6 +112,11 @@ export function Companion({
           conversationRef.current = true
           setConversation(true)
         }
+        return
+      }
+      // Quick replies for a finished answer: buttons under it while it is the last thing said.
+      if (e.type === 'suggestions') {
+        if (linesRef.current.at(-1)?.id === e.replyId) setSuggest({ replyId: e.replyId, options: e.options })
         return
       }
       // An onboarding question being read aloud: only its audio matters.
@@ -186,7 +194,7 @@ export function Companion({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
-  }, [lines])
+  }, [lines, suggest])
 
 
   /** Stop talking and streaming: used by Stop, Esc, and whenever the owner starts a new turn. */
@@ -257,6 +265,7 @@ export function Companion({
   /** Typed text from this box or the floating Ask bar: one path, one thread. */
   const sendText = async (text: string) => {
     if (!text || !ready) return
+    setSuggest(null)
     // Typing ends a voice conversation: the reply stays on screen.
     endConversation()
     interrupt()
@@ -545,8 +554,13 @@ export function Companion({
   }, [presence, widgetCaption, widgetLevel])
 
   // The widget's Stop and Talk act here, where the microphone and the speech are.
-  const widgetAsks = useRef<(c: 'stop' | 'talk') => void>(() => undefined)
+  const widgetAsks = useRef<(c: PresenceCommand) => void>(() => undefined)
   widgetAsks.current = c => {
+    // A quick reply pressed on the widget: send it as if typed here.
+    if (typeof c === 'object') {
+      void sendText(c.say)
+      return
+    }
     if (liveRef.current.active) {
       if (c === 'stop') liveRef.current.phase === 'speaking' ? liveRef.current.cancel() : liveRef.current.stop()
       return
@@ -708,6 +722,21 @@ export function Companion({
             </div>
           </div>
         ))}
+        {suggest && lines.at(-1)?.id === suggest.replyId && !replyId && (
+          <div className="rise-in flex flex-wrap gap-1.5 pl-1" role="group" aria-label="Quick replies">
+            {suggest.options.map(o => (
+              <button
+                key={o}
+                type="button"
+                dir="auto"
+                onClick={() => void sendText(o)}
+                className="rounded-full border border-accent/40 bg-accent-soft px-3 py-1 text-xs text-accent transition-colors hover:border-accent hover:bg-accent hover:text-accent-fg"
+              >
+                {o}
+              </button>
+            ))}
+          </div>
+        )}
         <div ref={endRef} />
       </main>
 

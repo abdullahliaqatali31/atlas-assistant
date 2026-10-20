@@ -37,6 +37,8 @@ import { mainWebPreferences } from './window-prefs.ts'
 
 /** An initiative card stays this long unless the owner answers it sooner. */
 const CARD_MS = 3 * 60_000
+/** Quick replies stay offered this long. */
+const REPLIES_MS = 15 * 60_000
 const DOT = { width: 64, height: 64 }
 /** The page's zoom for each size (PresenceApp's ZOOM). */
 const ORB_ZOOM: Record<WidgetScale, number> = { s: 0.85, m: 1, l: 1.2 }
@@ -53,6 +55,8 @@ export class PresenceWidget {
   private saved: Saved
   private live: PresenceUpdate = { activity: 'idle', caption: '', level: 0 }
   private initiative: { item: InitiativeItem; until: number } | null = null
+  /** The quick replies offered after the last answer, until the next turn or a while passes. */
+  private replies: { replyId: string; text: string; options: string[]; until: number } | null = null
   private main: MainWindowState = 'front'
   private lastSent = ''
   private glassOpen = false
@@ -137,6 +141,31 @@ export class PresenceWidget {
     this.push()
   }
 
+  /** Atlas offered quick replies after an answer. */
+  suggest(replyId: string, text: string, options: string[]) {
+    this.replies = { replyId, text: text.slice(-400), options: options.slice(0, 4), until: Date.now() + REPLIES_MS }
+    this.push()
+  }
+
+  /** A new reply began: the old quick replies no longer fit. */
+  replyStarted(replyId: string) {
+    if (!this.replies || this.replies.replyId === replyId) return
+    this.replies = null
+    this.push()
+  }
+
+  /** Send a pressed quick reply through the main window's conversation (opening it if it is closed). */
+  private async say(text: string) {
+    this.replies = null
+    this.push()
+    if (this.deps.command({ say: text })) return
+    this.deps.openMain()
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 200))
+      if (this.deps.command({ say: text })) return
+    }
+  }
+
   /** Full control turned on or off (the widget wears an amber ring while on). */
   fullControl(on: boolean) {
     this.fullControlOn = on
@@ -195,7 +224,15 @@ export class PresenceWidget {
       memories: this.live.activity === 'idle' ? 0 : this.memoriesInUse,
       waiting: this.deps.approvals().length,
       later: this.deps.later?.() ?? 0,
+      replies: this.liveReplies(locked),
     }
+  }
+
+  private liveReplies(locked: boolean): PresenceState['replies'] {
+    if (this.replies && Date.now() > this.replies.until) this.replies = null
+    // Busy again, or locked: nothing to offer on the desktop.
+    if (!this.replies || locked || this.live.activity === 'thinking') return null
+    return { text: this.replies.text, options: this.replies.options }
   }
 
   private push() {
@@ -364,6 +401,16 @@ export class PresenceWidget {
     on(PRS.stop, () => void this.deps.command('stop'))
     on(PRS.talk, () => this.talk())
     on(PRS.open, () => this.deps.openMain())
+    on(PRS.say, text => {
+      if (this.deps.locked()) throw new Error('Please confirm it is you first.')
+      // Only a reply Atlas offered can be sent from the widget.
+      if (typeof text !== 'string' || !this.replies?.options.includes(text)) throw new Error('That reply is no longer offered.')
+      void this.say(text)
+    })
+    on(PRS.dismissReplies, () => {
+      this.replies = null
+      this.push()
+    })
     on(PRS.menu, () => this.menu())
     on(PRS.dragStart, () => this.dragStart())
     on(PRS.dragEnd, () => this.dragEnd())

@@ -9,7 +9,7 @@ import type { PresenceBridge, PresenceState, PRS } from '../shared/presence.ts'
 // The channel names, written out: a sandboxed preload must be one file, and
 // sharing the PRS object with the main window's preload would split it into
 // a chunk. The type keeps every name equal to CH.
-type Used = 'state' | 'stop' | 'talk' | 'open' | 'menu' | 'resize' | 'approval' | 'initiative' | 'dragStart' | 'dragEnd'
+type Used = 'state' | 'stop' | 'talk' | 'open' | 'menu' | 'resize' | 'approval' | 'initiative' | 'dragStart' | 'dragEnd' | 'say' | 'dismissReplies'
 const CH: { readonly [K in Used]: (typeof PRS)[K] } = {
   state: 'presence:state',
   stop: 'presence:stop',
@@ -21,6 +21,8 @@ const CH: { readonly [K in Used]: (typeof PRS)[K] } = {
   initiative: 'presence:initiative',
   dragStart: 'presence:drag-start',
   dragEnd: 'presence:drag-end',
+  say: 'presence:say',
+  dismissReplies: 'presence:dismiss-replies',
 }
 
 const bridge: PresenceBridge = {
@@ -38,6 +40,8 @@ const bridge: PresenceBridge = {
   initiative: (id, action) => ipcRenderer.invoke(CH.initiative, id, action),
   dragStart: () => ipcRenderer.invoke(CH.dragStart),
   dragEnd: () => ipcRenderer.invoke(CH.dragEnd),
+  say: text => ipcRenderer.invoke(CH.say, text),
+  dismissReplies: () => ipcRenderer.invoke(CH.dismissReplies),
 }
 
 contextBridge.exposeInMainWorld('presence', bridge)

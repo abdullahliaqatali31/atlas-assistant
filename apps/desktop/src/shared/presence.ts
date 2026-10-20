@@ -43,6 +43,8 @@ export interface PresenceState {
   waiting: number
   /** Things Atlas held back for later (a badge on the dot). */
   later: number
+  /** Atlas's last answer and short replies the owner might send (buttons), until the next turn. */
+  replies: { text: string; options: string[] } | null
 }
 
 /** What the main window's conversation reports; main adds the card, name and scale. */
@@ -73,9 +75,14 @@ export const PRS = {
   /** Widget → main: the owner pressed and moved; main moves the window with the cursor until released. */
   dragStart: 'presence:drag-start',
   dragEnd: 'presence:drag-end',
+  /** Widget → main: the owner pressed a quick reply. */
+  say: 'presence:say',
+  /** Widget → main: put the quick replies away. */
+  dismissReplies: 'presence:dismiss-replies',
 } as const
 
-export type PresenceCommand = 'stop' | 'talk'
+/** Stop, talk, or send a quick reply the owner pressed, as their message. */
+export type PresenceCommand = 'stop' | 'talk' | { say: string }
 
 /** The widget page's bridge (window.presence). */
 export interface PresenceBridge {
@@ -89,6 +96,9 @@ export interface PresenceBridge {
   initiative(id: string, action: 'snooze' | 'mute' | 'dismiss'): Promise<void>
   dragStart(): Promise<void>
   dragEnd(): Promise<void>
+  /** Send one of the offered quick replies as the owner's message. */
+  say(text: string): Promise<void>
+  dismissReplies(): Promise<void>
 }
 
 /** The main window's side (window.presenceHost): report what the conversation does, hear the widget's asks, the setting. */

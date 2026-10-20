@@ -206,6 +206,8 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
       drawAttention()
       presence.spokeUp(e.item)
     }
+    if (e.type === 'chunk' || e.type === 'heard' || e.type === 'initiative') presence.replyStarted(e.replyId)
+    if (e.type === 'suggestions') presence.suggest(e.replyId, e.text, e.options)
     replyToRenderer(e)
   },
   onLater: (later, item) => {
