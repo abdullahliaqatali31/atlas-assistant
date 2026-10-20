@@ -13,14 +13,14 @@ import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type R
 import { MAX_PINS, type MapOp, type Pin, type Story } from '../../../shared/map.ts'
 import type { NewsResult } from '../../../shared/news.ts'
 import { CAMERA_COVERAGE, kmBetween, type Camera, type Flight, type FlightRoute, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
-import { cleanError, deadReckon, flightFeatures, launchFeatures, radioFeatures, rainTiles, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
+import { cameraFeatures, cleanError, deadReckon, flightFeatures, launchFeatures, radioFeatures, rainTiles, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
 import { nearbyItems, type NearbyItem } from './hover.ts'
 import { HoverCard } from './HoverCard.tsx'
 import type { Selected } from './Inspector.tsx'
 import { layerDef, LAYERS, OWN_SOURCES, PICKABLE, readLayers, ROUTE_LAYERS, SELECTED_LAYER, TRAIL_LAYER, type LayerId } from './layers.ts'
 import { groundTrack, horizonKm, nextPasses, orbitFacts, ring } from './passes.ts'
 import { Trails } from './trails.ts'
-import { describeFound, describeVisible, findItems, linkFeatures, pinFeatures, routeFeatures, routeProgress, storyFeatures, ZOOM_FOR } from './mapops.ts'
+import { describeFound, describeVisible, findItems, linkFeatures, MAP3D_EVENT, pinFeatures, routeFeatures, routeProgress, storyFeatures, ZOOM_FOR } from './mapops.ts'
 import { LayerRail, RAIL } from './LayerRail.tsx'
 import { NewsCanvas } from './NewsCanvas.tsx'
 import { newsFeatures } from './newsmap.ts'
@@ -133,6 +133,8 @@ export function MapView({
   const [threeD, setThreeD] = useState<{ lat: number; lon: number; zoom: number } | null>(null)
   const threeDRef = useRef(threeD)
   threeDRef.current = threeD
+  /** Nothing to draw: the window is hidden, or the 3D view covers the flat map. */
+  const idle = () => document.hidden || threeDRef.current !== null
   /** The open 3D view's handle, for Atlas's map_3d. */
   const globeCtl = useRef<Globe3DControl | null>(null)
   // Visual mode, tactical HUD and scope (keys 1-5, H).
@@ -530,6 +532,20 @@ export function MapView({
       }
     }
   }
+  const [note3d, setNote3d] = useState('')
+  useEffect(() => {
+    const on = (e: Event) => {
+      const op = (e as CustomEvent<MapOp>).detail
+      if (!op || op.kind !== '3d') return
+      setNote3d('')
+      void runOpRef.current(op).catch(err => {
+        setNote3d(err instanceof Error ? err.message : String(err))
+        setTimeout(() => setNote3d(''), 7000)
+      })
+    }
+    window.addEventListener(MAP3D_EVENT, on)
+    return () => window.removeEventListener(MAP3D_EVENT, on)
+  }, [])
   const runOpRef = useRef(runOp)
   runOpRef.current = runOp
 
@@ -563,7 +579,7 @@ export function MapView({
     ]
     let k = 0
     const timer = setInterval(() => {
-      if (document.hidden || !m.getLayer('story-links')) return
+      if (idle() || !m.getLayer('story-links')) return
       k = (k + 1) % steps.length
       m.setPaintProperty('story-links', 'line-dasharray', steps[k])
     }, 70)
@@ -736,7 +752,7 @@ export function MapView({
     const load = async () => {
       if (timer) clearTimeout(timer)
       let again = 20_000
-      if (!stopped && !document.hidden) {
+      if (!stopped && !idle()) {
         const c = m.getCenter()
         const b = m.getBounds()
         const corner = b.getNorthEast()
@@ -773,7 +789,7 @@ export function MapView({
       ? null
       : setInterval(() => {
           const g = glide.current
-          if (!g || stopped || document.hidden || g.list.length > 6000) return
+          if (!g || stopped || idle() || g.list.length > 6000) return
           const dt = (Date.now() - g.at) / 1000
           put('flights', flightFeatures(g.list.map(f => deadReckon(f, f.seen + dt))))
         }, 1000)
@@ -798,7 +814,7 @@ export function MapView({
     if (!m || !ready || !layers.ships) return
     let stopped = false
     const load = async () => {
-      if (stopped || document.hidden) return
+      if (stopped || idle()) return
       const b = m.getBounds()
       const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
       try {
@@ -866,19 +882,7 @@ export function MapView({
     let stopped = false
     let official: Camera[] = []
     let windy: Camera[] = []
-    const feature = (c: Camera) => ({
-      type: 'Feature' as const,
-      geometry: { type: 'Point' as const, coordinates: [c.lon, c.lat] },
-      properties: {
-        id: c.id,
-        title: c.name,
-        source: c.source,
-        ...(c.video ? { video: c.video.url, videoKind: c.video.kind } : {}),
-        ...(c.player ? { player: c.player.url, playerKind: c.player.kind } : {}),
-        ...(c.link ? { link: c.link } : {}),
-        ...(c.source === 'Windy Webcams' ? { color: '#38bdf8' } : {}),
-      },
-    })
+    const feature = (c: Camera) => cameraFeatures([c]).features[0]!
     const draw = () => {
       if (stopped) return
       const ids = new Set(official.map(c => c.id))
@@ -891,7 +895,7 @@ export function MapView({
       draw()
     }, () => undefined)
     const loadWindy = async () => {
-      if (stopped || document.hidden) return
+      if (stopped || idle()) return
       const b = m.getBounds()
       const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
       try {
@@ -926,7 +930,7 @@ export function MapView({
     let stopped = false
     let sats: { name: string; rec: satellite.SatRec }[] = []
     const draw = () => {
-      if (stopped || document.hidden || !sats.length) return
+      if (stopped || idle() || !sats.length) return
       put('satellites', satelliteFeatures(sats, new Date()))
     }
     void window.world.satellites().then(list => {
@@ -1118,10 +1122,11 @@ export function MapView({
         />
       )}
       {!threeD && toolbar(controls)}
+      {note3d && <p className="glass absolute left-1/2 top-14 z-40 max-w-md -translate-x-1/2 rounded-lg bg-solid/90 px-3 py-1.5 text-xs text-warm">{note3d}</p>}
       {threeD && (
         <Guard3D onClose={() => setThreeD(null)}>
         <Suspense fallback={<div className="absolute inset-0 z-30 grid place-items-center bg-black/80 text-xs text-muted">Loading the 3D world…</div>}>
-          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} />
+          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} />
         </Suspense>
         </Guard3D>
       )}

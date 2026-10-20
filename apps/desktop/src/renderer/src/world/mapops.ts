@@ -4,6 +4,9 @@
  * and the pins layer. MapView does the flying; this decides what to say.
  */
 import type { Pin, Story } from '../../../shared/map.ts'
+
+/** Any card or button can ask for the 3D view with a map_3d op (detail): the World map runs it. */
+export const MAP3D_EVENT = 'atlas:map3d'
 import { kmBetween, type FlightRoute } from '../../../shared/world.ts'
 import type { FC } from './geo.ts'
 import type { NearbyItem, Props } from './hover.ts'

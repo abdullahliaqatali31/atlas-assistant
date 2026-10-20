@@ -293,7 +293,8 @@ export const LAYERS: LayerDef[] = [
         id: 'flights',
         type: 'symbol',
         source: 'flights',
-        layout: { 'icon-image': 'plane', 'icon-size': ['case', ['<', ['get', 'rank'], 2], 0.68, 0.55], 'icon-rotate': ['get', 'track'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'symbol-sort-key': ['get', 'rank'] },
+        layout: { 'icon-image': 'plane', // The 48 px silhouette: small over the whole world, full size over a city; picked and important ones a bit larger.
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 2, ['case', ['<', ['get', 'rank'], 2], 0.26, 0.15], 6, ['case', ['<', ['get', 'rank'], 2], 0.45, 0.33], 10, ['case', ['<', ['get', 'rank'], 2], 0.6, 0.48], 14, ['case', ['<', ['get', 'rank'], 2], 0.72, 0.6]], 'icon-rotate': ['get', 'track'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'symbol-sort-key': ['get', 'rank'] },
         paint: { 'icon-color': ['get', 'color'], 'icon-halo-color': HALO, 'icon-halo-width': 1 },
       },
       {

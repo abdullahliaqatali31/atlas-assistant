@@ -5,6 +5,7 @@
  * modes that ride one (follow it, or look straight down from it).
  */
 import * as Cesium from '@cesium/engine'
+import { FixedFrameTransforms as Transforms } from '@cesium/core'
 import * as satellite from 'satellite.js'
 
 import { satGroup, SAT_GROUPS, type SatGroupId } from '../../../shared/space.ts'
@@ -21,6 +22,9 @@ export interface Sat3D {
 }
 
 const ORBIT_STEPS = 180
+/** Satellites closer to the camera than this show as a 3D model (at most MAX_MODELS of them). */
+const MODEL_RANGE_M = 3_000_000
+const MAX_MODELS = 20
 
 export class Satellites3D {
   readonly list: Sat3D[] = []
@@ -29,6 +33,10 @@ export class Satellites3D {
   private hidden = new Set<SatGroupId>()
   private orbitOf: Sat3D | null = null
   private orbitAt = 0
+  private models = new Map<number, Cesium.Model>()
+  private loadingModels = new Set<number>()
+  private readonly hpr = new Cesium.HeadingPitchRoll()
+  private readonly at = new Cesium.Cartesian3()
 
   constructor(private readonly scene: Cesium.Scene) {
     this.points = scene.primitives.add(new Cesium.PointPrimitiveCollection()) as Cesium.PointPrimitiveCollection
@@ -63,23 +71,88 @@ export class Satellites3D {
   setVisible(on: boolean) {
     this.points.show = on
     this.orbits.show = on
+    for (const m of this.models.values()) m.show = on
   }
 
   setGroupHidden(group: SatGroupId, hide: boolean) {
     if (hide) this.hidden.add(group)
     else this.hidden.delete(group)
-    for (const s of this.list) s.point.show = !this.hidden.has(s.group)
+    for (const s of this.list) s.point.show = !this.hidden.has(s.group) && !this.models.has(s.i)
+    for (const [i, m] of this.models) m.show = !this.hidden.has(this.list[i]!.group)
   }
 
   /** Propagates every shown satellite to now; the picked one's orbit ring is redrawn each minute. */
   move(now: Date) {
     if (!this.points.show) return
     for (const s of this.list) {
-      if (!s.point.show) continue
+      if (!s.point.show || this.models.has(s.i)) continue
       const f = orbitFacts(s.rec, now)
       if (f) s.point.position = Cesium.Cartesian3.fromDegrees(f.lon, f.lat, f.altKm * 1000)
     }
     if (this.orbitOf && now.getTime() - this.orbitAt > 60_000) this.drawOrbit(this.orbitOf)
+  }
+
+  /** How many satellites are showing as models: the view draws continuously while any do. */
+  get modelCount() {
+    return this.models.size
+  }
+
+  /**
+   * Which satellites get a 3D model: those near the camera, plus the one
+   * picked or ridden. Called once a second; models come and go here.
+   */
+  pickModels(camera: { x: number; y: number; z: number }, keep: number | null) {
+    const want = new Set<number>()
+    // Models only when the camera is down among the low orbits (or for the one picked or ridden):
+    // from high up they would be specks that keep the view drawing continuously.
+    const low = Cesium.Cartesian3.magnitude(camera as never) - Cesium.Ellipsoid.WGS84.maximumRadius < 2_500_000
+    if (this.points.show) {
+      const near = this.list
+        .filter(s => s.point.show && (s.i === keep || (low && Cesium.Cartesian3.distance(s.point.position, camera as never) < MODEL_RANGE_M)))
+        .sort((a, b) => Cesium.Cartesian3.distance(a.point.position, camera as never) - Cesium.Cartesian3.distance(b.point.position, camera as never))
+        .slice(0, MAX_MODELS)
+      for (const s of near) want.add(s.i)
+      if (keep !== null) want.add(keep)
+    }
+    for (const [i, m] of this.models)
+      if (!want.has(i)) {
+        this.scene.primitives.remove(m)
+        this.models.delete(i)
+        const s = this.list[i]
+        if (s) s.point.show = !this.hidden.has(s.group)
+      }
+    for (const i of want) {
+      if (this.models.has(i) || this.loadingModels.has(i)) continue
+      const s = this.list[i]
+      if (!s) continue
+      this.loadingModels.add(i)
+      // Stations are much bigger than a typical satellite.
+      const scale = s.group === 'stations' ? 8 : 1
+      void Cesium.Model.fromGltfAsync({ url: './models/satellite.glb', scale, minimumPixelSize: s.group === 'stations' ? 56 : 40, maximumScale: 20_000, id: { kind: 'sat', i } }).then(
+        model => {
+          this.loadingModels.delete(i)
+          if (this.scene.isDestroyed()) return model.destroy()
+          this.models.set(i, this.scene.primitives.add(model) as Cesium.Model)
+          s.point.show = false
+          this.frame()
+          this.scene.requestRender()
+        },
+        () => this.loadingModels.delete(i),
+      )
+    }
+  }
+
+  /** Moves the modelled satellites to this very moment, wings across their path: every frame while any show. */
+  frame() {
+    for (const [i, m] of this.models) {
+      const s = this.list[i]
+      const w = s ? this.where(s) : null
+      if (!s || !w) continue
+      Cesium.Cartesian3.fromDegrees(w.lon, w.lat, w.altM, Cesium.Ellipsoid.WGS84, this.at)
+      s.point.position = this.at
+      this.hpr.heading = Cesium.Math.toRadians(w.heading)
+      m.modelMatrix = Transforms.headingPitchRollToFixedFrame(this.at, this.hpr, Cesium.Ellipsoid.WGS84, undefined, m.modelMatrix)
+    }
   }
 
   facts(s: Sat3D): OrbitFacts | null {

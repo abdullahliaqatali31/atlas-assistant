@@ -16,6 +16,8 @@ under the license listed below.
 | `b789.glb` | “Boeing 787-9” by [Nobilis 2](https://sketchfab.com/nobilishornet2) | [Sketchfab model](https://sketchfab.com/3d-models/boeing-787-9-b6711e2e698e4e469675c1154a50b7a3) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Optimized for God's Eye View: geometry/material simplification, textures resized to 256 px WebP, orientation/scale vertex-baked to real-world meters (Y-up, nose −X), origin centered. |
 | `atr72.glb` | “ATR 72 - 600” by [Oyan3D](https://sketchfab.com/oyan3D) | [Sketchfab model](https://sketchfab.com/3d-models/atr-72-600-1e1a7186f7444d288675262fcee44744) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Optimized for God's Eye View: geometry/material simplification, textures removed with dominant material colors baked into PBR factors (flat “abstracted” style), orientation/scale vertex-baked to real-world meters (Y-up, nose −X), origin centered. |
 
+`satellite.glb` is Atlas's own: a simple satellite (body, solar wings, dish) built by code, released under [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
+
 CC BY 4.0 permits sharing and adaptation, including commercial use, provided
 appropriate credit is retained, the license is linked, and modifications are
 identified. These credits do not imply endorsement by the original creators.

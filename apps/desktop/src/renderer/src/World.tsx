@@ -142,7 +142,7 @@ export function WorldPage() {
       )}
 
       {selected && (
-        <div className="pointer-events-none absolute inset-x-2 bottom-16 z-10 flex max-h-[55%] flex-col @[640px]:bottom-16 @[640px]:right-auto @[640px]:top-14 @[640px]:max-h-none @[640px]:w-[340px]">
+        <div className="pointer-events-none absolute inset-x-2 bottom-16 z-40 flex max-h-[55%] flex-col @[640px]:bottom-16 @[640px]:right-auto @[640px]:top-14 @[640px]:max-h-none @[640px]:w-[340px]">
           <Inspector
             sel={selected}
             world={world}

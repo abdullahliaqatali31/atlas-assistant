@@ -42,7 +42,8 @@ export class Cameras3D {
     this.points.removeAll()
     this.list = cameras
     cameras.forEach((c, i) => {
-      this.points.add({ position: Cesium.Cartesian3.fromDegrees(c.lon, c.lat, 20), pixelSize: c.video ? 6 : 5, color: c.video ? LIVE : STILL, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1, scaleByDistance: new Cesium.NearFarScalar(5e3, 1.6, 8e6, 0.6), id: { kind: 'cam', i } })
+      // Small, and only within a country's reach of the camera: 11,000 dots over the whole globe are just clutter.
+      this.points.add({ position: Cesium.Cartesian3.fromDegrees(c.lon, c.lat, 20), pixelSize: c.video ? 5 : 4, color: c.video ? LIVE : STILL, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1, scaleByDistance: new Cesium.NearFarScalar(3e3, 1.4, 2.5e6, 0.6), distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2_500_000), id: { kind: 'cam', i } })
     })
     this.loaded = true
   }

@@ -2,7 +2,7 @@
 import * as satellite from 'satellite.js'
 
 import { aircraftName, squawkMeaning } from '../../../shared/aircraft.ts'
-import type { Flight, Launch, RadioStation, Ship, WorldSnapshot } from '../../../shared/world.ts'
+import type { Camera, Flight, Launch, RadioStation, Ship, WorldSnapshot } from '../../../shared/world.ts'
 
 export const cleanError = (err: unknown) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.'
@@ -41,19 +41,41 @@ export const toFeatures = (w: WorldSnapshot): { places: FC; quakes: FC; events: 
   },
 })
 
-/** An arrow pointing up, drawn once; tinted per aircraft (signed distance field). */
+/** An airliner seen from above, nose up, drawn once at 48 px; tinted per aircraft (signed distance field). */
 export const planeIcon = () => {
-  const size = 32
+  const size = 48
   const c = document.createElement('canvas')
   c.width = c.height = size
   const g = c.getContext('2d')!
   g.fillStyle = '#fff'
   g.beginPath()
-  g.moveTo(16, 2)
-  g.lineTo(27, 28)
-  g.lineTo(16, 22)
-  g.lineTo(5, 28)
-  g.closePath()
+  // Fuselage, rounded at the nose.
+  g.moveTo(24, 3)
+  g.quadraticCurveTo(27.5, 6, 27.5, 12)
+  g.lineTo(27.5, 36)
+  g.lineTo(26, 44)
+  g.lineTo(22, 44)
+  g.lineTo(20.5, 36)
+  g.lineTo(20.5, 12)
+  g.quadraticCurveTo(20.5, 6, 24, 3)
+  // Swept wings.
+  g.moveTo(27, 17)
+  g.lineTo(45, 28)
+  g.lineTo(45, 31.5)
+  g.lineTo(27, 26.5)
+  g.moveTo(21, 17)
+  g.lineTo(3, 28)
+  g.lineTo(3, 31.5)
+  g.lineTo(21, 26.5)
+  // Tailplane.
+  g.moveTo(26.5, 37)
+  g.lineTo(33, 42.5)
+  g.lineTo(33, 45)
+  g.lineTo(25, 42.5)
+  g.moveTo(21.5, 37)
+  g.lineTo(15, 42.5)
+  g.lineTo(15, 45)
+  g.lineTo(23, 42.5)
   g.fill()
   return g.getImageData(0, 0, size, size)
 }
@@ -171,6 +193,24 @@ export const satelliteFeatures = (sats: { name: string; rec: satellite.SatRec }[
   }
   return { type: 'FeatureCollection', features }
 }
+
+/** Public cameras as map features: the same card in the flat map and the 3D view. */
+export const cameraFeatures = (cams: Camera[]): FC => ({
+  type: 'FeatureCollection',
+  features: cams.map(c => ({
+    type: 'Feature' as const,
+    geometry: { type: 'Point' as const, coordinates: [c.lon, c.lat] },
+    properties: {
+      id: c.id,
+      title: c.name,
+      source: c.source,
+      ...(c.video ? { video: c.video.url, videoKind: c.video.kind } : {}),
+      ...(c.player ? { player: c.player.url, playerKind: c.player.kind } : {}),
+      ...(c.link ? { link: c.link } : {}),
+      ...(c.source === 'Windy Webcams' ? { color: '#38bdf8' } : {}),
+    },
+  })),
+})
 
 /** "in 2 d 4 h", "in 35 min", "launched 3 h ago". */
 export const launchWhen = (at: number, now: number) => {

@@ -1,5 +1,5 @@
 /** The Inspector: what was picked on the map, with what you can do about it. */
-import { Crosshair, ExternalLink, LocateFixed, Sparkles, Trash2, Wind, X } from 'lucide-react'
+import { Box, Crosshair, ExternalLink, Eye, LocateFixed, Sparkles, Trash2, Video, Wind, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { PlaceStatus, WorldSnapshot } from '../../../shared/world.ts'
@@ -8,6 +8,8 @@ import { ASK_EVENT } from '../shell/live.ts'
 import { FlightDetail, moreLinks, RadioDetail, SatelliteDetail, ShipDetail } from './Details.tsx'
 import { hoverInfo, type NearbyItem } from './hover.ts'
 import { layerDef, type LayerId } from './layers.ts'
+import { MAP3D_EVENT } from './mapops.ts'
+import type { Map3dOp } from '../../../shared/map.ts'
 
 /** Something picked on the map, shown in the Inspector. */
 export interface Selected {
@@ -263,6 +265,7 @@ export function Inspector({
           <X className="size-4" aria-hidden />
         </button>
       </header>
+      <In3D sel={sel} title={title} />
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 text-sm">
         {place ? (
           <PlaceDetail s={place} now={now} />
@@ -273,7 +276,7 @@ export function Inspector({
         ) : sel.kind === 'satellites' ? (
           <SatelliteDetail p={p} />
         ) : sel.kind === 'radio' ? (
-          <RadioDetail p={p} />
+          <RadioDetail key={String(p.id)} p={p} />
         ) : sel.kind === 'cameras' ? (
           <CameraDetail id={String(p.id)} source={String(p.source ?? '')} video={typeof p.video === 'string' ? p.video : undefined} videoKind={typeof p.videoKind === 'string' ? p.videoKind : undefined}
             player={typeof p.player === 'string' ? p.player : undefined}
@@ -341,5 +344,48 @@ export function Inspector({
         )}
       </footer>
     </aside>
+  )
+}
+
+/** The way into the 3D view for what is picked: ride it, follow it, look through it, or just see it in 3D. */
+function In3D({ sel, title }: { sel: Selected; title: string }) {
+  const p = sel.props
+  const [lon, lat] = sel.lngLat
+  const go = (op: Omit<Partial<Map3dOp>, 'kind'> & { action: Map3dOp['action'] }) => window.dispatchEvent(new CustomEvent(MAP3D_EVENT, { detail: { kind: '3d', show: [], hide: [], ...op } }))
+  const chip = 'flex items-center gap-1 rounded-full border border-accent/40 px-2.5 py-1 text-[11px] text-accent hover:bg-accent/10'
+  const name = typeof p.name === 'string' && p.name ? p.name : title
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5">
+      <span className="mr-0.5 flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-muted">
+        <Box className="size-3" aria-hidden /> 3D
+      </span>
+      {sel.kind === 'flights' && p.onGround !== 1 ? (
+        <>
+          <button type="button" className={chip} onClick={() => go({ action: 'fly_with', query: String(p.hex ?? ''), lat, lon, mode: 'chase' })}>
+            <Video className="size-3" aria-hidden /> Fly with it
+          </button>
+          <button type="button" className={chip} onClick={() => go({ action: 'fly_with', query: String(p.hex ?? ''), lat, lon, mode: 'cockpit' })}>
+            <Eye className="size-3" aria-hidden /> Cockpit
+          </button>
+        </>
+      ) : sel.kind === 'satellites' ? (
+        <>
+          <button type="button" className={chip} onClick={() => go({ action: 'follow_sat', query: String(p.norad ?? name), mode: 'follow' })}>
+            <Crosshair className="size-3" aria-hidden /> Follow
+          </button>
+          <button type="button" className={chip} onClick={() => go({ action: 'follow_sat', query: String(p.norad ?? name), mode: 'eye' })}>
+            <Eye className="size-3" aria-hidden /> Satellite’s eye
+          </button>
+        </>
+      ) : sel.kind === 'cameras' ? (
+        <button type="button" className={chip} onClick={() => go({ action: 'camera', query: title, lat, lon })}>
+          <Video className="size-3" aria-hidden /> Its view in 3D
+        </button>
+      ) : (
+        <button type="button" className={chip} onClick={() => go({ action: 'open', lat, lon, zoom: sel.kind === 'ships' ? 13 : 11, label: title })}>
+          <Box className="size-3" aria-hidden /> See it in 3D
+        </button>
+      )}
+    </div>
   )
 }
