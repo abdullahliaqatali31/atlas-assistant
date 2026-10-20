@@ -35,6 +35,7 @@ import {
 } from '../../shared/code.ts'
 import { claudeSessions, discover, notAProject } from './discover.ts'
 import { Runner } from './runner.ts'
+import { openInVsCode } from '../system/vscode.ts'
 import { dayKey, lastDays, scanProject, type ScanResult } from './scan.ts'
 
 const SCAN_EVERY_MS = 30 * 60_000
@@ -391,7 +392,8 @@ export class CodeService {
     })))
     handle(KC.openEditor, owner(id => {
       const p = this.project(id)
-      void shell.openExternal(`vscode://file/${p.path.replace(/\\/g, '/')}`)
+      // Its own window: projects already open in VS Code stay open.
+      void openInVsCode(p.path, null)
     }))
     handle(KC.openUrl, owner(runId => {
       const run = this.runner.list().find(r => r.id === runId)

@@ -13,6 +13,7 @@ import { basename, dirname, extname, isAbsolute, join, normalize } from 'node:pa
 import { app, shell } from 'electron'
 
 import { boldRuns, claudeAppLink, claudeCliLink, markdownBlocks, safeName, vscodeLink, withExt, wslUnc, type DocBlock, type OpenWith, type SheetSpec } from '../../shared/pcactions.ts'
+import { openInVsCode } from './vscode.ts'
 import { fromWslUnc, isProtectedPath, searchMap, type MapEntry, type SystemMap } from '../../shared/sysmap.ts'
 
 const KNOWN = ['desktop', 'documents', 'downloads', 'pictures', 'music', 'videos'] as const
@@ -91,8 +92,9 @@ export class PcActions {
     const where = t.wsl ? `${t.name} (WSL ${t.wsl})` : t.name
     switch (withApp) {
       case 'vscode':
-        await shell.openExternal(vscodeLink(t.path, t.wsl))
-        return `Opened ${where} in VS Code${t.wsl ? ' (Remote - WSL)' : ''}.`
+        // Its own window: a project already open in VS Code stays open.
+        await openInVsCode(t.path, t.wsl)
+        return `Opened ${where} in VS Code${t.wsl ? ' (Remote - WSL)' : ''}, in its own window (projects already open stay open).`
       case 'claude':
         if (!t.isDir) throw new Error('The Claude app opens folders; give the project folder.')
         await shell.openExternal(claudeAppLink(t.wsl ? wslUnc(t.wsl, t.path) : t.path, prompt))
