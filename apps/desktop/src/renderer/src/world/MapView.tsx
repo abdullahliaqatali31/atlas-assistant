@@ -805,6 +805,17 @@ export function MapView({
     }
   }, [layers, ready])
 
+  // The 3D view's engine is large: load it quietly once the flat map has settled, so 3D opens without the wait.
+  useEffect(() => {
+    if (!ready || isLite()) return
+    const t = setTimeout(() => {
+      const warm = () => void import('./Globe3D.tsx').catch(() => undefined)
+      if ('requestIdleCallback' in window) requestIdleCallback(warm, { timeout: 5000 })
+      else warm()
+    }, 4000)
+    return () => clearTimeout(t)
+  }, [ready])
+
   // Fires from space: the last day (main refreshes every three hours).
   const [fireList, setFireList] = useState<FireSpot[] | null>(null)
   useEffect(() => {
