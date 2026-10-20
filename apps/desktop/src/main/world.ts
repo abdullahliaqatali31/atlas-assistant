@@ -11,6 +11,7 @@ import { EMPTY_WORLD, countryQuery, parseCountryCard, type CountryCard, isHex, i
 import { isCableId, parseCableDetail, parseCables, parseLandings, SAT_GROUPS, type CableDetail, type CablesResult } from '../shared/space.ts'
 import { CameraDirectory } from './cameras.ts'
 import { IntelFeed } from './intel.ts'
+import { ImageCache } from './images.ts'
 import { INSTRUMENTS, parseYahooChart, type Quote } from '../shared/markets.ts'
 import { parsePlaneAlert, parseRichest, RICHEST_QUERY, type RichPerson, type VipCategory, type VipFlying, type VipPlane } from '../shared/vip.ts'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
@@ -93,8 +94,10 @@ export class WorldService {
   ) {
     this.intel = new IntelFeed({ cacheDir: deps.cacheDir, log: deps.log })
     this.cams.useCache(deps.cacheDir)
+    this.images = new ImageCache(join(deps.cacheDir, 'images'))
   }
   private readonly intel: IntelFeed
+  private readonly images: ImageCache
 
   onHostEvent(e: Extract<HostEvent, { type: 'world' | 'world-result' }>) {
     if (e.type === 'world') {
@@ -515,6 +518,7 @@ export class WorldService {
     const hours = (h: unknown) => (typeof h === 'number' && Number.isFinite(h) ? h : 24)
     handle(WLD.intelEvents, h => this.intel.list(hours(h)))
     handle(WLD.markets, () => this.markets())
+    handle(WLD.image, url => this.images.get(url))
     handle(WLD.vip, () => this.vip())
     handle(WLD.richest, () => this.richest())
     handle(WLD.country, iso => this.country(iso))

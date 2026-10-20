@@ -14,6 +14,7 @@ import type { Selected } from './Inspector.tsx'
 import { cameraFeatures } from './geo.ts'
 import { VIP_CATEGORIES, VIP_LABEL, type RichPerson, type VipCategory, type VipFlying } from '../../../shared/vip.ts'
 import { MAP3D_EVENT } from './mapops.ts'
+import { initialsOf, RemoteImg } from './RemoteImg.tsx'
 
 export type DockId = 'intel' | 'cams' | 'markets' | 'vip' | 'geo'
 
@@ -608,7 +609,7 @@ function VipPanel({ ctx }: { ctx: DockContext }) {
             {rich?.map((r, i) => (
               <li key={r.name} className="flex items-center gap-2 px-1">
                 <span className="w-4 font-mono text-[10px] text-muted">{i + 1}</span>
-                {r.image ? <img src={r.image} alt="" className="size-7 shrink-0 rounded-full bg-surface object-cover" loading="lazy" /> : <span className="size-7 shrink-0 rounded-full bg-surface" />}
+                <RemoteImg src={r.image} initials={initialsOf(r.name)} className="size-7 shrink-0 rounded-full object-cover" />
                 <span className="min-w-0 flex-1">
                   <span className="flex justify-between gap-2 text-xs">
                     <span className="truncate">{r.name}</span>

@@ -10,6 +10,7 @@ import { Plane, Satellite, Ship } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import type { AircraftInfo, FlightTrack, WikiThing } from '../../../shared/world.ts'
+import { RemoteImg } from './RemoteImg.tsx'
 
 type Props = Record<string, string | number>
 
@@ -221,7 +222,7 @@ function Airframe({ hex }: { hex: string }) {
   if (!info || (!info.photo && !info.owner)) return null
   return (
     <figure className="space-y-1">
-      {info.photo && !broken && <img src={info.photo} alt={[info.manufacturer, info.type, info.registration].filter(Boolean).join(' ')} className="aspect-[3/2] w-full rounded-lg bg-surface object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} />}
+      {info.photo && !broken && <RemoteImg src={info.photo} alt={[info.manufacturer, info.type, info.registration].filter(Boolean).join(' ')} className="aspect-[3/2] w-full rounded-lg object-cover" onMissing={() => setBroken(true)} />}
       <figcaption className="flex items-baseline justify-between gap-2 text-[11px] text-muted">
         <span className="truncate">{[info.owner, info.country].filter(Boolean).join(' · ')}</span>
         {info.photo && !broken && <span className="shrink-0 text-[10px]">Photo: airport-data.com</span>}
@@ -381,7 +382,7 @@ function MiniPhoto({ hex }: { hex: string }) {
     }
   }, [hex])
   if (!src) return null
-  return <img src={src} alt="" className="h-11 w-16 shrink-0 rounded-md bg-surface object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => setSrc(null)} />
+  return <RemoteImg src={src} className="h-11 w-16 shrink-0 rounded-md object-cover" onMissing={() => setSrc(null)} />
 }
 
 /** Wikidata on a notable ship or satellite: its picture (Wikimedia Commons, credited) and who runs it. Most have none. */
@@ -405,7 +406,7 @@ export function WikiFacts({ kind, id, mini = false }: { kind: 'ship' | 'satellit
   if (mini)
     return (
       <div className="flex items-center gap-2">
-        {thing.image && !broken && <img src={thing.image} alt="" className="h-11 w-16 shrink-0 rounded-md bg-surface object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} />}
+        {thing.image && !broken && <RemoteImg src={thing.image} className="h-11 w-16 shrink-0 rounded-md object-cover" onMissing={() => setBroken(true)} />}
         <div className="min-w-0">
           <p className="truncate text-xs">{thing.label}</p>
           <p className="truncate text-[11px] text-muted">{thing.description || facts}</p>
@@ -414,7 +415,7 @@ export function WikiFacts({ kind, id, mini = false }: { kind: 'ship' | 'satellit
     )
   return (
     <figure className="space-y-1">
-      {thing.image && !broken && <img src={thing.image} alt={thing.label} className="aspect-[3/2] w-full rounded-lg bg-surface object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} />}
+      {thing.image && !broken && <RemoteImg src={thing.image} alt={thing.label} className="aspect-[3/2] w-full rounded-lg object-cover" onMissing={() => setBroken(true)} />}
       <figcaption className="space-y-0.5 text-[11px] text-muted">
         <p className="text-text">
           {thing.label}

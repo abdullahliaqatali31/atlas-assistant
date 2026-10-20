@@ -792,6 +792,7 @@ export const WLD = {
   wiki: 'world:wiki',
   intelEvents: 'world:intel-events',
   markets: 'world:markets',
+  image: 'world:image',
   vip: 'world:vip',
   richest: 'world:richest',
   country: 'world:country',
@@ -835,6 +836,8 @@ export interface WorldBridge {
   intelEvents(hours: number): Promise<IntelEvent[]>
   /** Indices, commodities, crypto, currencies and sectors, with their month (Yahoo, cached 30 min). */
   markets(): Promise<Quote[]>
+  /** A Wikimedia Commons or airport-data.com picture, fetched by main, as a data URL; null when it cannot be had. */
+  image(url: string): Promise<string | null>
   /** VIP aircraft: how many of each kind are known, and which are flying now among the aircraft Atlas sees. */
   vip(): Promise<{ total: number; counts: Partial<Record<VipCategory, number>>; flying: VipFlying[] }>
   /** The richest people (Wikidata), most first. */

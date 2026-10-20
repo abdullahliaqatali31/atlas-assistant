@@ -277,6 +277,7 @@ const world: WorldBridge = {
   wiki: (kind, id) => ipcRenderer.invoke(WLD.wiki, kind, id),
   intelEvents: hours => ipcRenderer.invoke(WLD.intelEvents, hours),
   markets: () => ipcRenderer.invoke(WLD.markets),
+  image: url => ipcRenderer.invoke(WLD.image, url),
   vip: () => ipcRenderer.invoke(WLD.vip),
   richest: () => ipcRenderer.invoke(WLD.richest),
   country: iso => ipcRenderer.invoke(WLD.country, iso),
