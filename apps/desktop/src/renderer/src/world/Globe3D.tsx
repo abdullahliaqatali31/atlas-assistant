@@ -365,6 +365,8 @@ export default function Globe3D({
             )
           }
         }
+        // City lights are coarse (NASA Black Marble): full from space, fading as the ground comes close.
+        if (nightLights.current) nightLights.current.nightAlpha = Math.min(1, Math.max(0.2, cam.height / 1_500_000))
         // Satellites near the camera become 3D models.
         const pts = parts.current
         pts?.sats.pickModels(viewer.camera.positionWC, satRideRef.current?.i ?? satPickRef.current)

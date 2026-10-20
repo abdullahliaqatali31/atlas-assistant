@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import type { HostEvent, HostRequest } from '../shared/ipc.ts'
 import { osCredentialStore } from '@assistant/runtime'
 
-import { EMPTY_WORLD, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
+import { EMPTY_WORLD, isHex, parseAdsbdbAircraft, parseOpenSkyTrack, type AircraftInfo, type FlightTrack, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
 import { isCableId, parseCableDetail, parseCables, parseLandings, SAT_GROUPS, type CableDetail, type CablesResult } from '../shared/space.ts'
 import { CameraDirectory } from './cameras.ts'
 import { AdsbFeed, FlightSweep, RouteBook } from './flights.ts'
@@ -57,6 +57,8 @@ export class WorldService {
   private satellitesAll: { at: number; list: SatelliteElements[] } | null = null
   private cablesCache: { at: number; data: CablesResult } | null = null
   private cableCards = new Map<string, CableDetail | null>()
+  private airframes = new Map<string, { at: number; info: AircraftInfo | null }>()
+  private tracks = new Map<string, { at: number; track: FlightTrack | null }>()
   private readonly cams = new CameraDirectory((level, message) => this.deps.log?.(level, message))
   readonly webcams = new WebcamService({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
   private readonly adsb = new AdsbFeed(getJson)
@@ -223,6 +225,30 @@ export class WorldService {
     }
   }
 
+  /** The airframe (adsbdb), remembered a day: aircraft do not change type or owner often. */
+  async aircraft(hex: unknown): Promise<AircraftInfo | null> {
+    if (!isHex(hex)) return null
+    const key = hex.toLowerCase()
+    const hit = this.airframes.get(key)
+    if (hit && Date.now() - hit.at < 24 * 3600_000) return hit.info
+    const info = await getJson(`https://api.adsbdb.com/v0/aircraft/${key}`).then(parseAdsbdbAircraft, () => null)
+    if (this.airframes.size > 500) this.airframes.delete(this.airframes.keys().next().value!)
+    this.airframes.set(key, { at: Date.now(), info })
+    return info
+  }
+
+  /** This flight's track (OpenSky, anonymous: a few hundred calls a day), remembered two minutes. */
+  async track(hex: unknown): Promise<FlightTrack | null> {
+    if (!isHex(hex)) return null
+    const key = hex.toLowerCase()
+    const hit = this.tracks.get(key)
+    if (hit && Date.now() - hit.at < 120_000) return hit.track
+    const track = await getJson(`https://opensky-network.org/api/tracks/all?icao24=${key}&time=0`).then(parseOpenSkyTrack, () => null)
+    if (this.tracks.size > 100) this.tracks.delete(this.tracks.keys().next().value!)
+    this.tracks.set(key, { at: Date.now(), track })
+    return track
+  }
+
   async cable(id: unknown): Promise<CableDetail | null> {
     if (!isCableId(id)) return null
     if (this.cableCards.has(id)) return this.cableCards.get(id) ?? null
@@ -339,6 +365,8 @@ export class WorldService {
     handle(WLD.flights, (lat, lon, dist, fill) => this.flights(lat, lon, typeof dist === 'number' && Number.isFinite(dist) ? dist : 250, fill === true))
     handle(WLD.flightsArea, raw => this.flightsArea(toBox(raw)))
     handle(WLD.flightRoute, callsign => (typeof callsign === 'string' ? this.routes.get(callsign) : null))
+    handle(WLD.aircraft, hex => this.aircraft(hex))
+    handle(WLD.track, hex => this.track(hex))
     handle(WLD.satellites, which => (which === 'all' ? this.satelliteListAll() : this.satelliteList()))
     handle(WLD.cables, () => this.cables())
     handle(WLD.cable, id => this.cable(id))

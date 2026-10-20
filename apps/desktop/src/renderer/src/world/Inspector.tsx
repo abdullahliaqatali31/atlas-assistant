@@ -1,11 +1,11 @@
 /** The Inspector: what was picked on the map, with what you can do about it. */
-import { Box, Crosshair, ExternalLink, Eye, LocateFixed, Sparkles, Trash2, Video, Wind, X } from 'lucide-react'
+import { Box, ChevronDown, ChevronUp, Crosshair, ExternalLink, Eye, LocateFixed, Sparkles, Trash2, Video, Wind, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { PlaceStatus, WorldSnapshot } from '../../../shared/world.ts'
 import { ago } from '../Jarvis.tsx'
 import { ASK_EVENT } from '../shell/live.ts'
-import { FlightDetail, moreLinks, RadioDetail, SatelliteDetail, ShipDetail } from './Details.tsx'
+import { FlightDetail, MiniDetail, moreLinks, RadioDetail, SatelliteDetail, ShipDetail } from './Details.tsx'
 import { hoverInfo, type NearbyItem } from './hover.ts'
 import { layerDef, type LayerId } from './layers.ts'
 import { MAP3D_EVENT } from './mapops.ts'
@@ -235,6 +235,24 @@ export function Inspector({
   onRemovePlace: (id: string) => void
 }) {
   const p = sel.props
+  // Moving things open as a compact card (remembered); "More" shows everything.
+  const [mini, setMini] = useState(() => {
+    try {
+      return localStorage.getItem('atlas.card.full') !== '1'
+    } catch {
+      return true
+    }
+  })
+  const toggleMini = () =>
+    setMini(m => {
+      try {
+        localStorage.setItem('atlas.card.full', m ? '1' : '0')
+      } catch {
+        // A private window: not remembered.
+      }
+      return !m
+    })
+  const compact = mini && (sel.kind === 'flights' || sel.kind === 'ships' || sel.kind === 'satellites')
   const { kind: kindLabel } = layerDef(sel.kind)
   const info = hoverInfo(sel.kind, p, world, now)
   const dot = info.color
@@ -261,11 +279,21 @@ export function Inspector({
             {place?.place.country ? <span className="font-normal text-muted"> · {place.place.country}</span> : null}
           </h3>
         </div>
+        {(sel.kind === 'flights' || sel.kind === 'ships' || sel.kind === 'satellites') && (
+          <button type="button" className="icon-btn size-7" onClick={toggleMini} aria-expanded={!compact} aria-label={compact ? 'Show all details' : 'Show the compact card'} title={compact ? 'More' : 'Less'}>
+            {compact ? <ChevronDown className="size-4" aria-hidden /> : <ChevronUp className="size-4" aria-hidden />}
+          </button>
+        )}
         <button type="button" className="icon-btn size-7" onClick={onClose} aria-label="Close the inspector" title="Close (Esc)">
           <X className="size-4" aria-hidden />
         </button>
       </header>
       <In3D sel={sel} title={title} />
+      {compact ? (
+        <div className="space-y-2 p-2.5 text-sm">
+          <MiniDetail kind={sel.kind} p={p} />
+        </div>
+      ) : (
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 text-sm">
         {place ? (
           <PlaceDetail s={place} now={now} />
@@ -315,17 +343,18 @@ export function Inspector({
         )}
         <p className="font-mono text-[10px] text-muted">{where}</p>
       </div>
-      <footer className="flex flex-wrap gap-1.5 border-t border-border px-3 py-2">
-        <button type="button" className="btn h-7 gap-1 px-2 text-xs" onClick={onCentre}>
-          <Crosshair className="size-3.5" aria-hidden /> Centre
+      )}
+      <footer className={`flex flex-wrap gap-1.5 border-t border-border ${compact ? 'px-2.5 py-1.5 [&_.btn]:h-6 [&_.btn]:px-1.5 [&_.lbl]:hidden' : 'px-3 py-2'}`}>
+        <button type="button" className="btn h-7 gap-1 px-2 text-xs" onClick={onCentre} title="Centre">
+          <Crosshair className="size-3.5" aria-hidden /> <span className="lbl">Centre</span>
         </button>
         {(sel.kind === 'flights' || sel.kind === 'ships' || sel.kind === 'satellites') && (
           <button type="button" className={`btn h-7 gap-1 px-2 text-xs ${following ? 'border-accent text-accent' : ''}`} onClick={onFollow} aria-pressed={following} title="Keep it in the middle of the map as it moves">
-            <LocateFixed className="size-3.5" aria-hidden /> {following ? 'Following' : 'Follow'}
+            <LocateFixed className="size-3.5" aria-hidden /> <span className="lbl">{following ? 'Following' : 'Follow'}</span>
           </button>
         )}
         <button type="button" className="btn h-7 gap-1 border-accent/60 px-2 text-xs text-accent" onClick={ask}>
-          <Sparkles className="size-3.5" aria-hidden /> Ask Atlas
+          <Sparkles className="size-3.5" aria-hidden /> <span className={compact ? '' : 'lbl'}>{compact ? 'Ask' : 'Ask Atlas'}</span>
         </button>
         {typeof p.url === 'string' && p.url.startsWith('https://') && (
           <a href={p.url} target="_blank" rel="noreferrer" className="btn h-7 gap-1 px-2 text-xs">
@@ -333,8 +362,8 @@ export function Inspector({
           </a>
         )}
         {moreLinks(sel.kind, p).map(l => (
-          <a key={l.href} href={l.href} target="_blank" rel="noreferrer" className="btn h-7 gap-1 px-2 text-xs">
-            <ExternalLink className="size-3.5" aria-hidden /> {l.label}
+          <a key={l.href} href={l.href} target="_blank" rel="noreferrer" className="btn h-7 gap-1 px-2 text-xs" title={l.label}>
+            <ExternalLink className="size-3.5" aria-hidden /> <span className="lbl">{l.label}</span>
           </a>
         ))}
         {place && (

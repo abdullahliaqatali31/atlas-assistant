@@ -9,6 +9,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Plane, Satellite, Ship } from 'lucide-react'
 import type { ReactNode } from 'react'
 
+import type { AircraftInfo, FlightTrack } from '../../../shared/world.ts'
+
 type Props = Record<string, string | number>
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -50,6 +52,7 @@ export function FlightDetail({ p }: { p: Props }) {
         badge={emergency ? `EMERGENCY · ${emergency.toUpperCase()}` : military ? 'MILITARY' : 'CIVILIAN'}
         badgeTone={emergency ? 'border-danger text-danger' : military ? 'border-red-400/60 text-red-300' : 'border-accent/50 text-accent'}
       />
+      {str(p.hex) && <Airframe hex={str(p.hex)!} />}
       {str(p.routeFrom) && str(p.routeTo) && (
         <div className="rounded-lg bg-surface px-3 py-2">
           <div className="flex items-baseline justify-between gap-2 font-mono">
@@ -71,6 +74,7 @@ export function FlightDetail({ p }: { p: Props }) {
           )}
         </div>
       )}
+      {str(p.hex) && !ground && <Profile hex={str(p.hex)!} />}
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
         <Field label="Type" wide>
           {str(p.typeName) ?? str(p.type) ?? 'Unknown'}
@@ -196,4 +200,184 @@ export function RadioDetail({ p }: { p: Props }) {
       </p>
     </div>
   )
+}
+
+/** This very airframe: its photo, who flies it and where it is registered (adsbdb; photos from airport-data.com). */
+function Airframe({ hex }: { hex: string }) {
+  const [info, setInfo] = useState<AircraftInfo | null>(null)
+  const [broken, setBroken] = useState(false)
+  useEffect(() => {
+    let gone = false
+    setInfo(null)
+    setBroken(false)
+    void window.world.aircraft(hex).then(
+      i => !gone && setInfo(i),
+      () => undefined,
+    )
+    return () => {
+      gone = true
+    }
+  }, [hex])
+  if (!info || (!info.photo && !info.owner)) return null
+  return (
+    <figure className="space-y-1">
+      {info.photo && !broken && <img src={info.photo} alt={[info.manufacturer, info.type, info.registration].filter(Boolean).join(' ')} className="aspect-[3/2] w-full rounded-lg bg-surface object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} />}
+      <figcaption className="flex items-baseline justify-between gap-2 text-[11px] text-muted">
+        <span className="truncate">{[info.owner, info.country].filter(Boolean).join(' · ')}</span>
+        {info.photo && !broken && <span className="shrink-0 text-[10px]">Photo: airport-data.com</span>}
+      </figcaption>
+    </figure>
+  )
+}
+
+/** This flight so far: its altitude over time (OpenSky), refreshed each minute while the card is open. */
+function Profile({ hex }: { hex: string }) {
+  const [track, setTrack] = useState<FlightTrack | null>(null)
+  useEffect(() => {
+    let gone = false
+    setTrack(null)
+    const load = () =>
+      void window.world.track(hex).then(
+        t => !gone && setTrack(t),
+        () => undefined,
+      )
+    load()
+    const timer = setInterval(load, 60_000)
+    return () => {
+      gone = true
+      clearInterval(timer)
+    }
+  }, [hex])
+  const pts = track?.points.filter(x => x.altM !== null) ?? []
+  if (!track || pts.length < 2) return null
+  const W = 300
+  const H = 56
+  const t0 = pts[0]!.t
+  const t1 = Math.max(pts[pts.length - 1]!.t, t0 + 60_000)
+  const peak = Math.max(...pts.map(x => x.altM!), 1000)
+  const xy = pts.map(x => [((x.t - t0) / (t1 - t0)) * W, H - 4 - (x.altM! / peak) * (H - 10)] as const)
+  const line = xy.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+  const last = xy[xy.length - 1]!
+  const mins = Math.round((Date.now() - track.start) / 60_000)
+  const since = mins >= 60 ? `${Math.floor(mins / 60)} h ${mins % 60} min` : `${mins} min`
+  return (
+    <div className="rounded-lg bg-surface px-3 py-2">
+      <p className="mb-1 flex justify-between text-[10px] uppercase tracking-wider text-muted">
+        <span>This flight · altitude</span>
+        <span>peak FL{String(Math.round((peak / 0.3048) / 100)).padStart(3, '0')}</span>
+      </p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-14 w-full" preserveAspectRatio="none" aria-label="Altitude over the flight so far">
+        <defs>
+          <linearGradient id="alt-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="var(--color-accent, #22d3ee)" stopOpacity="0.35" />
+            <stop offset="1" stopColor="var(--color-accent, #22d3ee)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={`${line} L${last[0].toFixed(1)},${H} L0,${H} Z`} fill="url(#alt-fill)" />
+        <path d={line} fill="none" stroke="var(--color-accent, #22d3ee)" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+        <circle cx={last[0]} cy={last[1]} r="3" fill="var(--color-accent, #22d3ee)" />
+      </svg>
+      <p className="mt-0.5 text-[10px] text-muted">
+        Departed {new Date(track.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {since} ago · path from OpenSky Network
+      </p>
+    </div>
+  )
+}
+
+/** One number in a compact card. */
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-md bg-surface px-2 py-1">
+      <p className="text-[9px] uppercase tracking-wider text-muted">{label}</p>
+      <p className="truncate font-mono text-xs">{value}</p>
+    </div>
+  )
+}
+
+/**
+ * The compact card for things that move: what it is, where it is going and
+ * three numbers, with a small photo for an aircraft. "More" opens the full card.
+ */
+export function MiniDetail({ kind, p }: { kind: string; p: Props }) {
+  if (kind === 'flights') {
+    const alt = num(p.altitude)
+    const vr = num(p.verticalRate) ?? 0
+    const ground = p.onGround === 1
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          {str(p.hex) && <MiniPhoto hex={str(p.hex)!} />}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs">{str(p.typeName) ?? str(p.type) ?? 'Aircraft'}</p>
+            {str(p.routeFrom) && str(p.routeTo) ? (
+              <>
+                <p className="truncate font-mono text-xs">
+                  {str(p.routeFrom)} → {str(p.routeTo)}
+                  {num(p.routeKmLeft) !== null && <span className="text-muted"> · {fmt(num(p.routeKmLeft)!)} km to go</span>}
+                </p>
+                <div className="mt-1 h-1 overflow-hidden rounded-full bg-border">
+                  <div className="h-full rounded-full bg-warm" style={{ width: `${Math.round((num(p.routeProgress) ?? 0) * 100)}%` }} />
+                </div>
+              </>
+            ) : (
+              <p className="truncate text-[11px] text-muted">{[str(p.registration), str(p.callsign)].filter(Boolean).join(' · ')}</p>
+            )}
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-1">
+          <Stat label="Alt" value={ground ? 'Ground' : alt !== null ? (alt >= 18_000 ? `FL${String(Math.round(alt / 100)).padStart(3, '0')}` : `${fmt(alt)} ft`) : '—'} />
+          <Stat label="Speed" value={num(p.speed) !== null ? `${fmt(num(p.speed)!)} kt` : '—'} />
+          <Stat label={Math.abs(vr) < 100 ? 'Level' : vr > 0 ? 'Climb' : 'Descent'} value={Math.abs(vr) < 100 ? (num(p.track) !== null ? `${fmt(num(p.track)!)}° ${compass(num(p.track)!)}` : '—') : `${fmt(Math.abs(vr))} fpm`} />
+        </div>
+      </div>
+    )
+  }
+  if (kind === 'ships')
+    return (
+      <div className="space-y-1.5">
+        <p className="truncate text-xs">
+          {str(p.category) ?? 'Vessel'}
+          {str(p.destination) && <span className="text-muted"> · to {str(p.destination)}</span>}
+        </p>
+        <div className="grid grid-cols-3 gap-1">
+          <Stat label="Speed" value={num(p.speed) !== null ? `${fmt(num(p.speed)!, 1)} kn` : '—'} />
+          <Stat label="Course" value={num(p.course) !== null ? `${fmt(num(p.course)!)}° ${compass(num(p.course)!)}` : '—'} />
+          <Stat label="Length" value={num(p.length) !== null ? `${fmt(num(p.length)!)} m` : '—'} />
+        </div>
+      </div>
+    )
+  // Satellites.
+  const period = num(p.periodMin)
+  return (
+    <div className="space-y-1.5">
+      {num(p.nextPass) !== null && (
+        <p className="truncate text-[11px] text-muted">
+          Next over {str(p.passPlace) ?? 'you'}: {new Date(num(p.nextPass)!).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+        </p>
+      )}
+      <div className="grid grid-cols-3 gap-1">
+        <Stat label="Alt" value={num(p.altKm) !== null ? `${fmt(num(p.altKm)!)} km` : '—'} />
+        <Stat label="Speed" value={num(p.speedKms) !== null ? `${fmt(num(p.speedKms)!, 2)} km/s` : '—'} />
+        <Stat label="Orbit" value={period !== null ? (period < 200 ? `${fmt(period)} min` : `${fmt(period / 60, 1)} h`) : '—'} />
+      </div>
+    </div>
+  )
+}
+
+/** The aircraft's own photo, thumbnail size, for the compact card. */
+function MiniPhoto({ hex }: { hex: string }) {
+  const [src, setSrc] = useState<string | null>(null)
+  useEffect(() => {
+    let gone = false
+    setSrc(null)
+    void window.world.aircraft(hex).then(
+      i => !gone && setSrc(i?.photoThumb ?? i?.photo ?? null),
+      () => undefined,
+    )
+    return () => {
+      gone = true
+    }
+  }, [hex])
+  if (!src) return null
+  return <img src={src} alt="" className="h-11 w-16 shrink-0 rounded-md bg-surface object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => setSrc(null)} />
 }

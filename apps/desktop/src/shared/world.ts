@@ -221,6 +221,47 @@ export interface FlightRoute {
   destination: Airport
 }
 
+/** The aircraft itself (adsbdb by ICAO hex): what it is, who flies it, and a photo of this very airframe. */
+export interface AircraftInfo {
+  type: string
+  icaoType: string
+  manufacturer: string
+  registration: string
+  owner: string
+  country: string
+  /** https only (airport-data.com, via adsbdb); null when there is none. */
+  photo: string | null
+  photoThumb: string | null
+}
+
+export const isHex = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{6}$/i.test(v)
+
+export const parseAdsbdbAircraft = (j: unknown): AircraftInfo | null => {
+  const a = (j as { response?: { aircraft?: Record<string, unknown> } })?.response?.aircraft
+  if (!a || typeof a !== 'object') return null
+  const s = (v: unknown) => (typeof v === 'string' ? v : '')
+  const https = (v: unknown) => (typeof v === 'string' && /^https:\/\/[^\s]+$/.test(v) ? v : null)
+  return { type: s(a.type), icaoType: s(a.icao_type), manufacturer: s(a.manufacturer), registration: s(a.registration), owner: s(a.registered_owner), country: s(a.registered_owner_country_name), photo: https(a.url_photo), photoThumb: https(a.url_photo_thumbnail) }
+}
+
+/** This flight's path so far (OpenSky): altitude over time, for the card's profile. */
+export interface FlightTrack {
+  callsign: string
+  start: number
+  points: { t: number; altM: number | null; ground: boolean }[]
+}
+
+/** OpenSky /tracks/all: { startTime, callsign, path: [[time, lat, lon, baroAltM, track, onGround]] }. */
+export const parseOpenSkyTrack = (j: unknown): FlightTrack | null => {
+  const r = j as { startTime?: unknown; callsign?: unknown; path?: unknown }
+  if (!r || !Array.isArray(r.path)) return null
+  const points = r.path
+    .filter((p): p is unknown[] => Array.isArray(p) && typeof p[0] === 'number')
+    .map(p => ({ t: (p[0] as number) * 1000, altM: typeof p[3] === 'number' ? p[3] : null, ground: p[5] === true }))
+  if (points.length < 2) return null
+  return { callsign: typeof r.callsign === 'string' ? r.callsign.trim() : '', start: typeof r.startTime === 'number' ? r.startTime * 1000 : points[0]!.t, points }
+}
+
 /** adsbdb's { response: { flightroute: { origin, destination, airline } } }; null when it has no route. */
 export const parseAdsbdbRoute = (j: unknown): FlightRoute | null => {
   const r = (j as { response?: { flightroute?: Record<string, unknown> } })?.response?.flightroute
@@ -613,6 +654,8 @@ export const WLD = {
   flights: 'world:flights',
   flightsArea: 'world:flights-area',
   flightRoute: 'world:flight-route',
+  aircraft: 'world:aircraft',
+  track: 'world:track',
   launches: 'world:launches',
   radio: 'world:radio',
   rain: 'world:rain',
@@ -640,6 +683,10 @@ export interface WorldBridge {
   flightsArea(box: GeoBox): Promise<FlightsArea>
   /** Where a flight flies from and to, by callsign; null when no route is known. */
   flightRoute(callsign: string): Promise<FlightRoute | null>
+  /** The airframe behind an ICAO hex: type, owner, a photo (adsbdb); null when unknown. */
+  aircraft(hex: string): Promise<AircraftInfo | null>
+  /** This flight's track so far (OpenSky, keyless, sparing): null when it has none. */
+  track(hex: string): Promise<FlightTrack | null>
   /** Space launches: the next 30 days and the last 7 (Launch Library 2, keyless). */
   launches(): Promise<Launch[]>
   /** Internet radio stations with a place (Radio Browser, keyless). */
