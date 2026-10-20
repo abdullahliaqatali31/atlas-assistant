@@ -18,12 +18,13 @@ export type WorldDataOp = { what: 'markets'; query?: string | undefined } | { wh
 import type { MapOp } from './map.ts'
 import type { SystemOp } from './system.ts'
 
-export const VIEWS = ['home', 'world', 'browser', 'alerts', 'today', 'news', 'projects', 'files', 'apps', 'learning', 'controls', 'setup'] as const
+export const VIEWS = ['home', 'world', 'habits', 'browser', 'alerts', 'today', 'news', 'projects', 'files', 'apps', 'learning', 'controls', 'setup'] as const
 export type View = (typeof VIEWS)[number]
 
 export const VIEW_LABEL: Record<View, string> = {
   home: 'Home (Atlas’s mind)',
   world: 'World',
+  habits: 'Profiles (browser profiles and habits)',
   browser: 'your own browser',
   alerts: 'Alerts (the last 24 hours)',
   today: 'Today',

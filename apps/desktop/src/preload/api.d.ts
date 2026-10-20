@@ -20,6 +20,7 @@ import type { PcBridge } from '../shared/system.ts'
 import type { BrainBridge } from '../shared/brain.ts'
 import type { PowerUpBridge } from '../shared/powerup.ts'
 import type { BrowserTabsBridge } from '../shared/browser.ts'
+import type { HabitsBridge } from '../shared/habits.ts'
 
 declare global {
   interface Window {
@@ -48,5 +49,6 @@ declare global {
     mapOps: MapOpsBridge
     world: WorldBridge
     atlasTabs: BrowserTabsBridge
+    habits: HabitsBridge
   }
 }

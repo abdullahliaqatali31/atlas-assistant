@@ -25,6 +25,7 @@ import { PCC, type PcBridge, type PcState } from '../shared/system.ts'
 import { BR, type BrainBridge, type MemoryUseWhy } from '../shared/brain.ts'
 import { PWC, type PowerUpBridge } from '../shared/powerup.ts'
 import { BRT, type BrowserTabsBridge, type BrowserTabsState } from '../shared/browser.ts'
+import { HB, type HabitsBridge, type HabitsView } from '../shared/habits.ts'
 
 const subscribe = <T>(channel: string, cb: (v: T) => void) => {
   const listener = (_e: IpcRendererEvent, v: T) => cb(v)
@@ -355,3 +356,14 @@ const atlasTabs: BrowserTabsBridge = {
   report: r => void ipcRenderer.invoke(BRT.report, r).catch(() => undefined),
 }
 contextBridge.exposeInMainWorld('atlasTabs', atlasTabs)
+
+/** The Profiles tab: browser profiles and habits (read on this PC). */
+const habits: HabitsBridge = {
+  state: () => ipcRenderer.invoke(HB.state),
+  onChanged: cb => subscribe<HabitsView>(HB.changed, cb),
+  setEnabled: on => ipcRenderer.invoke(HB.setEnabled, on),
+  setProfile: (key, change) => ipcRenderer.invoke(HB.setProfile, key, change),
+  setWorkHours: w => ipcRenderer.invoke(HB.setWorkHours, w),
+  refresh: () => ipcRenderer.invoke(HB.refresh),
+}
+contextBridge.exposeInMainWorld('habits', habits)

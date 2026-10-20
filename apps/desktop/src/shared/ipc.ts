@@ -6,6 +6,7 @@
 
 import { isLlmProvider, type LlmProviderId } from '@assistant/providers/llm-presets'
 import type { PcNotification } from './notifications.ts'
+import type { HabitsForAtlas } from './habits.ts'
 
 import type { ActivityHostEvent, ActivityHostRequest } from './activity.ts'
 import type { CodeOp, CodeProjectView, RunView } from './code.ts'
@@ -429,6 +430,8 @@ export type HostRequest =
   | { type: 'system-snapshot'; snapshot: SystemSnapshot; changes: SystemChange[] }
   /** Windows notifications main read (once the owner turned them on); fresh ones may be spoken. */
   | { type: 'notifications'; items: PcNotification[]; fresh: boolean }
+  /** Browser profiles and habits (shared profiles only), or null when off. */
+  | { type: 'habits-snapshot'; data: HabitsForAtlas | null }
   /** Answer to a window tool's request. */
   | { type: 'ui-result'; requestId: string; result?: string | undefined; error?: string | undefined }
   /** Answer to a desktop-app tool's request. */

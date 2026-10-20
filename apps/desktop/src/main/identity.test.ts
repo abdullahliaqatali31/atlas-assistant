@@ -26,7 +26,8 @@ describe('normalizeCode', () => {
   })
 })
 
-describe('IdentityGate', () => {
+// Each code check runs a deliberately slow hash; under a full parallel test run these need more than 5 s.
+describe('IdentityGate', { timeout: 30_000 }, () => {
   it('never asks before a code is set', () => {
     const { g } = gate()
     expect(g.shouldAsk(Infinity)).toBe(false)

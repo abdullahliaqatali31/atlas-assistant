@@ -61,7 +61,8 @@ export class NotificationWatcher {
     } catch {
       this.enabled = false
     }
-    if (this.enabled) this.start()
+    // After the app has finished wiring itself up (onChange may use things made after this).
+    if (this.enabled) setTimeout(() => this.start(), 0)
   }
 
   view(): NotificationsView {

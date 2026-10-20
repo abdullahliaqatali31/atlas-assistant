@@ -15,6 +15,7 @@ import {
   FolderKanban,
   FolderOpen,
   Globe2,
+  Fingerprint,
   Home as HomeIcon,
   ListTodo,
   Maximize2,
@@ -82,6 +83,9 @@ import {
 } from "./theme.ts";
 
 // Pages load the first time they open: a lighter start.
+const HabitsPage = lazy(() =>
+  import("./habits/Habits.tsx").then((m) => ({ default: m.HabitsPage })),
+);
 const WorldPage = lazy(() =>
   import("./World.tsx").then((m) => ({ default: m.WorldPage })),
 );
@@ -777,6 +781,8 @@ export function App() {
                             />
                           ) : x === "world" ? (
                             <WorldPage />
+                          ) : x === "habits" ? (
+                            <HabitsPage />
                           ) : (
                             <BrowserSlot />
                           )}
@@ -1052,6 +1058,7 @@ function TitleBar({ status, tabs }: { status: RuntimeStatus | null; tabs?: React
 const SURFACE_ICON: Record<Surface, ReactNode> = {
   home: <Brain className="size-3.5" aria-hidden />,
   world: <Globe2 className="size-3.5" aria-hidden />,
+  habits: <Fingerprint className="size-3.5" aria-hidden />,
   browser: <Compass className="size-3.5" aria-hidden />,
 };
 

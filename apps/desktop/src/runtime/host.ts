@@ -50,6 +50,7 @@ import { IMPROVEMENT_RULES, Improvements } from './improvements.ts'
 import { WORLD_RULES, WorldWatch } from './world.ts'
 import { HostNews, NEWS_RULES } from './news.ts'
 import { HostNotifications, NOTIFICATION_RULES } from './notifications.ts'
+import { HABITS_RULES, HostHabits } from './habits.ts'
 import { HostControls } from './controls.ts'
 import { InitiativeService, parseQuietHours } from './initiative.ts'
 import { once, runPersonalityOp, sttPin } from './personality.ts'
@@ -112,6 +113,7 @@ const applyChatModel = () => {
 const ui = new HostUi({ post: e => post(e), geocode: name => (world ? world.geocode(name) : Promise.reject(new Error('The assistant is not ready yet.'))) })
 const system = new HostSystem({ request: (op, signal) => ui.ask({ kind: 'system', op }, signal), now: () => Date.now(), fullControl: () => controls.fullControl })
 const news = new HostNews()
+const habits = new HostHabits()
 const notifications = new HostNotifications({
   now: () => Date.now(),
   raise: event => initiative?.raise(event),
@@ -122,7 +124,7 @@ const controls = new HostControls({
   log: (level, message) => log(level, message),
   now: () => systemClock.now(),
   extensionToken: () => store.get('PLAYWRIGHT_MCP_EXTENSION_TOKEN'),
-  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...SYSTEM_RULES, ...IMPROVEMENT_RULES, ...WORLD_RULES, ...NOTIFICATION_RULES, ...CONVERSATION_RULES],
+  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...SYSTEM_RULES, ...IMPROVEMENT_RULES, ...WORLD_RULES, ...NOTIFICATION_RULES, ...HABITS_RULES, ...CONVERSATION_RULES],
 })
 let voice: VoiceProvider | null = null
 let speechEnabled = true
@@ -265,6 +267,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
     llm: meterLlm(createLlm(config.llm, 'background'), { purpose: 'background', memory, clock: systemClock, utcOffsetMin: config.owner.utcOffsetMin, onRecord: () => schedulePush() }),
     memory,
     file: `${config.dataDir}/todays-find.json`,
+    interests: () => habits.interests(),
     utcOffsetMin: config.owner.utcOffsetMin,
     now: () => systemClock.now(),
     log: (level, message) => log(level, message),
@@ -285,7 +288,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
     summarize: llmSummarizer(meterLlm(createLlm(config.llm, 'background'), { purpose: 'background', memory, clock: systemClock, utcOffsetMin: offset, onRecord: () => schedulePush() })),
     memory,
     // What Atlas learned and taught tasks, plus one line on its own window.
-    learning: { observeOwner: text => learning?.observeOwner(text), contextLines: () => [...(learning?.contextLines() ?? []), ...ui.contextLines(), ...system.contextLines(), ...notifications.contextLines()] },
+    learning: { observeOwner: text => learning?.observeOwner(text), contextLines: () => [...(learning?.contextLines() ?? []), ...ui.contextLines(), ...system.contextLines(), ...notifications.contextLines(), ...habits.contextLines()] },
     clock: systemClock,
     owner: config.owner,
     prefs: { ...DEFAULT_PREFS, utcOffsetMin: config.owner.utcOffsetMin, quietHours: parseQuietHours(merged.ASSISTANT_QUIET_HOURS) },
@@ -303,7 +306,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   // Answers to its own questions (project status, learning suggestions) go through these.
   // The model chip's pick may have arrived before the assistant existed.
   applyChatModel()
-  void controls.attach(assistant, [...localTools(memory, systemClock), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...system.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now()), notifications.tool(), findTool()], config.mcpConfigPath)
+  void controls.attach(assistant, [...localTools(memory, systemClock), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...system.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now()), notifications.tool(), habits.tool(), findTool()], config.mcpConfigPath)
   const agendaMemory = memory
   const wrapUpMinute = parseClock(merged.ASSISTANT_WRAP_UP) ?? 18 * 60
   initiative = new InitiativeService(
@@ -328,6 +331,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
           ...code.agenda(now),
           ...improvements.agenda(now),
           ...watch.agenda(now),
+          ...habits.agenda(now),
         ].sort((a, b) => b.priority - a.priority)
       },
     },
@@ -679,6 +683,9 @@ port.on('message', ({ data }: { data: HostRequest }) => {
       break
     case 'notifications':
       notifications.add(data.items, data.fresh)
+      break
+    case 'habits-snapshot':
+      habits.set(data.data)
       break
     case 'world-op': {
       const { requestId, op } = data

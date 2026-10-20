@@ -8,10 +8,10 @@
  */
 
 /** What a pane of the window can show. */
-export const SURFACES = ['home', 'world', 'browser'] as const
+export const SURFACES = ['home', 'world', 'habits', 'browser'] as const
 export type Surface = (typeof SURFACES)[number]
 
-export const SURFACE_LABEL: Record<Surface, string> = { home: 'Brain', world: 'World', browser: 'Browser' }
+export const SURFACE_LABEL: Record<Surface, string> = { home: 'Brain', world: 'World', habits: 'Profiles', browser: 'Browser' }
 
 /** One pane, or two side by side (ratio is the first pane's share of the width). */
 export interface StageLayout {

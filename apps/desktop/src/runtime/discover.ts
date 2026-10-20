@@ -75,6 +75,8 @@ export class DailyFinder {
       now: () => number
       log: (level: 'info' | 'warn', message: string) => void
       fetch?: typeof fetch
+      /** Topic words from what the owner watched and searched this week. */
+      interests?: () => string[]
     },
   ) {}
 
@@ -111,7 +113,9 @@ export class DailyFinder {
       .memories(['preference', 'fact'], 60)
       .map(x => `- ${x.statement}`)
       .join('\n')
-    const prompt = [`What you know about the owner:\n${about || '(little yet: pick what most people would find fascinating)'}`, 'Today’s items:', list.map((c, i) => `${i + 1}. ${c.title}: ${c.text}`).join('\n')].join('\n\n')
+    // Plain topic words only (letters and digits), so a video title cannot carry instructions in.
+    const lately = (this.deps.interests?.() ?? []).map(w => w.replace(/[^\p{L}\p{N} +#-]/gu, '').slice(0, 30)).filter(Boolean).slice(0, 10)
+    const prompt = [`What you know about the owner:\n${about || '(little yet: pick what most people would find fascinating)'}${lately.length ? `\nWhat they watched and searched this week is about: ${lately.join(', ')}` : ''}`, 'Today’s items:', list.map((c, i) => `${i + 1}. ${c.title}: ${c.text}`).join('\n')].join('\n\n')
     let text = ''
     for await (const e of this.deps.llm.stream({ system: SYSTEM, turns: [{ role: 'user', content: prompt }], maxTokens: 500, effort: 'low' })) if (e.type === 'text') text += e.text
     const pick = parsePick(text)

@@ -43,6 +43,8 @@ import { registerLearningIpc } from './learning.ts'
 import { registerBrainIpc } from './brain.ts'
 import { BrowserService } from './browser.ts'
 import { NotificationWatcher } from './system/notifications.ts'
+import { HabitsService } from './system/habits.ts'
+import { forAtlas, HB, parseWorkHours, ROLE_LABEL, type ProfileRole } from '../shared/habits.ts'
 import type { BrowserMode } from '../shared/browser.ts'
 import { NewsService, newsSchemePrivileges } from './news.ts'
 import { modelSchemePrivileges, WakeService } from './wake.ts'
@@ -807,6 +809,33 @@ handle(PCC.setNotifications, on => {
   pcNotifications.setEnabled(on)
   return pcState()
 })
+/** The Profiles tab: browser profiles and habits, read on this PC once the owner turns it on. */
+const habitsService = new HabitsService({
+  file: join(app.getPath('userData'), 'habits.json'),
+  cacheDir: join(app.getPath('userData'), 'habits-cache'),
+  onChange: v => {
+    toRenderer(HB.changed, v)
+    supervisor.habits(forAtlas(v))
+  },
+  log: (level, message) => log(level, message),
+})
+handle(HB.state, () => habitsService.state())
+handle(HB.setEnabled, on => {
+  if (typeof on !== 'boolean') throw new Error('On or off.')
+  return habitsService.setEnabled(on)
+})
+handle(HB.setProfile, (key, change) => {
+  if (typeof key !== 'string' || key.length > 200) throw new Error('Which profile?')
+  const c = (change ?? {}) as { role?: unknown; shared?: unknown }
+  const role = c.role === null ? null : typeof c.role === 'string' && c.role in ROLE_LABEL ? (c.role as ProfileRole) : undefined
+  return habitsService.setProfile(key, { role, shared: typeof c.shared === 'boolean' ? c.shared : undefined })
+})
+handle(HB.setWorkHours, w => {
+  const hours = parseWorkHours(w)
+  if (!hours) throw new Error('Working hours need a start, an end and at least one day.')
+  return habitsService.setWorkHours(hours)
+})
+handle(HB.refresh, () => habitsService.refresh())
 handle(PCC.rebuild, () => {
   if (sysmap.enabled) void sysmap.build()
   void pcSystem.refresh()
