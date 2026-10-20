@@ -274,7 +274,7 @@ export default function Globe3D({
       document.addEventListener('visibilitychange', onVisible)
       cleanups.push(() => document.removeEventListener('visibilitychange', onVisible))
       // A handle for driving the view from the debugger, on the dev server only.
-      if (location.protocol === 'http:') (window as unknown as { __globe3d?: unknown }).__globe3d = { viewer, Cesium, parts: () => parts.current, ships: () => shipsRef.current, flights: () => flights.current.list, ride: { ship: (mmsi: number, mode: ShipRide['mode']) => setShipRide({ mmsi, mode }), flight: (hex: string, mode: Follow['mode']) => setFollow({ hex, mode }), sat: (i: number, mode: SatRide['mode']) => setSatRide({ i, mode }), stop: () => (setShipRide(null), setFollow(null), setSatRide(null)) }, look: lookRef }
+      if (location.protocol === 'http:') (window as unknown as { __globe3d?: unknown }).__globe3d = { viewer, Cesium, parts: () => parts.current, ships: () => shipsRef.current, flights: () => flights.current.list, ride: { ship: (mmsi: number, mode: ShipRide['mode']) => setShipRide({ mmsi, mode }), flight: (hex: string, mode: Follow['mode']) => setFollow({ hex, mode }), sat: (i: number, mode: SatRide['mode']) => setSatRide({ i, mode }), stop: () => (setShipRide(null), setFollow(null), setSatRide(null)) }, pickShip: (mmsi: number) => setShipPick(mmsi), look: lookRef }
       const scene = viewer.scene
       // No night side: the user looks at their own night too, and a black globe reads as broken.
       scene.globe.enableLighting = false
@@ -412,7 +412,7 @@ export default function Globe3D({
           const f = deadReckon(raw, raw.seen + dt)
           Cesium.Cartesian3.fromDegrees(f.lon, f.lat, altM(f), Cesium.Ellipsoid.WGS84, scratch)
           if (!b) {
-            b = bills.add({ position: scratch, image: planeImg, color: colorFor(colorOf(f)), alignedAxis: Cesium.Cartesian3.UNIT_Z, scaleByDistance: new Cesium.NearFarScalar(3e4, 0.8, 1.2e7, 0.14), id: { kind: 'flight', hex: f.hex } })
+            b = bills.add({ position: scratch, image: planeImg, width: 22, height: 22, color: colorFor(colorOf(f)), alignedAxis: Cesium.Cartesian3.UNIT_Z, scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 3e6, 0.35), id: { kind: 'flight', hex: f.hex } })
             byHex.set(f.hex, b)
           } else b.position = scratch
           b.rotation = -Cesium.Math.toRadians(f.track)
@@ -699,7 +699,7 @@ export default function Globe3D({
           if (ride.mode === 'eye') {
             unframe()
             viewer.camera.setView({ destination: pos, orientation: { heading: Cesium.Math.toRadians(w.heading) + look.yaw, pitch: Cesium.Math.clamp(-Cesium.Math.PI_OVER_TWO + look.pitch, -Cesium.Math.PI_OVER_TWO, 0.35), roll: 0 } })
-          } else viewer.camera.lookAtTransform(Transforms.eastNorthUpToFixedFrame(pos, Cesium.Ellipsoid.WGS84, enu))
+          } else orbitRide(`sat:${ride.i}`, pos, Cesium.Math.toRadians(w.heading), 160_000, 70_000)
           return
         }
         // Riding a ship: around it, or from its bridge.
@@ -972,9 +972,32 @@ export default function Globe3D({
     return window.news.onChanged(show)
   }, [widget])
 
+  // A ship or satellite picked on the flat map (See it in 3D) is picked here too, with its ride options.
+  useEffect(() => {
+    if (!selectedId) return
+    if (selectedId.startsWith('s:')) {
+      const mmsi = Number(selectedId.slice(2))
+      if (Number.isFinite(mmsi)) setShipPick(mmsi)
+    } else if (selectedId.startsWith('sat:')) {
+      const norad = selectedId.slice(4)
+      const find = () => {
+        const i = parts.current?.sats.list.findIndex(x => x.norad === norad) ?? -1
+        if (i >= 0) setSatPick(i)
+        return i >= 0
+      }
+      if (!find()) {
+        // The satellites may still be loading.
+        const t = setInterval(() => find() && clearInterval(t), 1000)
+        const stop = setTimeout(() => clearInterval(t), 20_000)
+        return () => (clearInterval(t), clearTimeout(stop))
+      }
+    }
+  }, [selectedId, widget])
+
   // The card closed (or moved to something else): drop the 3D picks that belonged to it.
   useEffect(() => {
     if (selectedId) return
+    setShipPick(null)
     setPicked(null)
     setCamPick(null)
     setRadioPick(null)
@@ -1057,7 +1080,6 @@ export default function Globe3D({
     cam.lookAtTransform(Cesium.Matrix4.IDENTITY)
     const sat = satRide ? pt.sats.list[satRide.i] : undefined
     const w = sat ? pt.sats.where(sat) : null
-    if (satRide?.mode === 'follow' && w) cam.lookAt(Cesium.Cartesian3.fromDegrees(w.lon, w.lat, w.altM), new Cesium.HeadingPitchRange(0, -0.6, w.altM > 2_000_000 ? 4_000_000 : 900_000))
     widget.scene.requestRender()
   }, [widget, satRide])
 
@@ -1585,10 +1607,10 @@ export default function Globe3D({
           )}
           <div className="flex gap-1.5">
             <button type="button" onClick={() => setSatRide(r => (r?.mode === 'follow' ? null : { i: sat.i, mode: 'follow' }))} aria-pressed={satRide?.mode === 'follow'} className={`flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs ${satRide?.mode === 'follow' ? 'bg-accent/90 text-accent-fg' : 'border border-accent/50 text-accent hover:bg-accent/10'}`}>
-              <Crosshair className="size-3.5" aria-hidden /> {satRide?.mode === 'follow' ? 'Following' : 'Follow'}
+              <Orbit className="size-3.5" aria-hidden /> {satRide?.mode === 'follow' ? 'Orbiting it' : 'Orbit 360°'}
             </button>
             <button type="button" onClick={() => setSatRide(r => (r?.mode === 'eye' ? null : { i: sat.i, mode: 'eye' }))} aria-pressed={satRide?.mode === 'eye'} className={`flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs ${satRide?.mode === 'eye' ? 'bg-accent/90 text-accent-fg' : 'border border-accent/50 text-accent hover:bg-accent/10'}`}>
-              <Eye className="size-3.5" aria-hidden /> Satellite’s eye
+              <Eye className="size-3.5" aria-hidden /> Cockpit (its eye)
             </button>
           </div>
           <p className="flex items-center gap-1 text-[10px] text-white/45">
@@ -1745,17 +1767,47 @@ export default function Globe3D({
         </p>
       )}
 
-      {/* A picked ship: ride with it. */}
-      {shipPick !== null && !shipRide && !follow && !satRide && shipsRef.current.get(shipPick) && (
-        <div className="absolute bottom-24 left-1/2 flex -translate-x-1/2 items-center gap-2">
-          <button type="button" onClick={() => setShipRide({ mmsi: shipPick, mode: 'orbit' })} className={`flex items-center gap-1.5 rounded-full px-3 py-2 text-xs ${panel}`}>
-            <Orbit className="size-3.5 text-accent" aria-hidden /> Ride around it (360°)
-          </button>
-          <button type="button" onClick={() => setShipRide({ mmsi: shipPick, mode: 'bridge' })} className={`flex items-center gap-1.5 rounded-full px-3 py-2 text-xs ${panel}`}>
-            <Eye className="size-3.5 text-accent" aria-hidden /> Bridge view
-          </button>
-        </div>
-      )}
+      {/* A picked ship: its card, and ride with it (around it, or from its bridge). */}
+      {shipPick !== null &&
+        !shipRide &&
+        !follow &&
+        !satRide &&
+        (() => {
+          const sh = shipsRef.current.get(shipPick)
+          return (
+            <div className={`absolute bottom-24 left-3 z-10 w-72 max-w-[calc(100%-1.5rem)] space-y-2 p-3 ${panel}`}>
+              <div className="flex items-start gap-2">
+                <ShipIcon className="mt-0.5 size-4 text-emerald-400" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{sh ? sh.name || `MMSI ${sh.mmsi}` : `MMSI ${shipPick}`}</p>
+                  <p className="text-[11px] capitalize text-white/60">{sh ? [sh.category, sh.length ? `${Math.round(sh.length)} m` : ''].filter(Boolean).join(' · ') : 'Finding it in this view…'}</p>
+                </div>
+                <button type="button" onClick={() => setShipPick(null)} className="text-white/60 hover:text-white" aria-label="Close">
+                  <X className="size-4" aria-hidden />
+                </button>
+              </div>
+              {sh && (
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+                  <dt className="text-white/50">Speed</dt>
+                  <dd className="font-mono">{sh.speed > 60 ? '—' : `${sh.speed.toFixed(1)} kn`}</dd>
+                  <dt className="text-white/50">Course</dt>
+                  <dd className="font-mono">{Math.round(sh.heading ?? sh.course)}° {compass(sh.heading ?? sh.course)}</dd>
+                  <dt className="text-white/50">Bound for</dt>
+                  <dd className="truncate">{sh.destination || '—'}</dd>
+                </dl>
+              )}
+              <div className="flex gap-1.5">
+                <button type="button" disabled={!sh} onClick={() => setShipRide({ mmsi: shipPick, mode: 'orbit' })} className="flex flex-1 items-center justify-center gap-1 rounded-full border border-accent/50 px-2 py-1.5 text-xs text-accent hover:bg-accent/10 disabled:opacity-40">
+                  <Orbit className="size-3.5" aria-hidden /> Orbit 360°
+                </button>
+                <button type="button" disabled={!sh} onClick={() => setShipRide({ mmsi: shipPick, mode: 'bridge' })} className="flex flex-1 items-center justify-center gap-1 rounded-full border border-accent/50 px-2 py-1.5 text-xs text-accent hover:bg-accent/10 disabled:opacity-40">
+                  <Eye className="size-3.5" aria-hidden /> Bridge (cockpit)
+                </button>
+              </div>
+              <p className="text-[10px] text-white/45">{sh ? 'Orbit: drag to go round it. Bridge: drag to look around.' : 'Ships come in for the area on screen; fly closer if it does not appear.'}</p>
+            </div>
+          )
+        })()}
 
       {/* Riding a ship: the bridge display. */}
       {shipRide &&
