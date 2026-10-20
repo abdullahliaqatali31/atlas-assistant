@@ -46,6 +46,8 @@ import { Satellites3D } from './sats3d.ts'
 import { Traffic3D } from './traffic3d.ts'
 import { IncidentCard, TrafficPill, type TrafficStatus } from './TrafficLayer2D.tsx'
 import type { TrafficIncident } from '../../../shared/traffic.ts'
+import { AtlasLoader, Atmos } from './Atmos.tsx'
+import { MAP_VIEW_EVENT } from '../../../shared/map.ts'
 import { latLonLabel } from './sky.ts'
 
 ;(window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = './cesium/'
@@ -160,6 +162,7 @@ export default function Globe3D({
   const flights = useRef<{ list: Flight[]; at: number; byHex: Map<string, Flight> }>({ list: [], at: 0, byHex: new Map() })
   const followRef = useRef<Follow | null>(null)
   const [tier, setTier] = useState<Tier | null>(null)
+  const [load3d, setLoad3d] = useState(0.3)
   const [error, setError] = useState('')
   const [picked, setPicked] = useState<Flight | null>(null)
   const [follow, setFollow] = useState<Follow | null>(null)
@@ -220,6 +223,30 @@ export default function Globe3D({
       // Cesium stops drawing after an error: say so in Atlas's own words.
       viewer.scene.renderError.addEventListener((_scene: unknown, e: unknown) => setError(`The 3D view stopped drawing (${e instanceof Error ? e.message.slice(0, 80) : 'error'}). Go back to 2D and open 3D again.`))
       viewerRef.current = viewer
+      setLoad3d(0.45)
+      // The loader follows the ground's tiles until the first view is in.
+      {
+        let most = 0
+        const offTiles = viewer.scene.globe.tileLoadProgressEvent.addEventListener((queued: number) => {
+          most = Math.max(most, queued)
+          if (most > 0) setLoad3d(queued === 0 ? 1 : 0.45 + 0.55 * (1 - queued / most))
+        })
+        cleanups.push(offTiles)
+        const safety = setTimeout(() => setLoad3d(1), 15_000)
+        cleanups.push(() => clearTimeout(safety))
+        // Where the camera looks, for the mini globe in the corner widget.
+        const cam = viewer.camera
+        let last = 0
+        const tell = () => {
+          if (Date.now() - last < 150) return
+          last = Date.now()
+          const c = cam.positionCartographic
+          window.dispatchEvent(new CustomEvent(MAP_VIEW_EVENT, { detail: { lat: Cesium.Math.toDegrees(c.latitude), lon: Cesium.Math.toDegrees(c.longitude), zoom: Math.log2(40_075_016 / Math.max(50, c.height)) } }))
+        }
+        cam.percentageChanged = 0.01
+        cleanups.push(cam.changed.addEventListener(tell))
+        tell()
+      }
       // Nothing is drawn while the window is hidden or minimised.
       const onVisible = () => {
         if (viewer && !viewer.isDestroyed()) viewer.useDefaultRenderLoop = !document.hidden
@@ -1231,6 +1258,8 @@ export default function Globe3D({
       {incHover && <IncidentCard i={incHover.i} style={{ left: Math.max(8, incHover.x - 140), top: incHover.y + 14 }} />}
       <div ref={box} className="absolute inset-0" style={{ filter: display ? MODE_FILTER[display.mode] : undefined }} />
       {display && <DisplayFx mode={display.mode} scope={display.scope} />}
+      <Atmos dim={!!follow || !!satRide} />
+      <AtlasLoader progress={load3d} label="Opening the 3D world" />
       {display?.hud && hudSource && !follow && <TacticalHud map={hudSource} mode={display.mode} counts={{ flights: counts.flights, ships: counts.ships, satellites: counts.sats, cameras: counts.cameras }} />}
       {hover && world && box.current && <HoverOverlay itemKey={hover.key} info={hoverInfo(hover.sel.kind, hover.sel.props, world, clock ?? Date.now())} p={{ x: hover.x, y: hover.y }} w={box.current.clientWidth} h={box.current.clientHeight} />}
       <div ref={credits} className="hidden" />

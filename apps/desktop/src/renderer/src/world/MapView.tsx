@@ -57,6 +57,8 @@ class Guard3D extends Component<{ onClose: () => void; children: ReactNode }, { 
   }
 }
 import { BASE_URL, carryOverlays, composeStyle, creditLine, STYLES, type CreditPart, type StyleId } from './styles.ts'
+import { MAP_VIEW_EVENT } from '../../../shared/map.ts'
+import { AtlasLoader, Atmos } from './Atmos.tsx'
 
 export interface MapPrefs {
   style: StyleId
@@ -121,6 +123,8 @@ export function MapView({
   const box = useRef<HTMLDivElement>(null)
   const map = useRef<MapLibre | null>(null)
   const [ready, setReady] = useState(false)
+  /** The loader's progress: the style, then the first full draw. */
+  const [loadPct, setLoadPct] = useState(0.1)
   const [styleError, setStyleError] = useState('')
   const fitted = useRef(false)
   const [layers, setLayers] = useState(readLayers)
@@ -268,6 +272,20 @@ export function MapView({
         m.on('mouseleave', layer, () => (m.getCanvas().style.cursor = ''))
       }
       setReady(true)
+      setLoadPct(0.6)
+      let viewT = 0
+      const tellView = () => {
+        if (viewT) return
+        viewT = window.setTimeout(() => {
+          viewT = 0
+          const c = m.getCenter()
+          window.dispatchEvent(new CustomEvent(MAP_VIEW_EVENT, { detail: { lat: c.lat, lon: c.lng, zoom: m.getZoom() } }))
+        }, 150)
+      }
+      m.on('move', tellView)
+      tellView()
+      m.once('idle', () => setLoadPct(1))
+      setTimeout(() => setLoadPct(1), 8000)
       // The stage may still be settling its size when the map starts (lazy page, opening drawer): measure again.
       m.resize()
       setTimeout(() => m.resize(), 300)
@@ -1252,6 +1270,8 @@ export function MapView({
       {traffic && trafficStatus && !threeD && <TrafficPill s={trafficStatus} />}
       <div ref={box} className="h-full w-full" aria-label="World map" role="region" style={{ filter: MODE_FILTER[display.mode], transition: isLite() ? 'none' : 'filter 500ms ease-in-out' }} />
       <DisplayFx mode={display.mode} scope={display.scope} />
+      {!threeD && <Atmos />}
+      <AtlasLoader progress={loadPct} label="Waking the world" />
       {display.hud && ready && <TacticalHud map={map.current} mode={display.mode} counts={counts} />}
       <HoverCard map={map.current} ready={ready} world={world} now={now} />
       {ready && map.current && (
@@ -1312,7 +1332,7 @@ export function MapView({
       {note3d && <p className="glass absolute left-1/2 top-14 z-40 max-w-md -translate-x-1/2 rounded-lg bg-solid/90 px-3 py-1.5 text-xs text-warm">{note3d}</p>}
       {threeD && (
         <Guard3D onClose={() => setThreeD(null)}>
-        <Suspense fallback={<div className="absolute inset-0 z-30 grid place-items-center bg-black/80 text-xs text-muted">Loading the 3D world…</div>}>
+        <Suspense fallback={<AtlasLoader progress={0.15} label="Opening the 3D world" />}>
           <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} world={world} now={now} display={display} displayButton={<>{displayButton}{dockButtons}</>} intel={intelOnMap ? intel?.events : undefined} traffic={traffic ? trafficKey : null} onTrafficStatus={setTrafficStatus} fires={layers.fires ? (fireList ?? undefined) : undefined} />
         </Suspense>
         </Guard3D>

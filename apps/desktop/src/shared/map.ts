@@ -225,3 +225,6 @@ export const mapOpFromTool = (tool: string, input: Record<string, unknown>): Map
   }
   throw new Error(`Unknown map tool ${tool}.`)
 }
+
+/** The World map (flat or 3D) says where it looks: detail { lat, lon, zoom }, for the corner widget's mini globe. */
+export const MAP_VIEW_EVENT = 'atlas:map-view'

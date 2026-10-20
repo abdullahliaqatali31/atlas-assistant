@@ -1,7 +1,7 @@
 import type { Map as MapLibre } from 'maplibre-gl'
 import { useEffect, useState } from 'react'
 
-import { dms, groundResolution, metres, MODE_LABEL, sunElevation, type DisplayMode } from './hud.ts'
+import { groundResolution, metres, MODE_LABEL, sunElevation, type DisplayMode } from './hud.ts'
 import type { LayerId } from './layers.ts'
 
 const isLite = () => document.documentElement.dataset.lite === 'true'
@@ -51,8 +51,9 @@ export function DisplayFx({ mode, scope }: { mode: DisplayMode; scope: boolean }
 const LABEL: Partial<Record<LayerId, string>> = { flights: 'FLT', ships: 'SHIP', satellites: 'SAT', quakes: 'QK', events: 'EVT', disasters: 'ALRT', cameras: 'CAM', launches: 'LNCH', radio: 'RADIO' }
 
 /**
- * The tactical HUD: corner brackets, a header line, REC and the UTC clock,
- * the centre in degrees, ground resolution, sun elevation, and live counts.
+ * The tactical HUD: a turning reticle and one strip under the toolbar with
+ * live time, mode and zoom, then (as room allows) the counts, ground
+ * resolution and sun. No frames: it reflows with the pane.
  * All real numbers from the map; repainted on move and once a second.
  */
 /** Where the HUD reads the view from: the flat map, or the 3D view through a small adapter. */
@@ -89,44 +90,47 @@ export function TacticalHud({ map, mode, counts }: { map: HudSource | MapLibre |
   const now = new Date()
   const sun = sunElevation(c.lat, c.lng, now)
   const gsd = groundResolution(c.lat, z)
-  const corner = 'absolute size-6 border-accent/70'
-  const mono = 'font-mono text-[10px] uppercase tracking-[0.14em] text-accent/90 [text-shadow:0_0_6px_rgba(0,0,0,0.9)]'
   const stats = Object.entries(LABEL)
     .filter(([k]) => typeof counts[k as LayerId] === 'number')
-    .map(([k, v]) => `${v} ${counts[k as LayerId]}`)
+    .map(([k, v]) => [v, counts[k as LayerId]!] as const)
+  const chip = 'flex items-center gap-2 rounded-full border border-accent/25 bg-slate-950/55 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-accent/90 shadow-[0_0_18px_rgba(0,0,0,0.35)] backdrop-blur-sm'
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[2]" aria-hidden>
-      <span className={`${corner} left-3 top-[6rem] border-l-2 border-t-2`} />
-      <span className={`${corner} right-14 top-[6rem] border-r-2 border-t-2`} />
-      <span className={`${corner} bottom-[4.75rem] left-3 border-b-2 border-l-2`} />
-      <span className={`${corner} bottom-[4.75rem] right-14 border-b-2 border-r-2`} />
-      {/* Crosshair at the centre. */}
-      <span className="absolute left-1/2 top-1/2 h-5 w-px -translate-x-1/2 -translate-y-1/2 bg-accent/60" />
-      <span className="absolute left-1/2 top-1/2 h-px w-5 -translate-x-1/2 -translate-y-1/2 bg-accent/60" />
-      <span className="absolute left-1/2 top-1/2 size-12 -translate-x-1/2 -translate-y-1/2 rounded-full border border-accent/25" />
-      <div className={`absolute left-6 top-[6.75rem] space-y-0.5 ${mono}`}>
-        <p>ATLAS // WORLD // LIVE</p>
-        <p className="text-accent/60">{MODE_LABEL[mode]} · Z{z.toFixed(1)}</p>
-      </div>
-      <div className={`absolute right-16 top-[6.75rem] space-y-0.5 text-right ${mono}`}>
-        <p>
-          <span className={blink ? 'text-red-500' : 'text-red-500/30'}>●</span> REC {now.toISOString().slice(0, 10)} {now.toISOString().slice(11, 19)}Z
-        </p>
-        {stats.length > 0 && <p className="text-accent/60">{stats.join(' · ')}</p>}
-      </div>
-      <div className={`absolute bottom-[5.5rem] left-6 space-y-0.5 ${mono}`}>
-        <p>{dms(c.lat, c.lng)}</p>
-        <p className="text-accent/60">
-          {c.lat.toFixed(4)}, {c.lng.toFixed(4)}
-        </p>
-      </div>
-      <div className={`absolute bottom-[5.5rem] right-16 space-y-0.5 text-right ${mono}`}>
-        <p>GSD {metres(gsd)}/PX</p>
-        <p className="text-accent/60">
-          SUN {sun >= 0 ? '+' : ''}
-          {sun.toFixed(1)}° {sun < -6 ? 'NIGHT' : sun < 0 ? 'TWILIGHT' : 'DAY'}
-        </p>
+      {/* The reticle: a still cross inside a slowly turning ring. */}
+      <span className="absolute left-1/2 top-1/2 h-4 w-px -translate-x-1/2 -translate-y-1/2 bg-accent/60" />
+      <span className="absolute left-1/2 top-1/2 h-px w-4 -translate-x-1/2 -translate-y-1/2 bg-accent/60" />
+      <span className="absolute left-1/2 top-1/2 -ml-7 -mt-7 size-14">
+        <span className="hud-reticle block size-full rounded-full border border-dashed border-accent/35" />
+      </span>
+      {/* One strip under the toolbar: live, the time, the mode and zoom; counts, resolution and sun when there is room. */}
+      <div className="absolute inset-x-0 top-[6.4rem] hidden justify-center px-3 @min-[640px]:flex @min-[1200px]:top-[3.6rem]">
+        <div className={chip}>
+          <span className={blink ? 'text-red-500' : 'text-red-500/30'}>●</span>
+          <span>Live {now.toISOString().slice(11, 19)}Z</span>
+          <span className="text-accent/50">·</span>
+          <span className="text-accent/70">
+            {MODE_LABEL[mode]} Z{z.toFixed(1)}
+          </span>
+          {stats.length > 0 && (
+            <span className="hidden gap-2 @min-[1000px]:flex">
+              <span className="text-accent/50">·</span>
+              {stats.map(([k, v]) => (
+                <span key={k}>
+                  <span className="text-accent/55">{k}</span> {v!.toLocaleString()}
+                </span>
+              ))}
+            </span>
+          )}
+          <span className="hidden gap-2 @min-[1300px]:flex">
+            <span className="text-accent/50">·</span>
+            <span>GSD {metres(gsd)}</span>
+            <span className="text-accent/70">
+              Sun {sun >= 0 ? '+' : ''}
+              {sun.toFixed(0)}° {sun < -6 ? 'night' : sun < 0 ? 'dusk' : 'day'}
+            </span>
+          </span>
+        </div>
       </div>
     </div>
   )

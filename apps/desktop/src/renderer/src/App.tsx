@@ -782,7 +782,7 @@ export function App() {
                         </Suspense>
                       </div>
                       {x === "world" && (
-                        <div className="pointer-events-none absolute bottom-3 left-3 z-10 hidden @[960px]:block">
+                        <div className="pointer-events-none absolute bottom-3 left-3 z-[35] hidden @[720px]:block">
                           <CornerWidget
                             state={
                               controls?.paused
