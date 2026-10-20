@@ -7,6 +7,8 @@
 
 import type { CableDetail, CablesResult } from './space.ts'
 import type { AlertRegion, countryStats, IntelEvent } from './intel.ts'
+import type { Quote } from './markets.ts'
+import type { RichPerson, VipCategory, VipFlying } from './vip.ts'
 
 export interface Place {
   id: string
@@ -283,6 +285,34 @@ export const parseWikiThing = (j: unknown): WikiThing | null => {
     since: v(first, 'launch').slice(0, 10),
     wikidata: /^http:\/\/www\.wikidata\.org\/entity\/Q\d+$/.test(item) ? item.replace('http://', 'https://') : '',
   }
+}
+
+/** A country's card (Wikidata, by ISO code): capital, people, size, money, languages and who leads it. */
+export interface CountryCard {
+  iso: string
+  name: string
+  description: string
+  capital: string
+  population: number | null
+  areaKm2: number | null
+  currency: string
+  languages: string
+  headOfState: string
+  headOfGovernment: string
+}
+
+export const countryQuery = (iso: string) => `SELECT ?countryLabel ?countryDescription ?capitalLabel ?population ?area ?currencyLabel ?langLabel ?hosLabel ?hogLabel WHERE { ?country wdt:P297 "${iso}" . OPTIONAL { ?country wdt:P36 ?capital } OPTIONAL { ?country wdt:P1082 ?population } OPTIONAL { ?country wdt:P2046 ?area } OPTIONAL { ?country wdt:P38 ?currency } OPTIONAL { ?country wdt:P37 ?lang } OPTIONAL { ?country p:P35 ?s1 . ?s1 ps:P35 ?hos . FILTER NOT EXISTS { ?s1 pq:P582 ?e1 } } OPTIONAL { ?country p:P6 ?s2 . ?s2 ps:P6 ?hog . FILTER NOT EXISTS { ?s2 pq:P582 ?e2 } } SERVICE wikibase:label { bd:serviceParam wikibase:language "en". } } LIMIT 60`
+
+export const parseCountryCard = (iso: string, j: unknown): CountryCard | null => {
+  const rows = (j as { results?: { bindings?: Record<string, { value?: string }>[] } })?.results?.bindings
+  if (!Array.isArray(rows) || !rows.length) return null
+  const v = (r: Record<string, { value?: string }>, k: string) => (typeof r[k]?.value === 'string' ? r[k]!.value! : '')
+  const uniq = (k: string, max = 4) => [...new Set(rows.map(r => v(r, k)).filter(x => x && !/^Q\d+$/.test(x)))].slice(0, max).join(', ')
+  const most = (k: string) => {
+    const nums = rows.map(r => Number(v(r, k))).filter(n => Number.isFinite(n) && n > 0)
+    return nums.length ? Math.max(...nums) : null
+  }
+  return { iso, name: v(rows[0]!, 'countryLabel'), description: v(rows[0]!, 'countryDescription'), capital: uniq('capitalLabel', 2), population: most('population'), areaKm2: most('area'), currency: uniq('currencyLabel', 2), languages: uniq('langLabel', 4), headOfState: uniq('hosLabel', 2), headOfGovernment: uniq('hogLabel', 2) }
 }
 
 /** This flight's path so far (OpenSky): altitude over time, for the card's profile. */
@@ -698,6 +728,10 @@ export const WLD = {
   aircraft: 'world:aircraft',
   wiki: 'world:wiki',
   intelEvents: 'world:intel-events',
+  markets: 'world:markets',
+  vip: 'world:vip',
+  richest: 'world:richest',
+  country: 'world:country',
   intelStats: 'world:intel-stats',
   intelCountries: 'world:intel-countries',
   intelAlerts: 'world:intel-alerts',
@@ -736,6 +770,14 @@ export interface WorldBridge {
   wiki(kind: 'ship' | 'satellite', id: string): Promise<WikiThing | null>
   /** Conflict events of the last hours (GDELT, filtered and categorised), newest first. */
   intelEvents(hours: number): Promise<IntelEvent[]>
+  /** Indices, commodities, crypto, currencies and sectors, with their month (Yahoo, cached 30 min). */
+  markets(): Promise<Quote[]>
+  /** VIP aircraft: how many of each kind are known, and which are flying now among the aircraft Atlas sees. */
+  vip(): Promise<{ total: number; counts: Partial<Record<VipCategory, number>>; flying: VipFlying[] }>
+  /** The richest people (Wikidata), most first. */
+  richest(): Promise<RichPerson[]>
+  /** A country's card by ISO code (Wikidata), null when unknown. */
+  country(iso: string): Promise<CountryCard | null>
   /** Events per country, most first. */
   intelStats(hours: number): Promise<ReturnType<typeof countryStats>>
   /** Country shapes (Natural Earth 110m) with iso and name, for highlighting. */

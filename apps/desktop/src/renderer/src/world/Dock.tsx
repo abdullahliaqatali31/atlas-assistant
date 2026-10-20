@@ -8,6 +8,10 @@ import { Briefcase, Globe2, Search, Shield, Star, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { CATEGORY_COLOR, CATEGORY_LABEL, INTEL_CATEGORIES, type AlertRegion, type IntelCategory, type IntelEvent } from '../../../shared/intel.ts'
+import { GROUP_LABEL, MARKET_GROUPS, sparkPath, type MarketGroup, type Quote } from '../../../shared/markets.ts'
+import type { CountryCard } from '../../../shared/world.ts'
+import { VIP_CATEGORIES, VIP_LABEL, type RichPerson, type VipCategory, type VipFlying } from '../../../shared/vip.ts'
+import { MAP3D_EVENT } from './mapops.ts'
 
 export type DockId = 'intel' | 'markets' | 'vip' | 'geo'
 
@@ -29,6 +33,8 @@ export interface DockContext {
   setIntelOnMap: (on: boolean) => void
   /** Events and alerts as the panel loaded them, shared with the map layers. */
   onIntel: (events: IntelEvent[], alerts: AlertRegion[]) => void
+  /** The events loaded so far (for Geography's activity), if the Intelligence panel has run. */
+  intelEvents: IntelEvent[] | null
 }
 
 export function DockButtons({ open, onOpen, badge }: { open: DockId | null; onOpen: (id: DockId | null) => void; badge?: Partial<Record<DockId, string>> }) {
@@ -264,7 +270,353 @@ export function DockPanel({ which, onClose, ctx, children }: { which: DockId; on
           <X className="size-4" aria-hidden />
         </button>
       </header>
-      {which === 'intel' ? <IntelPanel ctx={ctx} /> : children}
+      {which === 'intel' ? <IntelPanel ctx={ctx} /> : which === 'markets' ? <MarketsPanel /> : which === 'geo' ? <GeoPanel ctx={ctx} /> : which === 'vip' ? <VipPanel ctx={ctx} /> : children}
     </section>
+  )
+}
+
+const flag = (cc: string, w = 40) => `https://flagcdn.com/w${w}/${cc.toLowerCase()}.png`
+const fmtPrice = (q: Quote) => {
+  const v = q.price
+  const s = v >= 1000 ? v.toLocaleString(undefined, { maximumFractionDigits: 0 }) : v >= 10 ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : v.toLocaleString(undefined, { maximumFractionDigits: 4 })
+  return q.currency === 'USD' && q.group !== 'indices' && q.group !== 'currencies' ? `$${s}` : s
+}
+
+/** World trade: indices, commodities, crypto, currencies and sectors, each with its month. */
+function MarketsPanel() {
+  const [quotes, setQuotes] = useState<Quote[] | null>(null)
+  const [group, setGroup] = useState<MarketGroup | null>(null)
+  const [query, setQuery] = useState('')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let gone = false
+    const load = () =>
+      void window.world.markets().then(
+        q => !gone && (setQuotes(q), setError(q.length ? '' : 'Market data is unavailable right now.')),
+        () => !gone && setError('Market data is unavailable right now.'),
+      )
+    load()
+    const t = setInterval(load, 10 * 60_000)
+    return () => {
+      gone = true
+      clearInterval(t)
+    }
+  }, [])
+  const q = query.trim().toLowerCase()
+  const shown = (quotes ?? []).filter(x => (!group || x.group === group) && (!q || `${x.name} ${x.symbol} ${GROUP_LABEL[x.group]}`.toLowerCase().includes(q)))
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2 p-2.5">
+      <label className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5">
+        <Search className="size-3.5 text-muted" aria-hidden />
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Company, index, commodity, currency" className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted" />
+      </label>
+      <div className="flex flex-wrap gap-1 text-[10px]">
+        {MARKET_GROUPS.map(g => (
+          <button key={g} type="button" onClick={() => setGroup(x => (x === g ? null : g))} aria-pressed={group === g} className={`rounded-full border px-2 py-0.5 ${group === g ? 'border-accent text-accent' : 'border-border text-muted hover:text-text'}`}>
+            {GROUP_LABEL[g]}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {error && <p className="px-1 text-xs text-warm">{error}</p>}
+        {!quotes && !error && <p className="px-1 text-xs text-muted">Loading today and the last month…</p>}
+        {MARKET_GROUPS.filter(g => shown.some(x => x.group === g)).map(g => {
+          const items = shown.filter(x => x.group === g)
+          const up = items.filter(x => x.changePct >= 0).length
+          return (
+            <section key={g} className="mb-2">
+              <p className="hud-label flex justify-between px-1 pb-1">
+                <span>{GROUP_LABEL[g]}</span>
+                <span>
+                  <span className="text-emerald-400">▲ {up}</span> · <span className="text-red-400">▼ {items.length - up}</span>
+                </span>
+              </p>
+              <ul className="space-y-0.5">
+                {items.map(x => {
+                  const rising = (x.closes.at(-1) ?? 0) >= (x.closes[0] ?? 0)
+                  return (
+                    <li key={x.symbol}>
+                      <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(x.symbol)}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-surface">
+                        {x.cc ? <img src={flag(x.cc)} alt="" className="h-4 w-6 shrink-0 rounded-sm object-cover" loading="lazy" /> : <span className="grid h-4 w-6 shrink-0 place-items-center rounded-sm bg-surface font-mono text-[8px] text-muted">{x.symbol.slice(0, 3)}</span>}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-medium">{x.name}</span>
+                          <span className="block truncate font-mono text-[9px] text-muted">{x.symbol}</span>
+                        </span>
+                        <svg viewBox="0 0 60 18" className="h-[18px] w-[60px] shrink-0" aria-hidden>
+                          <path d={sparkPath(x.closes, 60, 18)} fill="none" stroke={rising ? '#34d399' : '#f87171'} strokeWidth="1.2" />
+                        </svg>
+                        <span className="w-20 shrink-0 text-right">
+                          <span className="block font-mono text-xs">{fmtPrice(x)}</span>
+                          <span className={`block font-mono text-[10px] ${x.changePct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {x.changePct >= 0 ? '▲' : '▼'}
+                            {Math.abs(x.changePct).toFixed(2)} %
+                          </span>
+                        </span>
+                      </a>
+                    </li>
+                  )
+                })}
+              </ul>
+            </section>
+          )
+        })}
+      </div>
+      <p className="text-[10px] text-muted">Today and the last month, from Yahoo Finance (delayed, for information only).</p>
+    </div>
+  )
+}
+
+interface CountryRow {
+  iso: string
+  name: string
+  continent: string
+  lat: number
+  lon: number
+}
+
+const CONTINENTS = ['Europe', 'Asia', 'Africa', 'North America', 'South America', 'Oceania'] as const
+
+/** Geography: every country, the busiest first, and each country's card. */
+function GeoPanel({ ctx }: { ctx: DockContext }) {
+  const [rows, setRows] = useState<CountryRow[]>([])
+  const [query, setQuery] = useState('')
+  const [continent, setContinent] = useState<string | null>(null)
+  const [pick, setPick] = useState<CountryRow | null>(null)
+  const [card, setCard] = useState<CountryCard | null | 'loading'>(null)
+  useEffect(() => {
+    void window.world.intelCountries().then(
+      fc => setRows(fc.features.map(f => f.properties as unknown as CountryRow).filter(r => r.iso && r.name).sort((a, b) => a.name.localeCompare(b.name))),
+      () => undefined,
+    )
+  }, [])
+  useEffect(() => {
+    if (!pick) return
+    let gone = false
+    setCard('loading')
+    void window.world.country(pick.iso).then(
+      c => !gone && setCard(c),
+      () => !gone && setCard(null),
+    )
+    return () => {
+      gone = true
+    }
+  }, [pick])
+  const activity = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const e of ctx.intelEvents ?? []) if (e.country) m.set(e.country, (m.get(e.country) ?? 0) + 1)
+    return m
+  }, [ctx.intelEvents])
+  const q = query.trim().toLowerCase()
+  const shown = rows.filter(r => (!continent || r.continent === continent) && (!q || r.name.toLowerCase().includes(q) || r.iso.toLowerCase() === q)).sort((a, b) => (activity.get(b.iso) ?? 0) - (activity.get(a.iso) ?? 0) || a.name.localeCompare(b.name))
+  const top = Math.max(1, ...activity.values())
+
+  if (pick) {
+    const c = card === 'loading' ? null : card
+    const events = (ctx.intelEvents ?? []).filter(e => e.country === pick.iso).slice(0, 8)
+    const fmt = (n: number | null) => (n === null ? '—' : n.toLocaleString())
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2.5">
+        <button type="button" onClick={() => setPick(null)} className="self-start text-[11px] text-accent hover:underline">
+          ← All countries
+        </button>
+        <div className="flex items-center gap-3">
+          <img src={flag(pick.iso, 80)} alt="" className="h-10 w-16 rounded object-cover shadow" />
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold">{c?.name || pick.name}</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted">
+              {pick.continent} · {pick.iso}
+            </p>
+          </div>
+        </div>
+        {c?.description && <p className="text-xs text-muted">{c.description}</p>}
+        {card === 'loading' && <p className="text-xs text-muted">Reading its card…</p>}
+        {c && (
+          <dl className="divide-y divide-border text-xs">
+            {[
+              ['Capital', c.capital],
+              ['Population', fmt(c.population)],
+              ['Area', c.areaKm2 === null ? '—' : `${Math.round(c.areaKm2).toLocaleString()} km²`],
+              ['Currency', c.currency],
+              ['Languages', c.languages],
+              ['Head of state', c.headOfState],
+              ['Head of government', c.headOfGovernment],
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-3 py-1.5">
+                <dt className="text-muted">{k}</dt>
+                <dd className="text-right">{v || '—'}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {card === null && <p className="text-xs text-muted">No card for this country right now.</p>}
+        <button type="button" onClick={() => ctx.flyTo(pick.lat, pick.lon, 4)} className="rounded-lg border border-accent/50 px-3 py-1.5 text-xs text-accent hover:bg-accent/10">
+          Center on map
+        </button>
+        {events.length > 0 && (
+          <>
+            <p className="hud-label pt-1">Latest events here</p>
+            <ul className="space-y-1">
+              {events.map(e => (
+                <li key={e.url}>
+                  <button type="button" onClick={() => ctx.flyTo(e.lat, e.lon, 7)} className="flex w-full gap-2 rounded-md px-1 py-1 text-left text-xs hover:bg-surface">
+                    <span className="mt-1 size-2 shrink-0 rounded-full" style={{ background: CATEGORY_COLOR[e.category] }} />
+                    <span className="min-w-0 flex-1">
+                      {e.title}
+                      <span className="block text-[10px] text-muted">
+                        {e.place} · {ago(e.at)} · S{e.severity}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <p className="text-[10px] text-muted">Facts: Wikidata (CC0); flags: flagcdn.com.</p>
+      </div>
+    )
+  }
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2 p-2.5">
+      <label className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5">
+        <Search className="size-3.5 text-muted" aria-hidden />
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Country or code" className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted" />
+      </label>
+      <div className="flex flex-wrap gap-1 text-[10px]">
+        {CONTINENTS.map(c => (
+          <button key={c} type="button" onClick={() => setContinent(x => (x === c ? null : c))} aria-pressed={continent === c} className={`rounded-full border px-2 py-0.5 ${continent === c ? 'border-accent text-accent' : 'border-border text-muted hover:text-text'}`}>
+            {c}
+          </button>
+        ))}
+      </div>
+      {!ctx.intelEvents && <p className="px-1 text-[10px] text-muted">Open Intelligence once to rank countries by what is happening there.</p>}
+      <ul className="min-h-0 flex-1 overflow-y-auto">
+        {shown.map(r => {
+          const n = activity.get(r.iso) ?? 0
+          return (
+            <li key={r.iso}>
+              <button type="button" onClick={() => setPick(r)} className="w-full rounded-md px-1 py-1 text-left hover:bg-surface">
+                <span className="flex items-center gap-2 text-xs">
+                  <img src={flag(r.iso)} alt="" className="h-3.5 w-5 shrink-0 rounded-sm object-cover" loading="lazy" />
+                  <span className="flex-1 truncate">{r.name}</span>
+                  {n > 0 && <span className="font-mono text-[11px]">{n}</span>}
+                </span>
+                {n > 0 && (
+                  <span className="mt-0.5 block h-0.5 overflow-hidden rounded-full bg-border">
+                    <span className="block h-full bg-amber-400" style={{ width: `${(n / top) * 100}%` }} />
+                  </span>
+                )}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+/** VIP people: who of the known VIP aircraft is flying now, and the richest. */
+function VipPanel({ ctx }: { ctx: DockContext }) {
+  const [tab, setTab] = useState<'now' | 'richest'>('now')
+  const [data, setData] = useState<{ total: number; counts: Partial<Record<VipCategory, number>>; flying: VipFlying[] } | null>(null)
+  const [rich, setRich] = useState<RichPerson[] | null>(null)
+  const [cat, setCat] = useState<VipCategory | null>(null)
+  const [query, setQuery] = useState('')
+  useEffect(() => {
+    let gone = false
+    const load = () =>
+      void window.world.vip().then(
+        d => !gone && setData(d),
+        () => undefined,
+      )
+    load()
+    const t = setInterval(load, 60_000)
+    return () => {
+      gone = true
+      clearInterval(t)
+    }
+  }, [])
+  useEffect(() => {
+    if (tab !== 'richest' || rich) return
+    void window.world.richest().then(setRich, () => setRich([]))
+  }, [tab, rich])
+  const q = query.trim().toLowerCase()
+  const flying = (data?.flying ?? []).filter(f => (!cat || f.category === cat) && (!q || `${f.who} ${f.operator} ${f.registration} ${f.type}`.toLowerCase().includes(q)))
+  const ride = (f: VipFlying) => window.dispatchEvent(new CustomEvent(MAP3D_EVENT, { detail: { kind: '3d', action: 'fly_with', query: f.hex, lat: f.lat, lon: f.lon, mode: 'chase', show: [], hide: [] } }))
+  const topWorth = rich?.[0]?.worth ?? 1
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2 p-2.5">
+      <Tabs value={tab} onChange={setTab} items={[['now', 'Now'], ['richest', 'The richest']]} />
+      {tab === 'now' ? (
+        <>
+          <label className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5">
+            <Search className="size-3.5 text-muted" aria-hidden />
+            <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Person, company or country" className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted" />
+          </label>
+          <div className="flex flex-wrap gap-1 text-[10px]">
+            {VIP_CATEGORIES.map(c => (
+              <button key={c} type="button" onClick={() => setCat(x => (x === c ? null : c))} aria-pressed={cat === c} className={`rounded-full border px-2 py-0.5 ${cat === c ? 'border-accent text-accent' : 'border-border text-muted hover:text-text'}`}>
+                {VIP_LABEL[c]}
+                {data?.counts[c] ? <span className="ml-1 font-mono text-muted">{data.counts[c]}</span> : null}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <div className="rounded-lg border border-border px-2 py-1.5">
+              <p className="font-mono text-lg">{data ? data.flying.length : '…'}</p>
+              <p className="text-[10px] text-muted">flying now, among the aircraft Atlas sees</p>
+            </div>
+            <div className="rounded-lg border border-border px-2 py-1.5">
+              <p className="font-mono text-lg">{data ? data.total.toLocaleString() : '…'}</p>
+              <p className="text-[10px] text-muted">VIP aircraft known</p>
+            </div>
+          </div>
+          <p className="hud-label px-1">Flying now</p>
+          <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
+            {flying.map(f => (
+              <li key={f.hex} className="rounded-md px-1 py-1 hover:bg-surface">
+                <button type="button" onClick={() => ctx.flyTo(f.lat, f.lon, 8)} className="flex w-full items-center gap-2 text-left">
+                  <Star className="size-3.5 shrink-0 text-yellow-300" aria-hidden />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium">{f.who}</span>
+                    <span className="block truncate text-[10px] text-muted">
+                      {VIP_LABEL[f.category]} · {f.registration} · {f.type}
+                    </span>
+                  </span>
+                  <span className="shrink-0 rounded border border-emerald-400/60 px-1 font-mono text-[9px] text-emerald-300">{f.altitude ? `FL${String(Math.round(f.altitude / 100)).padStart(3, '0')}` : 'LIVE'}</span>
+                </button>
+                <button type="button" onClick={() => ride(f)} className="ml-5 mt-0.5 text-[10px] text-accent hover:underline">
+                  Fly with it in 3D
+                </button>
+              </li>
+            ))}
+            {data && !flying.length && <li className="px-1 py-2 text-xs text-muted">None in the air among the aircraft loaded. Zoom the map out to the world: Atlas sweeps every area and the list fills in.</li>}
+          </ul>
+          <p className="text-[10px] text-muted">Aircraft list: plane-alert-db (sdr-enthusiasts, ODbL). Positions: live ADS-B.</p>
+        </>
+      ) : (
+        <>
+          <ol className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
+            {!rich && <li className="px-1 text-xs text-muted">Reading Wikidata…</li>}
+            {rich?.map((r, i) => (
+              <li key={r.name} className="flex items-center gap-2 px-1">
+                <span className="w-4 font-mono text-[10px] text-muted">{i + 1}</span>
+                {r.image ? <img src={r.image} alt="" className="size-7 shrink-0 rounded-full bg-surface object-cover" loading="lazy" /> : <span className="size-7 shrink-0 rounded-full bg-surface" />}
+                <span className="min-w-0 flex-1">
+                  <span className="flex justify-between gap-2 text-xs">
+                    <span className="truncate">{r.name}</span>
+                    <span className="font-mono text-yellow-300">${(r.worth / 1e9).toFixed(1)} B</span>
+                  </span>
+                  <span className="mt-0.5 block h-1 overflow-hidden rounded-full bg-border">
+                    <span className="block h-full bg-yellow-400" style={{ width: `${(r.worth / topWorth) * 100}%` }} />
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ol>
+          <p className="text-[10px] text-muted">Net worth in US dollars as Wikidata records it (dates vary); photos Wikimedia Commons.</p>
+        </>
+      )}
+    </div>
   )
 }

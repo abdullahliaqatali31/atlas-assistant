@@ -136,6 +136,14 @@ export class FlightSweep {
     }
   }
 
+  /** Every aircraft the sweep holds that is still fresh (for "VIP flying now"). */
+  everything(maxAgeMs = 10 * 60_000): Flight[] {
+    const now = Date.now()
+    const out = new Map<string, Flight>()
+    for (const c of this.cells.values()) if (now - c.at < maxAgeMs) for (const f of c.flights) out.set(f.hex, f)
+    return [...out.values()]
+  }
+
   stop() {
     if (this.timer) clearInterval(this.timer)
     this.timer = null

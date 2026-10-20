@@ -1107,6 +1107,7 @@ export function MapView({
     intelOnMap,
     setIntelOnMap,
     onIntel: (events, alerts) => setIntel({ events, alerts }),
+    intelEvents: intel?.events ?? null,
   }
   const dockButtons = <DockButtons open={dock} onOpen={setDock} badge={intel ? { intel: String(intel.events.length) } : undefined} />
   const displayButton = (

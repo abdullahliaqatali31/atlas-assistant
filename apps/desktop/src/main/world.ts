@@ -7,10 +7,14 @@ import { randomUUID } from 'node:crypto'
 import type { HostEvent, HostRequest } from '../shared/ipc.ts'
 import { osCredentialStore } from '@assistant/runtime'
 
-import { EMPTY_WORLD, isHex, isWikiId, parseWikiThing, wikiQuery, type WikiThing, parseAdsbdbAircraft, parseOpenSkyTrack, type AircraftInfo, type FlightTrack, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
+import { EMPTY_WORLD, countryQuery, parseCountryCard, type CountryCard, isHex, isWikiId, parseWikiThing, wikiQuery, type WikiThing, parseAdsbdbAircraft, parseOpenSkyTrack, type AircraftInfo, type FlightTrack, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
 import { isCableId, parseCableDetail, parseCables, parseLandings, SAT_GROUPS, type CableDetail, type CablesResult } from '../shared/space.ts'
 import { CameraDirectory } from './cameras.ts'
 import { IntelFeed } from './intel.ts'
+import { INSTRUMENTS, parseYahooChart, type Quote } from '../shared/markets.ts'
+import { parsePlaneAlert, parseRichest, RICHEST_QUERY, type RichPerson, type VipCategory, type VipFlying, type VipPlane } from '../shared/vip.ts'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { AdsbFeed, FlightSweep, RouteBook } from './flights.ts'
 import { ShipFeed } from './ships.ts'
 import { WebcamService } from './webcams.ts'
@@ -63,6 +67,12 @@ export class WorldService {
   private wikiCache = new Map<string, { at: number; thing: WikiThing | null }>()
   private wikiQueue: Promise<unknown> = Promise.resolve()
   private wikiPausedUntil = 0
+  private quotes: { at: number; list: Quote[] } | null = null
+  private quoting: Promise<Quote[]> | null = null
+  private countryCards = new Map<string, { at: number; card: CountryCard | null }>()
+  private vipDb: { at: number; planes: Map<string, VipPlane> } | null = null
+  private vipLoading: Promise<Map<string, VipPlane>> | null = null
+  private rich: { at: number; list: RichPerson[] } | null = null
   private readonly cams = new CameraDirectory((level, message) => this.deps.log?.(level, message))
   readonly webcams = new WebcamService({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
   private readonly adsb = new AdsbFeed(getJson)
@@ -286,6 +296,103 @@ export class WorldService {
     return thing
   }
 
+  /** One Wikidata query through the gentle queue (one at a time, 1.5 s apart, paused after a refusal). */
+  private sparql(query: string): Promise<unknown> {
+    if (Date.now() < this.wikiPausedUntil) return Promise.resolve(null)
+    const run = this.wikiQueue.then(async () => {
+      await new Promise(r => setTimeout(r, 1500))
+      const res = await fetch(`https://query.wikidata.org/sparql?query=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(25_000), headers: { 'user-agent': 'Atlas personal assistant (open source desktop app)', accept: 'application/sparql-results+json' } })
+      if (res.status === 429 || res.status === 403) {
+        this.wikiPausedUntil = Date.now() + 10 * 60_000
+        return null
+      }
+      return res.ok ? res.json() : null
+    })
+    this.wikiQueue = run.catch(() => null)
+    return run.catch(() => null)
+  }
+
+  /** plane-alert-db (ODbL): fetched once a day, kept on disk between runs. */
+  private async vipPlanes(): Promise<Map<string, VipPlane>> {
+    if (this.vipDb && Date.now() - this.vipDb.at < 24 * 3600_000) return this.vipDb.planes
+    this.vipLoading ??= (async () => {
+      const file = join(this.deps.cacheDir, 'plane-alert-db.csv')
+      let csv = ''
+      try {
+        const st = await stat(file)
+        if (Date.now() - st.mtimeMs < 24 * 3600_000) csv = await readFile(file, 'utf8')
+      } catch {
+        // Not cached yet.
+      }
+      if (!csv) {
+        const res = await fetch('https://raw.githubusercontent.com/sdr-enthusiasts/plane-alert-db/main/plane-alert-db.csv', { signal: AbortSignal.timeout(60_000), headers: { 'user-agent': 'Atlas personal assistant (open source)' } })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        csv = await res.text()
+        await mkdir(this.deps.cacheDir, { recursive: true }).catch(() => undefined)
+        await writeFile(file, csv).catch(() => undefined)
+      }
+      const planes = parsePlaneAlert(csv)
+      this.vipDb = { at: Date.now(), planes }
+      return planes
+    })().finally(() => {
+      this.vipLoading = null
+    })
+    return this.vipLoading
+  }
+
+  /** VIP aircraft known, and those among the aircraft Atlas holds right now (the sweep, nearby areas, military). */
+  async vip() {
+    const planes = await this.vipPlanes().catch(() => new Map<string, VipPlane>())
+    const counts: Partial<Record<VipCategory, number>> = {}
+    for (const p of planes.values()) counts[p.category] = (counts[p.category] ?? 0) + 1
+    const seen = new Map<string, Flight>()
+    for (const f of this.sweep.everything()) seen.set(f.hex, f)
+    for (const c of this.flightCache.values()) if (Date.now() - c.at < 10 * 60_000) for (const f of c.flights) seen.set(f.hex, f)
+    for (const f of this.militaryCache?.flights ?? []) seen.set(f.hex, f)
+    const flying: VipFlying[] = []
+    for (const f of seen.values()) {
+      const p = planes.get(f.hex.toLowerCase())
+      if (p) flying.push({ ...p, callsign: f.callsign, lat: f.lat, lon: f.lon, altitude: f.altitude, speed: f.speed })
+    }
+    return { total: planes.size, counts, flying }
+  }
+
+  /** The richest people from Wikidata, remembered a day. */
+  async richest(): Promise<RichPerson[]> {
+    if (this.rich && Date.now() - this.rich.at < 24 * 3600_000) return this.rich.list
+    const list = parseRichest(await this.sparql(RICHEST_QUERY))
+    if (list.length) this.rich = { at: Date.now(), list }
+    return list.length ? list : (this.rich?.list ?? [])
+  }
+
+  /** A country's card, remembered a week. */
+  async country(iso: unknown): Promise<CountryCard | null> {
+    if (typeof iso !== 'string' || !/^[A-Z]{2}$/.test(iso)) return null
+    const hit = this.countryCards.get(iso)
+    if (hit && Date.now() - hit.at < 7 * 86_400_000) return hit.card
+    const card = parseCountryCard(iso, await this.sparql(countryQuery(iso)))
+    if (card) this.countryCards.set(iso, { at: Date.now(), card })
+    return card
+  }
+
+  /** Every instrument's month from Yahoo, a quarter-second apart; the last list for half an hour. */
+  async markets(): Promise<Quote[]> {
+    if (this.quotes && Date.now() - this.quotes.at < 30 * 60_000) return this.quotes.list
+    this.quoting ??= (async () => {
+      const list: Quote[] = []
+      for (const ins of INSTRUMENTS) {
+        const q = await getJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ins.symbol)}?range=1mo&interval=1d`).then(j => parseYahooChart(j, ins), () => null)
+        if (q) list.push(q)
+        await new Promise(r => setTimeout(r, 250))
+      }
+      if (list.length) this.quotes = { at: Date.now(), list }
+      return list.length ? list : (this.quotes?.list ?? [])
+    })().finally(() => {
+      this.quoting = null
+    })
+    return this.quoting
+  }
+
   async cable(id: unknown): Promise<CableDetail | null> {
     if (!isCableId(id)) return null
     if (this.cableCards.has(id)) return this.cableCards.get(id) ?? null
@@ -406,6 +513,10 @@ export class WorldService {
     handle(WLD.wiki, (kind, id) => this.wiki(kind, id))
     const hours = (h: unknown) => (typeof h === 'number' && Number.isFinite(h) ? h : 24)
     handle(WLD.intelEvents, h => this.intel.list(hours(h)))
+    handle(WLD.markets, () => this.markets())
+    handle(WLD.vip, () => this.vip())
+    handle(WLD.richest, () => this.richest())
+    handle(WLD.country, iso => this.country(iso))
     handle(WLD.intelStats, h => this.intel.stats(hours(h)))
     handle(WLD.intelCountries, async () => (await this.intel.countryShapes()).shapes)
     handle(WLD.intelAlerts, () => this.intel.ukraineAlerts())

@@ -77,9 +77,9 @@ export class IntelFeed {
   /** Country shapes with ISO code and name (and the FIPS map GDELT needs). */
   async countryShapes() {
     if (this.countries) return this.countries
-    const shapes = await this.shapes('ne_110m_countries.json', COUNTRIES_URL, p => {
+    const shapes = await this.shapes('ne_110m_countries_v2.json', COUNTRIES_URL, p => {
       const iso = [p.ISO_A2_EH, p.ISO_A2].find(v => typeof v === 'string' && /^[A-Z]{2}$/.test(v)) ?? ''
-      return { iso, name: String(p.NAME ?? ''), fips: String(p.FIPS_10 ?? '') }
+      return { iso, name: String(p.NAME ?? ''), fips: String(p.FIPS_10 ?? ''), continent: String(p.CONTINENT ?? ''), lat: Number(p.LABEL_Y ?? 0), lon: Number(p.LABEL_X ?? 0) }
     })
     const fips = new Map<string, { iso: string; name: string }>()
     for (const f of shapes.features) {
