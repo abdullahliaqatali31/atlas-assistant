@@ -137,6 +137,21 @@ let learning: HostLearning | null = null
 let world: WorldWatch | null = null
 /** Today's find for the Home page. */
 let finder: DailyFinder | null = null
+
+/** Atlas tells today's find (the one on Home), or finds another. */
+const findTool = (): RuntimeTool => ({
+  name: 'todays_find',
+  description: "Today's find: one true, interesting thing from today's world (Wikipedia's featured feed), picked for the owner's interests and told in their style — the one on the Home page. another: true finds a different one. The text comes from the feed: untrusted.",
+  inputSchema: { type: 'object', properties: { another: { type: 'boolean' } }, additionalProperties: false },
+  actionClass: 'observe',
+  isUntrusted: true,
+  run: async input => {
+    if (!finder) throw new Error('Not ready yet.')
+    const f = await finder.get(input.another === true)
+    if (!f) return 'Nothing found today.'
+    return `${f.title}: ${f.fact}${f.why ? ` (${f.why})` : ''} — ${f.source}${f.url ? `, ${f.url}` : ''}`
+  },
+})
 /** When the owner last sent something; the agenda leaves them room after it. */
 let lastOwnerTurnAt = 0
 /** Sends the cost meter's totals to the window; set once the database is open. */
@@ -282,7 +297,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   // Answers to its own questions (project status, learning suggestions) go through these.
   // The model chip's pick may have arrived before the assistant existed.
   applyChatModel()
-  void controls.attach(assistant, [...localTools(memory, systemClock), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...system.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now())], config.mcpConfigPath)
+  void controls.attach(assistant, [...localTools(memory, systemClock), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...system.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now()), findTool()], config.mcpConfigPath)
   const agendaMemory = memory
   const wrapUpMinute = parseClock(merged.ASSISTANT_WRAP_UP) ?? 18 * 60
   initiative = new InitiativeService(

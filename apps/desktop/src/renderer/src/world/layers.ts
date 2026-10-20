@@ -319,15 +319,7 @@ export const LAYERS: LayerDef[] = [
           'icon-size': ['interpolate', ['linear'], ['zoom'], 2, ['case', ['<', ['get', 'rank'], 2], 0.26, 0.15], 6, ['case', ['<', ['get', 'rank'], 2], 0.45, 0.33], 10, ['case', ['<', ['get', 'rank'], 2], 0.6, 0.48], 14, ['case', ['<', ['get', 'rank'], 2], 0.72, 0.6]], 'icon-rotate': ['get', 'track'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'symbol-sort-key': ['get', 'rank'] },
         paint: { 'icon-color': ['get', 'color'], 'icon-halo-color': HALO, 'icon-halo-width': 1 },
       },
-      {
-        id: 'flight-labels',
-        type: 'symbol',
-        source: 'flights',
-        minzoom: 5,
-        // Labels compete for room (no overlap); emergencies and military win, so a busy sky never turns into a smear.
-        layout: { 'text-field': ['get', 'label'], 'text-offset': [0, 1.2], 'text-size': 10, 'text-anchor': 'top', 'symbol-sort-key': ['get', 'rank'], 'text-optional': true },
-        paint: { 'text-color': ['get', 'color'], 'text-halo-color': HALO, 'text-halo-width': 1.5 },
-      },
+      // No callsign labels on the map: they show on hover (the hover card), so a busy sky stays clean.
     ],
   },
   {

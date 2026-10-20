@@ -173,11 +173,17 @@ export const PWC = {
   save: 'powerup:save',
   remove: 'powerup:remove',
   test: 'powerup:test',
+  preview: 'powerup:preview-voice',
 } as const
+
+/** Voices that can be heard before choosing: OpenAI (Live voice and the ChatGPT voice) and ElevenLabs. */
+export type VoicePreviewProvider = 'openai' | 'elevenlabs'
 
 export interface PowerUpBridge {
   state(): Promise<PowerRow[]>
   save(id: string, key: string): Promise<PowerRow[]>
   remove(id: string): Promise<PowerRow[]>
   test(id: string): Promise<PowerRow[]>
+  /** A short sample in this voice (MP3), to hear it before choosing; null when it cannot be made. */
+  previewVoice(provider: VoicePreviewProvider, voice: string): Promise<Uint8Array | null>
 }

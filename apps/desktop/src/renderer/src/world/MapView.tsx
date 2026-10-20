@@ -559,6 +559,35 @@ export function MapView({
         if (!globeCtl.current) throw new Error('The 3D view is still starting; try again in a moment.')
         return globeCtl.current.run(op)
       }
+      case 'traffic': {
+        if (!op.on) {
+          setTraffic(false)
+          return 'Traffic is off.'
+        }
+        if (!traffic) await toggleTraffic()
+        if (!trafficKey && !(await window.world.map3dKeys().catch(() => null))?.tomtom) return 'Live traffic needs a free TomTom key (Setup › Power up › TomTom Traffic).'
+        const zoom = threeDRef.current ? 12 : m.getZoom()
+        const b = m.getBounds()
+        const box = { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() }
+        const [flow, incidents] = await Promise.all([zoom >= 11 ? window.world.trafficFlow(box, zoom).catch(() => null) : Promise.resolve(null), zoom >= 8 ? window.world.trafficIncidents(box).catch(() => []) : Promise.resolve([])])
+        const worst = [...incidents].sort((a, b2) => b2.magnitude - a.magnitude || b2.delay - a.delay).slice(0, 6)
+        const roads = flow?.roads ?? []
+        const jammed = roads.filter(r => r.level < 0.5).length
+        return [
+          zoom < 11 ? 'Traffic is on; zoom to a city (11 or closer) to see the vehicles move.' : flow?.source === 'simulated' ? 'Traffic is on, but TomTom has no live traffic here: the vehicles on the real roads are only an impression.' : flow?.source === 'tomtom' ? `Live traffic is on: ${roads.length} road stretches in view, ${jammed} slow or jammed.` : 'Traffic is on; no traffic data for this view.',
+          worst.length ? `Incidents in view (${incidents.length}): ${worst.map(i => `${i.description}${i.road ? ` on ${i.road}` : ''}${i.from ? ` (${i.from}${i.to ? ` to ${i.to}` : ''})` : ''}${i.delay ? `, +${Math.round(i.delay / 60)} min` : ''}`).join('; ')}.` : zoom >= 8 ? 'No incidents reported in view.' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')
+      }
+      case 'panel': {
+        setDock(op.panel)
+        return op.panel ? `The ${DOCK.find(d => d.id === op.panel)?.label ?? op.panel} panel is open on the World page.` : 'Panel closed.'
+      }
+      case 'display': {
+        setDisplay(d => ({ ...d, ...(op.mode ? { mode: op.mode } : {}), ...(op.hud !== undefined ? { hud: op.hud } : {}), ...(op.scope !== undefined ? { scope: op.scope } : {}) }))
+        return `The map is now ${op.mode ? MODE_LABEL[op.mode] : 'as it was'}${op.hud !== undefined ? `, HUD ${op.hud ? 'on' : 'off'}` : ''}${op.scope !== undefined ? `, scope ${op.scope ? 'on' : 'off'}` : ''}.`
+      }
       case 'view': {
         if (threeDRef.current && globeCtl.current && op.lat !== undefined && op.lon !== undefined)
           return globeCtl.current.run({ kind: '3d', action: 'open', lat: op.lat, lon: op.lon, zoom: op.zoom, label: op.label, show: [], hide: [] })

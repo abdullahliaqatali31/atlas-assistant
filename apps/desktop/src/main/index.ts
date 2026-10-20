@@ -64,6 +64,8 @@ import { PCC, searchWords, type PcState, type SystemOp } from '../shared/system.
 import { isProtectedPath } from '../shared/sysmap.ts'
 import type { GlassFile } from '../shared/glass.ts'
 import { describeEntry, searchMap } from '../shared/sysmap.ts'
+import { LIVE_VOICES, type LiveVoiceName } from '../shared/livevoice.ts'
+import type { VoiceChange } from '../shared/ui.ts'
 import { PRS, WIDGET_WHEN, type WidgetWhen } from '../shared/presence.ts'
 
 // Privileged scheme for the local speech model must be declared before 'ready'.
@@ -629,6 +631,8 @@ const ui = new UiService({
   glass: op => glass.handle(op),
   system: op => pcOp(op),
   browser: (op): Promise<string> => atlasBrowser.handle(op),
+  worldData: (op): Promise<string> => world.worldData(op),
+  voice: (change): Promise<string> => voiceChange(change),
 })
 ui.register()
 /** The live world at the owner's places, for the World page. */
@@ -731,6 +735,47 @@ handle(CH.liveSession, name => {
   liveName = typeof name === 'string' && name.trim() ? name.slice(0, 40) : 'Atlas'
   return liveVoice.mint()
 })
+/**
+ * Atlas changes its own voice (voice_settings). The Live voice changes at
+ * once; the spoken (ChatGPT) voice is saved and the runtime restarts as soon
+ * as the reply in progress has finished, so nothing is cut off.
+ */
+const voiceChange = async (change: VoiceChange): Promise<string> => {
+  const s = readSetup()
+  const done: string[] = []
+  if (change.voice !== undefined) {
+    const v = change.voice.trim().toLowerCase()
+    if (!/^[a-z]{2,20}$/.test(v)) throw new Error('Give an OpenAI voice name, e.g. marin, cedar, coral, sage, shimmer, nova, alloy, ash, ballad, echo, fable, onyx, verse.')
+    if ((LIVE_VOICES as readonly string[]).includes(v)) {
+      saveLiveVoice({ ...s.liveVoice, voice: v as LiveVoiceName })
+      done.push(`Live voice is now ${v}`)
+    }
+    if (s.voiceProvider === 'openai' && s.openaiVoice !== v) {
+      saveSetup({ ownerName: s.ownerName, voiceProvider: 'openai', voiceId: v, llmKey: '', voiceKey: '' }, 'openai')
+      done.push(`my spoken voice becomes ${v} in a few seconds, once this reply is done`)
+      const restartWhenIdle = (tries = 0) =>
+        setTimeout(() => {
+          if (supervisor.currentReply && tries < 60) return restartWhenIdle(tries + 1)
+          void supervisor.restart().then(() => publish({ setup: setupSummary() }))
+        }, 2_000)
+      restartWhenIdle()
+    } else if (s.voiceProvider !== 'openai' && !(LIVE_VOICES as readonly string[]).includes(v)) throw new Error(`${v} is not a Live voice, and the spoken voice is ${s.voiceProvider || 'ElevenLabs'} (change it in Setup).`)
+  }
+  if (change.live !== undefined) {
+    saveLiveVoice({ ...readSetup().liveVoice, enabled: change.live })
+    done.push(`Live voice ${change.live ? 'on' : 'off'}`)
+  }
+  if (change.speakReplies !== undefined) {
+    saveSpeakReplies(change.speakReplies)
+    supervisor.setSpeech(change.speakReplies)
+    done.push(`spoken replies ${change.speakReplies ? 'on' : 'off'}`)
+  }
+  publish({ speech: speech() })
+  const now = readSetup()
+  const state = `Voice: spoken by ${now.voiceProvider === 'openai' ? `ChatGPT (${now.openaiVoice || 'marin'})` : now.voiceProvider || 'ElevenLabs'}, replies ${now.speakReplies ? 'spoken' : 'not spoken'}; Live voice ${now.liveVoice.enabled ? 'on' : 'off'} (${now.liveVoice.voice}).`
+  return done.length ? `Done: ${done.join('; ')}. ${state}` : state
+}
+
 handle(CH.setLiveVoice, raw => {
   saveLiveVoice(parseLiveVoice(raw))
   publish({ speech: speech() })
@@ -738,6 +783,7 @@ handle(CH.setLiveVoice, raw => {
 handle(PWC.save, (id, key) => powerUp.save(id, key))
 handle(PWC.remove, id => powerUp.remove(id))
 handle(PWC.test, id => powerUp.test(id))
+handle(PWC.preview, (provider, voice) => powerUp.previewVoice(provider, voice, status.setup.ownerName))
 handle(PCC.setMap, on => {
   if (typeof on !== 'boolean') throw new Error('On or off.')
   sysmap.setEnabled(on)

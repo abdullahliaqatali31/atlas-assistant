@@ -87,7 +87,17 @@ export type MapOp =
   | { kind: 'back' }
   | { kind: 'story'; story: Story | null }
   | { kind: 'tour'; action: 'play' | 'stop'; secondsEach: number }
+  | { kind: 'traffic'; on: boolean }
+  | { kind: 'panel'; panel: MapPanel | null }
+  | { kind: 'display'; mode?: MapDisplayMode | undefined; hud?: boolean | undefined; scope?: boolean | undefined }
   | Map3dOp
+
+/** The World page's dock panels Atlas can open. */
+export const MAP_PANELS = ['intel', 'cams', 'markets', 'vip', 'geo', 'launches'] as const
+export type MapPanel = (typeof MAP_PANELS)[number]
+/** The World map's looks: normal, night vision, thermal, CRT, noir. */
+export const MAP_DISPLAY_MODES = ['normal', 'nvg', 'thermal', 'crt', 'noir'] as const
+export type MapDisplayMode = (typeof MAP_DISPLAY_MODES)[number]
 
 export const MC = {
   op: 'map:op',
@@ -217,6 +227,21 @@ export const mapOpFromTool = (tool: string, input: Record<string, unknown>): Map
       if (action === 'follow_sat' && !query) throw new Error('Which satellite? A name such as "ISS", "Hubble" or "GPS".')
       const mode = (['chase', 'cockpit', 'follow', 'eye', 'orbit', 'bridge'] as const).find(m => m === input.mode)
       return { kind: '3d', action, lat, lon, zoom: num(input.zoom, 0, 20), label: text(input.label, 80), query, mode, show, hide, direction: action === 'next_contact' ? (input.previous === true ? -1 : 1) : action === 'orbit' ? (input.on === false ? 0 : 1) : undefined }
+    }
+    case 'map_traffic':
+      return { kind: 'traffic', on: input.on !== false }
+    case 'map_panel': {
+      if (input.open === false) return { kind: 'panel', panel: null }
+      const panel = (MAP_PANELS as readonly unknown[]).includes(input.panel) ? (input.panel as MapPanel) : null
+      if (!panel) throw new Error(`Which panel: ${MAP_PANELS.join(', ')}?`)
+      return { kind: 'panel', panel }
+    }
+    case 'map_display': {
+      const mode = (MAP_DISPLAY_MODES as readonly unknown[]).includes(input.mode) ? (input.mode as MapDisplayMode) : undefined
+      const hud = typeof input.hud === 'boolean' ? input.hud : undefined
+      const scope = typeof input.scope === 'boolean' ? input.scope : undefined
+      if (mode === undefined && hud === undefined && scope === undefined) throw new Error(`Say what to change: mode (${MAP_DISPLAY_MODES.join(', ')}), hud or scope.`)
+      return { kind: 'display', mode, hud, scope }
     }
     case 'map_tour': {
       const action = input.action === 'stop' ? 'stop' : 'play'

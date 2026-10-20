@@ -112,7 +112,7 @@ export function HudChip({ map, mode, counts }: { map: HudSource | MapLibre | nul
     .filter(([k]) => typeof counts[k as LayerId] === 'number')
     .map(([k, v]) => [v, counts[k as LayerId]!] as const)
   return (
-    <span className="pointer-events-none flex h-8 min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-full border border-accent/25 bg-slate-950/60 px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-accent/90 backdrop-blur-sm" aria-hidden>
+    <span className="pointer-events-none flex h-8 min-w-0 max-w-full items-center gap-2 overflow-hidden whitespace-nowrap rounded-full border border-accent/25 bg-slate-950/60 px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-accent/90 backdrop-blur-sm" aria-hidden>
       <span className={blink ? 'text-red-500' : 'text-red-500/30'}>●</span>
       <span>{now.toISOString().slice(11, 19)}Z</span>
       <span className="text-accent/70">

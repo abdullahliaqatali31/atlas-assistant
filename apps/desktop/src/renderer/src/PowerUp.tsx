@@ -1,4 +1,6 @@
-import { ArrowUpRight, Brain, Check, Globe2, Loader2, Mic, X, Zap } from 'lucide-react'
+import { ArrowUpRight, Brain, Check, Globe2, Loader2, Mic, Play, X, Zap } from 'lucide-react'
+import { Select } from './ui/Select.tsx'
+import { previewVoice } from './ui/voicePreview.ts'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { LIVE_MODELS, LIVE_TIERS, LIVE_VOICES, type LiveTier, type LiveVoiceName } from '../../shared/livevoice.ts'
@@ -202,26 +204,28 @@ function LiveVoiceCard() {
         <p className="text-[11px] text-warm">Needs an OpenAI key — add it under Brain › OpenAI below (it does not have to be your brain).</p>
       ) : (
         <div className="grid gap-2 @md:grid-cols-3">
-          <label className="text-[11px] text-muted">
+          <div className="text-[11px] text-muted">
             Model
-            <select className="field mt-0.5 w-full py-1 text-xs" value={live.tier} onChange={e => save({ tier: e.target.value as LiveTier })}>
-              {LIVE_TIERS.map(t => (
-                <option key={t} value={t}>
-                  {LIVE_MODELS[t].label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-[11px] text-muted">
-            Voice
-            <select className="field mt-0.5 w-full py-1 text-xs capitalize" value={live.voice} onChange={e => save({ voice: e.target.value as LiveVoiceName })}>
-              {LIVE_VOICES.map(v => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </select>
-          </label>
+            <Select className="mt-0.5 w-full" label="Live voice model" value={live.tier} onChange={v => save({ tier: v as LiveTier })} items={LIVE_TIERS.map(t => ({ value: t, label: LIVE_MODELS[t].label }))} />
+          </div>
+          <div className="text-[11px] text-muted">
+            Voice · picking one plays it
+            <div className="mt-0.5 flex gap-1">
+              <Select
+                className="min-w-0 flex-1"
+                label="Live voice"
+                value={live.voice}
+                onChange={v => {
+                  save({ voice: v as LiveVoiceName })
+                  void previewVoice('openai', v).then(e => e && setError(e))
+                }}
+                items={LIVE_VOICES.map(v => ({ value: v, label: v[0]!.toUpperCase() + v.slice(1) }))}
+              />
+              <button type="button" className="icon-btn size-8 shrink-0" onClick={() => void previewVoice('openai', live.voice).then(e => e && setError(e))} aria-label={`Hear ${live.voice}`} title="Hear this voice">
+                <Play className="size-3.5" aria-hidden />
+              </button>
+            </div>
+          </div>
           <label className="text-[11px] text-muted">
             Most per conversation ($)
             <input type="number" min={0.25} max={50} step={0.25} className="field mt-0.5 w-full py-1 text-xs" value={live.capUsd} onChange={e => Number.isFinite(e.target.valueAsNumber) && save({ capUsd: e.target.valueAsNumber })} />

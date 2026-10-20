@@ -123,7 +123,7 @@ export const VOICE_PROVIDER_INFO: Record<VoiceProviderChoice, { label: string; v
     label: 'ChatGPT (OpenAI)',
     voiceLabel: 'OpenAI voice',
     needsRegion: false,
-    suggestedVoices: ['marin', 'cedar', 'coral', 'nova', 'alloy'],
+    suggestedVoices: ['marin', 'cedar', 'coral', 'sage', 'shimmer', 'nova', 'alloy', 'ash', 'ballad', 'echo', 'fable', 'onyx', 'verse'],
     note: 'Uses your OpenAI key, the same one as Live voice: about $0.015 a minute of speech. No other voice service needed.',
   },
 }

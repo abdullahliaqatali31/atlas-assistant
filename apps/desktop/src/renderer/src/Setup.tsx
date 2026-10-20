@@ -1,5 +1,5 @@
 import * as Label from '@radix-ui/react-label'
-import { Check, Cloud } from 'lucide-react'
+import { Check, Cloud, Play } from 'lucide-react'
 import { useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from 'react'
 
 import { VOICE_PROVIDER_INFO, VOICE_PROVIDERS, type RuntimeStatus, type SetupInput, type VoiceProviderChoice } from '../../shared/ipc.ts'
@@ -7,6 +7,7 @@ import { LLM_KEY_NAMES, LLM_PROVIDER_IDS, LLM_PROVIDERS, type LlmProviderId } fr
 
 import { BrandIcon } from './ui/BrandIcon.tsx'
 import { StartupToggle, UsageCard } from './UsageCard.tsx'
+import { previewVoice } from './ui/voicePreview.ts'
 import { Select } from './ui/Select.tsx'
 
 /** Which form field answers each `loadConfig` problem key. */
@@ -85,6 +86,8 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
     }))
   }
   const [saving, setSaving] = useState(false)
+  /** Why a voice sample did not play, if it did not. */
+  const [heard, setHeard] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   const provider: VoiceProviderChoice = form.voiceProvider ?? 'elevenlabs'
@@ -296,7 +299,10 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
             <Select
               id="voiceId"
               value={form.voiceId}
-              onChange={v => setForm(f => ({ ...f, voiceId: v }))}
+              onChange={v => {
+                setForm(f => ({ ...f, voiceId: v }))
+                if (provider === 'openai' || provider === 'elevenlabs') void previewVoice(provider, v).then(setHeard)
+              }}
               items={[
                 ...info.suggestedVoices.map(v => ({ value: v, label: voiceLabel(v) })),
                 ...(form.voiceId && !info.suggestedVoices.includes(form.voiceId) ? [{ value: form.voiceId, label: form.voiceId }] : []),
@@ -306,6 +312,14 @@ export function Setup({ status, onSaved, onCancel }: { status: RuntimeStatus; on
           </div>
         ) : (
           <Field id="voiceId" label={info.voiceLabel} value={form.voiceId} onChange={set('voiceId')} problem={problemFor('voiceId')} />
+        )}
+        {(provider === 'openai' || provider === 'elevenlabs') && form.voiceId.trim() && (
+          <p className="flex items-center gap-2 text-xs text-muted">
+            <button type="button" className="btn h-7 gap-1 px-2.5 text-xs" onClick={() => void previewVoice(provider, form.voiceId.trim()).then(setHeard)}>
+              <Play className="size-3.5" aria-hidden /> Hear this voice
+            </button>
+            {heard ? <span className="text-warm">{heard}</span> : <span>Picking a voice plays it.</span>}
+          </p>
         )}
       </section>
 

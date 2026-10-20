@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { ipcMain, screen, type BrowserWindow, type Rectangle } from 'electron'
 
 import { MC, type MapOp } from '../shared/map.ts'
-import { describeUi, layoutFor, parseUiChange, UC, isView, type PageCommand, type PageUi, type UiChange, type UiOp, type UiState } from '../shared/ui.ts'
+import { describeUi, layoutFor, parseUiChange, UC, isView, type PageCommand, type PageUi, type UiChange, type UiOp, type UiState, type VoiceChange, type WorldDataOp } from '../shared/ui.ts'
 import type { GlassOp } from '../shared/glass.ts'
 import type { SystemOp } from '../shared/system.ts'
 import { isSurface, type BrowserMode, type BrowserOp } from '../shared/browser.ts'
@@ -47,6 +47,10 @@ export class UiService {
       system?: (op: SystemOp) => Promise<string>
       /** Atlas's own browser. */
       browser?: (op: BrowserOp) => Promise<string>
+      /** Atlas's own voice settings. */
+      voice?: (change: VoiceChange) => Promise<string>
+      /** World data (markets, conflict events) read without switching the owner's page. */
+      worldData?: (op: WorldDataOp) => Promise<string>
     },
   ) {}
 
@@ -194,6 +198,14 @@ export class UiService {
     if (op.kind === 'system') {
       if (!this.deps.system) throw new Error('PC control is not available.')
       return this.deps.system(op.op)
+    }
+    if (op.kind === 'voice') {
+      if (!this.deps.voice) throw new Error('Voice settings are not available.')
+      return this.deps.voice(op.change)
+    }
+    if (op.kind === 'world') {
+      if (!this.deps.worldData) throw new Error('World data is not available.')
+      return this.deps.worldData(op.op)
     }
     if (op.kind === 'browser') {
       if (!this.deps.browser) throw new Error('The browser is not available.')

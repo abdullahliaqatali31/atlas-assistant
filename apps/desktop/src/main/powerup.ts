@@ -37,6 +37,43 @@ export class PowerUp {
     },
   ) {}
 
+  private samples = new Map<string, Uint8Array>()
+
+  /** A short sample in a voice, with the owner's own key (cached for the session). */
+  async previewVoice(provider: unknown, voice: unknown, owner: string): Promise<Uint8Array | null> {
+    if ((provider !== 'openai' && provider !== 'elevenlabs') || typeof voice !== 'string' || !/^[\w-]{2,64}$/.test(voice)) throw new Error('Unknown voice.')
+    const id = `${provider}:${voice}`
+    const hit = this.samples.get(id)
+    if (hit) return hit
+    const name = owner.trim().split(/\s+/)[0] ?? ''
+    const text = `Hi${name ? ` ${name}` : ''}, main Atlas hoon. Is awaaz mein aap se baat karoon?`
+    const env = this.deps.env()
+    let res: Response
+    if (provider === 'openai') {
+      const key = this.deps.secrets.get('OPENAI_API_KEY' as never) ?? env.OPENAI_API_KEY
+      if (!key) return null
+      res = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'gpt-4o-mini-tts', voice, input: text, response_format: 'mp3', instructions: 'Warm, natural and friendly.' }),
+        signal: AbortSignal.timeout(20_000),
+      })
+    } else {
+      const key = this.deps.secrets.get('ELEVENLABS_API_KEY' as never) ?? env.ELEVENLABS_API_KEY
+      if (!key) return null
+      res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}`, {
+        method: 'POST',
+        headers: { 'xi-api-key': key, 'content-type': 'application/json', accept: 'audio/mpeg' },
+        body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2' }),
+        signal: AbortSignal.timeout(20_000),
+      })
+    }
+    if (!res.ok) throw new Error(res.status === 401 || res.status === 402 ? 'That voice service refused (key or credits).' : `The voice service answered ${res.status}.`)
+    const audio = new Uint8Array(await res.arrayBuffer())
+    this.samples.set(id, audio)
+    return audio
+  }
+
   private stored(p: PowerProvider) {
     return this.deps.secrets.get(p.secret as never)
   }

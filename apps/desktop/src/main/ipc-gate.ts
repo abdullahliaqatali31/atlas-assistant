@@ -69,6 +69,7 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   PWC.save,
   PWC.remove,
   PWC.test,
+  PWC.preview,
   PCC.setMap,
   // Full control: Atlas acting without asking.
   CC.setFullControl,

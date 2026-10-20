@@ -20,6 +20,7 @@ import { AdsbFeed, FlightSweep, OpenSkyBaseline, RouteBook } from './flights.ts'
 import { ShipFeed } from './ships.ts'
 import { TrafficService } from './traffic.ts'
 import { OpenSkyAuth } from './opensky.ts'
+import type { WorldDataOp } from '../shared/ui.ts'
 import { WebcamService } from './webcams.ts'
 
 const TIMEOUT_MS = 60_000
@@ -436,6 +437,43 @@ export class WorldService {
     if (this.cableCards.size > 300) this.cableCards.delete(this.cableCards.keys().next().value!)
     this.cableCards.set(id, card)
     return card
+  }
+
+  /** World data for Atlas, in words (markets, conflict events), without touching the owner's screen. */
+  async worldData(op: WorldDataOp): Promise<string> {
+    if (op.what === 'markets') {
+      const all = await this.markets()
+      if (!all.length) return 'Market data is unavailable right now.'
+      const q = (op.query ?? '').toLowerCase()
+      const list = q ? all.filter(x => `${x.name} ${x.symbol} ${x.group}`.toLowerCase().includes(q)) : all
+      if (!list.length) return `Nothing matches "${op.query}". Groups: ${[...new Set(all.map(x => x.group))].join(', ')}.`
+      const month = (x: Quote) => (x.closes.length > 1 && x.closes[0] ? ((x.price - x.closes[0]) / x.closes[0]) * 100 : null)
+      return list
+        .slice(0, q ? 20 : 40)
+        .map(x => {
+          const m = month(x)
+          return `${x.name} (${x.symbol}, ${x.group}): ${x.price.toLocaleString('en-US', { maximumFractionDigits: x.price < 10 ? 4 : 2 })} ${x.currency}, ${x.changePct >= 0 ? '+' : ''}${x.changePct.toFixed(2)}% today${m === null ? '' : `, ${m >= 0 ? '+' : ''}${m.toFixed(1)}% over the month`}`
+        })
+        .join('\n')
+    }
+    const events = await this.intel.list(op.hours)
+    const want = (op.country ?? '').toLowerCase()
+    const list = want ? events.filter(e => e.countryName.toLowerCase().includes(want) || e.country.toLowerCase() === want) : events
+    const byCountry = new Map<string, number>()
+    for (const e of events) if (e.countryName) byCountry.set(e.countryName, (byCountry.get(e.countryName) ?? 0) + 1)
+    const top = [...byCountry.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
+    const alerts = await this.intel.ukraineAlerts().catch(() => [])
+    const lines = [
+      `${events.length} conflict and unrest events in the last ${op.hours} h${want ? `, ${list.length} in "${op.country}"` : ''}.`,
+      top.length ? `Most active: ${top.map(([c, n]) => `${c} ${n}`).join(', ')}.` : '',
+      alerts.length ? `Ukraine air-raid alerts now in ${alerts.length} regions.` : '',
+      '',
+      ...[...list]
+        .sort((a, b) => b.severity - a.severity || b.at - a.at)
+        .slice(0, 15)
+        .map(e => `- [${e.category}, severity ${e.severity}] ${e.title} — ${e.place || e.countryName} (${e.source}, ${Math.max(1, Math.round((Date.now() - e.at) / 3_600_000))} h ago)`),
+    ]
+    return lines.filter((l, i) => l || i === 3).join('\n')
   }
 
   /** Every aircraft over a wide view (swept area by area), plus military worldwide. */

@@ -2,6 +2,10 @@ import { Brain, Check, ClipboardCopy, GraduationCap, Lightbulb, ListChecks, Mess
 import { useEffect, useState, type ReactNode } from 'react'
 
 import type { LearningView, ProposalView } from '../../shared/learning.ts'
+import { Select } from './ui/Select.tsx'
+
+/** The project picker's value for "no project" (Radix Select takes no empty value). */
+const APP_ONLY = '__app__'
 import { Skills } from './Skills.tsx'
 
 const cleanError = (err: unknown) =>
@@ -210,19 +214,13 @@ function Improvements({ view, run }: { view: LearningView; run: (fn: () => Promi
       </p>
       <label className="flex flex-wrap items-center gap-2 px-1 text-xs text-muted">
         Save briefs in project
-        <select
-          className="field w-auto py-1 text-xs"
-          value={view.improvementProject ?? ''}
-          onChange={e => void run(() => window.learning.improvementProject(e.target.value || null))}
-          aria-label="Project for improvement briefs"
-        >
-          <option value="">Only here in the app</option>
-          {view.projects.map(name => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+        <Select
+          className="w-auto min-w-48"
+          label="Project for improvement briefs"
+          value={view.improvementProject ?? APP_ONLY}
+          onChange={v => void run(() => window.learning.improvementProject(v === APP_ONLY ? null : v))}
+          items={[{ value: APP_ONLY, label: 'Only here in the app' }, ...view.projects.map(name => ({ value: name, label: name }))]}
+        />
         {view.projects.length === 0 && <span>(follow Atlas’s own folder in Projects › Code to save briefs there)</span>}
       </label>
       {view.improvements.length === 0 && <Empty>Nothing yet.</Empty>}

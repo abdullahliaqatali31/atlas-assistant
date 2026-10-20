@@ -341,5 +341,6 @@ const powerup: PowerUpBridge = {
   save: (id, key) => ipcRenderer.invoke(PWC.save, id, key),
   remove: id => ipcRenderer.invoke(PWC.remove, id),
   test: id => ipcRenderer.invoke(PWC.test, id),
+  previewVoice: (provider, voice) => ipcRenderer.invoke(PWC.preview, provider, voice),
 }
 contextBridge.exposeInMainWorld('powerup', powerup)
