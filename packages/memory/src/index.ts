@@ -119,6 +119,13 @@ const MIGRATIONS: string[] = [
      SELECT m.conversation_id, MIN(m.created_at), MAX(m.created_at),
        COALESCE((SELECT substr(o.content, 1, 60) FROM message o WHERE o.conversation_id = m.conversation_id AND o.speaker = 'owner' ORDER BY o.created_at LIMIT 1), '')
      FROM message m GROUP BY m.conversation_id;`,
+  // The brain: connections between memories (made when one is saved, strengthened when they are used
+  // together), and how often and when each memory was last used in a turn.
+  `CREATE TABLE memory_link (
+     a TEXT NOT NULL, b TEXT NOT NULL, weight REAL NOT NULL DEFAULT 1, uses INTEGER NOT NULL DEFAULT 0,
+     last_at INTEGER NOT NULL, PRIMARY KEY (a, b));
+   ALTER TABLE memory ADD COLUMN uses INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE memory ADD COLUMN last_used INTEGER;`,
 ]
 
 /** A conversation (session): a run of messages without a long pause. */
@@ -477,7 +484,60 @@ export class MemoryStore {
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(id, input.kind, input.statement, JSON.stringify(input.source), input.confidence ?? 1, input.projectId ?? null, this.clock.now())
+    this.linkNew(id, input.statement)
     return id
+  }
+
+  /** A new memory joins the three it is closest to in meaning (shared distinctive words). */
+  private linkNew(id: Id, statement: string) {
+    const words = statement
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter(w => w.length > 3 && !STOP.has(w))
+    if (!words.length) return
+    try {
+      for (const m of this.recall(words.join(' '), 4).filter(m => m.id !== id).slice(0, 3)) this.link(id, m.id, 0.6)
+    } catch {
+      // No neighbours yet: it stands alone until it is used.
+    }
+  }
+
+  private link(x: Id, y: Id, weight: number) {
+    if (x === y) return
+    const [a, b] = x < y ? [x, y] : [y, x]
+    this.db
+      .prepare(`INSERT INTO memory_link (a, b, weight, uses, last_at) VALUES (?, ?, ?, 0, ?)
+               ON CONFLICT(a, b) DO UPDATE SET weight = MIN(weight + excluded.weight, 12), last_at = excluded.last_at`)
+      .run(a, b, weight, this.clock.now())
+  }
+
+  /**
+   * Memories used together in one turn: each counts a use, and every pair
+   * among them is linked a little more strongly (the brain's paths grow).
+   */
+  noteUse(ids: readonly Id[]) {
+    const unique = [...new Set(ids)].slice(0, 12)
+    const now = this.clock.now()
+    const use = this.db.prepare('UPDATE memory SET uses = uses + 1, last_used = ? WHERE id = ?')
+    for (const id of unique) use.run(now, id)
+    for (let i = 0; i < unique.length; i++)
+      for (let j = i + 1; j < unique.length; j++) {
+        this.link(unique[i]!, unique[j]!, 1)
+        const [a, b] = unique[i]! < unique[j]! ? [unique[i]!, unique[j]!] : [unique[j]!, unique[i]!]
+        this.db.prepare('UPDATE memory_link SET uses = uses + 1 WHERE a = ? AND b = ?').run(a, b)
+      }
+  }
+
+  /** Everything the brain view draws: the live memories with their use, and the links among them. */
+  brain(limit = 600): { memories: (MemoryRecord & { uses: number; lastUsed: number | null })[]; links: { a: Id; b: Id; weight: number; uses: number }[] } {
+    // Memories from before the brain had links: join each to its neighbours, once.
+    const none = !(this.db.prepare('SELECT 1 FROM memory_link LIMIT 1').get())
+    if (none) for (const r of this.db.prepare('SELECT id, statement FROM memory WHERE superseded_by IS NULL').all() as { id: Id; statement: string }[]) this.linkNew(r.id, r.statement)
+    const rows = this.db.prepare('SELECT * FROM memory WHERE superseded_by IS NULL ORDER BY created_at DESC LIMIT ?').all(limit) as Record<string, unknown>[]
+    const memories = rows.map(r => ({ ...toMemory(r), uses: (r.uses as number | null) ?? 0, lastUsed: (r.last_used as number | null) ?? null }))
+    const ids = new Set(memories.map(m => m.id))
+    const links = (this.db.prepare('SELECT a, b, weight, uses FROM memory_link ORDER BY weight DESC LIMIT 4000').all() as { a: Id; b: Id; weight: number; uses: number }[]).filter(l => ids.has(l.a) && ids.has(l.b))
+    return { memories, links }
   }
 
   /** A correction supersedes the old fact; the original stays as evidence history. */
@@ -1136,6 +1196,9 @@ const toPersonality = (r: PersonalityRow) => {
   }
   return { version: r.version, profile: coerceProfile(profile), reason: r.reason, basedOn: r.based_on, at: r.created_at }
 }
+
+/** Words too common to say two memories are about the same thing. */
+const STOP = new Set(['that', 'this', 'with', 'from', 'have', 'they', 'them', 'their', 'there', 'what', 'when', 'where', 'which', 'would', 'should', 'could', 'about', 'into', 'than', 'then', 'also', 'just', 'like', 'likes', 'want', 'wants', 'does', 'owner', 'user', 'always', 'never', 'very', 'more', 'most', 'some', 'only', 'other', 'your', 'yours', 'been', 'being', 'were', 'will', 'mein', 'hain', 'karna', 'wala', 'wali'])
 
 const toMemory = (row: unknown): MemoryRecord => {
   const r = row as Record<string, unknown>

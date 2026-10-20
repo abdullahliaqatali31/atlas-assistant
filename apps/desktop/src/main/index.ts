@@ -40,6 +40,7 @@ import { registerBackupIpc } from './backup.ts'
 import { CodeService } from './code/service.ts'
 import { registerStartupIpc, startedHidden } from './startup.ts'
 import { registerLearningIpc } from './learning.ts'
+import { registerBrainIpc } from './brain.ts'
 import { NewsService, newsSchemePrivileges } from './news.ts'
 import { modelSchemePrivileges, WakeService } from './wake.ts'
 import { registerDataIpc } from './data.ts'
@@ -220,6 +221,7 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
   onControl: e => controls.onHostEvent(e),
   onPersonality: e => personality.onHostEvent(e),
   onData: e => data.onHostEvent(e),
+  onBrain: e => brain.onHostEvent(e),
   onLearning: e => learning.onHostEvent(e),
   onUsage: u => {
     usage = u
@@ -796,6 +798,7 @@ const data = registerDataIpc({
   isReady: () => status.phase === 'ready',
   toRenderer,
 })
+const brain = registerBrainIpc({ handle, post: msg => supervisor.data(msg), isReady: () => status.phase === 'ready', toRenderer })
 const learning = registerLearningIpc({
   handle,
   post: msg => supervisor.data(msg),

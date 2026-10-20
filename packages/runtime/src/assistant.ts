@@ -70,6 +70,11 @@ export interface AssistantDeps {
   /** Ask the owner to approve one action. Resolve false to decline. */
   confirm?: (tool: RuntimeTool, input: Record<string, unknown>, decision: Decision) => Promise<boolean>
   onAction?: (notice: ActionNotice) => void
+  /**
+   * Memories the turn is using: recalled into its context, found or saved
+   * by a memory tool. For the brain view (they light up); also counted as uses.
+   */
+  onRecall?: (ids: string[], why: 'context' | 'search' | 'saved') => void
   /** The learning service: sees owner messages (style feedback) and adds approved lessons and routines to the context. */
   learning?: { observeOwner(text: string): unknown; contextLines(): string[] }
   /** Sources read right before the daily briefing (connected calendar and email, window activity). */
@@ -445,6 +450,11 @@ export class Assistant {
     try {
       const out = capToolOutput(await tool.run(input, signal))
       log('done', out.slice(0, 500))
+      // Memory tools name memories by their short id: the brain lights those up.
+      if (tool.name.startsWith('memory_')) {
+        const ids = [...out.matchAll(/\[([0-9a-z-]{8})\]/g)].map(m => memory.findMemory(m[1]!)?.id).filter((x): x is string => !!x)
+        if (ids.length) this.deps.onRecall?.(ids, tool.name === 'memory_save' ? 'saved' : 'search')
+      }
       return result(tool.isUntrusted ? wrapUntrusted(tool.name, out) : out)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -473,6 +483,12 @@ export class Assistant {
     const overdueIds = new Set(overdue.map(t => t.id))
     const open = memory.openTasks().filter(t => !overdueIds.has(t.id)).slice(0, 10)
     const recalled = query ? memory.recall(query, 6) : memory.recent(6)
+    // Only a real recall counts (the "recent" fallback for greetings is not the brain thinking of something).
+    if (query && recalled.length) {
+      const ids = recalled.map(m => m.id)
+      memory.noteUse(ids)
+      this.deps.onRecall?.(ids, 'context')
+    }
 
     const lines = [
       `Now: ${new Date(clock.now()).toISOString()} | Owner: ${owner.name || 'unknown'} | Mode: ${this.session.mode}`,

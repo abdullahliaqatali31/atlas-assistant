@@ -166,3 +166,26 @@ describe('conversations', () => {
     store.close()
   })
 })
+
+describe('the brain: connections between memories', () => {
+  it('links a new memory to the ones it shares meaning with, and strengthens links used together', () => {
+    const { store } = open()
+    const tea = store.remember({ kind: 'preference', statement: 'Abdullah prefers green tea in the evening', source: owner() })
+    const coffee = store.remember({ kind: 'fact', statement: 'Abdullah drinks green tea after dinner', source: owner() })
+    const cricket = store.remember({ kind: 'fact', statement: 'Plays cricket on Sundays', source: owner() })
+    let b = store.brain()
+    expect(b.memories).toHaveLength(3)
+    expect(b.links.map(l => [l.a, l.b].sort().join())).toContain([tea, coffee].sort().join())
+    expect(b.links.some(l => l.a === cricket || l.b === cricket)).toBe(false)
+    const before = b.links.find(l => (l.a === tea || l.b === tea) && (l.a === coffee || l.b === coffee))!.weight
+    store.noteUse([tea, coffee, cricket, tea])
+    b = store.brain()
+    const after = b.links.find(l => (l.a === tea || l.b === tea) && (l.a === coffee || l.b === coffee))!
+    expect(after.weight).toBeGreaterThan(before)
+    expect(after.uses).toBe(1)
+    expect(b.links.some(l => l.a === cricket || l.b === cricket)).toBe(true)
+    expect(b.memories.find(m => m.id === tea)).toMatchObject({ uses: 1 })
+    expect(b.links.every(l => l.a < l.b)).toBe(true)
+    store.close()
+  })
+})

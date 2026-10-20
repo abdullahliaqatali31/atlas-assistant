@@ -658,3 +658,11 @@ input[type='radio']:disabled {
 @media (prefers-reduced-motion: reduce) {
   [class*='atlas-grain'], [class*='atlas-flicker'] { animation: none !important; }
 }
+
+/* The brain lives in deep space, in every theme: its light is additive. */
+.brain-stage {
+  background:
+    radial-gradient(ellipse 60% 55% at 50% 48%, rgba(14, 165, 233, 0.13), transparent 70%),
+    radial-gradient(ellipse 90% 80% at 50% 50%, rgba(76, 29, 149, 0.16), transparent 75%),
+    #020617;
+}

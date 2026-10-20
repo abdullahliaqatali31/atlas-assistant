@@ -212,8 +212,8 @@ export const localTools = (memory: MemoryStore, clock: Clock): RuntimeTool[] => 
     isUntrusted: false,
     run: async input => {
       const kind = input.kind === 'preference' ? 'preference' : 'fact'
-      memory.remember({ kind, statement: str(input.statement), source: { kind: 'owner', origin: 'conversation', retrievedAt: clock.now() } })
-      return 'Saved.'
+      const id = memory.remember({ kind, statement: str(input.statement), source: { kind: 'owner', origin: 'conversation', retrievedAt: clock.now() } })
+      return `Saved [${id.slice(0, 8)}].`
     },
   },
   {

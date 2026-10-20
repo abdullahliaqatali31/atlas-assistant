@@ -11,6 +11,7 @@ import { CH } from '../shared/ipc.ts'
 import { PC } from '../shared/personality.ts'
 import { PJ } from '../shared/projects.ts'
 import { PCC } from '../shared/system.ts'
+import { BR } from '../shared/brain.ts'
 import { PWC } from '../shared/powerup.ts'
 
 export const OWNER_ONLY: ReadonlySet<string> = new Set([
@@ -21,6 +22,9 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   CH.setLiveVoice,
   // Past conversations are the owner's.
   CH.chats,
+  // So are the memories in the brain view.
+  BR.view,
+  BR.forget,
   CH.listModels,
   CH.answerApproval,
   CH.initiativeAction,

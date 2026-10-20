@@ -55,6 +55,7 @@ import { once, runPersonalityOp, sttPin } from './personality.ts'
 import { HostLearning } from './learning.ts'
 import { runProjectsOp } from './projects.ts'
 import { createSpeaker } from './speaker.ts'
+import { brainView } from './brain.ts'
 import { startWindowSampler } from './window-sampler.ts'
 
 const port = process.parentPort
@@ -261,6 +262,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
     fullControl: () => controls.fullControl.on && !controls.paused,
     // While paused, nothing even asks.
     confirm: (tool, input, decision) => (controls.paused ? Promise.resolve(false) : askOwner(tool, input, decision.reason, current?.abort.signal)),
+    onRecall: (ids, why) => post({ type: 'memory-used', ids, why }),
     onAction: n => post({ type: 'action', notice: { tool: n.tool, status: n.status, detail: n.detail === undefined ? undefined : redact(n.detail) } }),
     // Connected calendar/email (read-only connectors) and, when the owner opted in, window activity.
     briefingSources: () => [...controls.briefingSources(), ...(activity?.briefingSources() ?? []), code.briefingSource(), ...(world ? [world.briefingSource()] : [])],
@@ -521,6 +523,19 @@ port.on('message', ({ data }: { data: HostRequest }) => {
       if (!learning) post({ type: 'learning', requestId: data.requestId, error: 'The assistant is not ready yet.' })
       else void learning.handle(data).then(post)
       break
+    case 'brain': {
+      if (!memory) {
+        post({ type: 'brain', requestId: data.requestId, error: 'The assistant is not ready yet.' })
+        break
+      }
+      try {
+        if (data.op.kind === 'forget') memory.forget(data.op.id)
+        post({ type: 'brain', requestId: data.requestId, view: brainView(memory, ownerName) })
+      } catch (error) {
+        post({ type: 'brain', requestId: data.requestId, error: error instanceof Error ? error.message : String(error) })
+      }
+      break
+    }
     case 'projects': {
       if (!memory) {
         post({ type: 'projects', requestId: data.requestId, error: 'The assistant is not ready yet.' })

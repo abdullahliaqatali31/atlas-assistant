@@ -18,6 +18,7 @@ import type { ControlHostEvent, ControlHostRequest } from './control.ts'
 import type { PersonalityHostEvent, PersonalityHostRequest } from './personality.ts'
 import type { LearningHostEvent, LearningHostRequest } from './learning.ts'
 import type { ProjectsHostEvent, ProjectsHostRequest } from './projects.ts'
+import type { BrainHostEvent, BrainHostRequest } from './brain.ts'
 
 export const MODES = ['companion', 'work', 'focus', 'quiet'] as const
 export type UiMode = (typeof MODES)[number]
@@ -426,6 +427,7 @@ export type HostRequest =
   | PersonalityHostRequest
   | ActivityHostRequest
   | ProjectsHostRequest
+  | BrainHostRequest
   | LearningHostRequest
 
 export type HostEvent =
@@ -463,4 +465,5 @@ export type HostEvent =
   | PersonalityHostEvent
   | ActivityHostEvent
   | ProjectsHostEvent
+  | BrainHostEvent
   | LearningHostEvent

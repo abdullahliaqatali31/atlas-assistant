@@ -22,6 +22,7 @@ import { PC, type PersonalityBridge, type PersonalityView } from '../shared/pers
 import { PJ, type ProjectsBridge } from '../shared/projects.ts'
 import { PRS, type PresenceCommand, type PresenceHostBridge } from '../shared/presence.ts'
 import { PCC, type PcBridge, type PcState } from '../shared/system.ts'
+import { BR, type BrainBridge, type MemoryUseWhy } from '../shared/brain.ts'
 import { PWC, type PowerUpBridge } from '../shared/powerup.ts'
 
 const subscribe = <T>(channel: string, cb: (v: T) => void) => {
@@ -258,6 +259,13 @@ const ui: UiBridge = {
   state: () => ipcRenderer.invoke(UC.state),
 }
 contextBridge.exposeInMainWorld('ui', ui)
+
+const brain: BrainBridge = {
+  view: () => ipcRenderer.invoke(BR.view),
+  forget: id => ipcRenderer.invoke(BR.forget, id),
+  onUsed: cb => subscribe<{ ids: string[]; why: MemoryUseWhy }>(BR.used, cb),
+}
+contextBridge.exposeInMainWorld('brain', brain)
 
 const mapOps: MapOpsBridge = {
   onOp: cb => subscribe<MapOpRequest>(MC.op, cb),

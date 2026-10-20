@@ -17,6 +17,7 @@ import type { WakeBridge } from '../shared/wake.ts'
 import type { PresenceBridge, PresenceHostBridge } from '../shared/presence.ts'
 import type { GlassBridge } from '../shared/glass.ts'
 import type { PcBridge } from '../shared/system.ts'
+import type { BrainBridge } from '../shared/brain.ts'
 import type { PowerUpBridge } from '../shared/powerup.ts'
 
 declare global {
@@ -42,6 +43,7 @@ declare global {
     files: FilesBridge
     desktop: DesktopBridge
     ui: UiBridge
+    brain: BrainBridge
     mapOps: MapOpsBridge
     world: WorldBridge
   }

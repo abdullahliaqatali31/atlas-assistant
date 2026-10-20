@@ -30,6 +30,7 @@ import type { PersonalityHostEvent, PersonalityHostRequest } from '../shared/per
 import type { ActivityHostEvent, ActivityHostRequest } from '../shared/activity.ts'
 import type { LearningHostEvent, LearningHostRequest } from '../shared/learning.ts'
 import type { ProjectsHostEvent, ProjectsHostRequest } from '../shared/projects.ts'
+import type { BrainHostEvent, BrainHostRequest } from '../shared/brain.ts'
 
 export interface SupervisorDeps {
   entry: string
@@ -53,6 +54,7 @@ export interface SupervisorDeps {
   onPersonality?: (e: PersonalityHostEvent) => void
   /** Answers for the Activity and Projects screens, and project-changed notices. */
   onData?: (e: ActivityHostEvent | ProjectsHostEvent) => void
+  onBrain?: (e: BrainHostEvent) => void
   /** Learning screen answers and "something new was learned" pushes. */
   onLearning?: (e: LearningHostEvent) => void
   /** The cost meter's totals. */
@@ -348,7 +350,7 @@ export class RuntimeSupervisor {
     return true
   }
 
-  data(msg: ActivityHostRequest | ProjectsHostRequest | LearningHostRequest): boolean {
+  data(msg: ActivityHostRequest | ProjectsHostRequest | LearningHostRequest | BrainHostRequest): boolean {
     if (!this.child) return false
     this.post(msg)
     return true
@@ -454,6 +456,10 @@ export class RuntimeSupervisor {
       case 'projects':
       case 'project-changed':
         this.deps.onData?.(e)
+        break
+      case 'brain':
+      case 'memory-used':
+        this.deps.onBrain?.(e)
         break
       case 'learning':
       case 'learning-changed':
