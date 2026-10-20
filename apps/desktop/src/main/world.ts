@@ -18,6 +18,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AdsbFeed, FlightSweep, RouteBook } from './flights.ts'
 import { ShipFeed } from './ships.ts'
+import { TrafficService } from './traffic.ts'
 import { WebcamService } from './webcams.ts'
 
 const TIMEOUT_MS = 60_000
@@ -79,6 +80,7 @@ export class WorldService {
   private readonly adsb = new AdsbFeed(getJson)
   private readonly sweep = new FlightSweep({ getJson, feed: this.adsb, log: (level, message) => this.deps.log?.(level, message) })
   private readonly routes = new RouteBook({ getJson })
+  private readonly traffic = new TrafficService({ key: () => osCredentialStore().get('TOMTOM_API_KEY') ?? null, log: (level, message) => this.deps.log?.(level, message) })
   readonly ships = new ShipFeed({ secrets: osCredentialStore(), log: (level, message) => this.deps.log?.(level, message) })
 
   constructor(
@@ -531,6 +533,8 @@ export class WorldService {
     handle(WLD.cables, () => this.cables())
     handle(WLD.cable, id => this.cable(id))
     handle(WLD.launches, () => this.launches())
+    handle(WLD.trafficFlow, (box, zoom) => this.traffic.flow(box, zoom))
+    handle(WLD.trafficIncidents, box => this.traffic.incidents(box))
     handle(WLD.radio, () => this.radio())
     handle(WLD.rain, () => this.rain())
     // Only the owner's own window, and only while unlocked, gets the 3D keys.

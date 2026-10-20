@@ -43,6 +43,9 @@ import type { WorldSnapshot } from '../../../shared/world.ts'
 import { CATEGORY_COLOR, type IntelEvent } from '../../../shared/intel.ts'
 import { MODEL_HEADING_OFFSET, headingTape, heightForZoom, modelFor, type ModelId } from './models3d.ts'
 import { Satellites3D } from './sats3d.ts'
+import { Traffic3D } from './traffic3d.ts'
+import { IncidentCard, TrafficPill, type TrafficStatus } from './TrafficLayer2D.tsx'
+import type { TrafficIncident } from '../../../shared/traffic.ts'
 import { latLonLabel } from './sky.ts'
 
 ;(window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = './cesium/'
@@ -124,6 +127,7 @@ export default function Globe3D({
   displayButton,
   intel,
   traffic,
+  onTrafficStatus,
 }: {
   start: { lat: number; lon: number; zoom: number }
   onClose: () => void
@@ -142,6 +146,8 @@ export default function Globe3D({
   intel?: IntelEvent[] | undefined
   /** Live traffic tiles (TomTom, the owner's key), when the Traffic chip is on. */
   traffic?: string | null
+  /** What moving traffic shows (cars, incidents, simulated or live). */
+  onTrafficStatus?: (s: TrafficStatus | null) => void
 }) {
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -180,11 +186,18 @@ export default function Globe3D({
   const nightLights = useRef<ReturnType<typeof Cesium.ImageryLayer.fromProviderAsync> | null>(null)
   /** Planes close enough to watch move: the view draws continuously while true. */
   const nearHold = useRef(false)
+  /** Cars moving on the roads: the view draws continuously while true. */
+  const trafficLive = useRef(false)
+  const traffic3d = useRef<Traffic3D | null>(null)
+  const [trafficStatus, setTrafficStatus] = useState<TrafficStatus | null>(null)
+  const [incHover, setIncHover] = useState<{ i: TrafficIncident; x: number; y: number } | null>(null)
+  const onTrafficStatusRef = useRef(onTrafficStatus)
+  onTrafficStatusRef.current = onTrafficStatus
   /** The render governor: frames on demand, continuously only while something on screen moves by itself. */
   const applyRender = () => {
     const w = viewerRef.current
     if (!w || w.isDestroyed()) return
-    w.scene.requestRenderMode = !(nearHold.current || followRef.current || satRideRef.current || orbitRef.current)
+    w.scene.requestRenderMode = !(nearHold.current || trafficLive.current || followRef.current || satRideRef.current || orbitRef.current)
     w.scene.requestRender()
   }
   /** Orbit: circling a point on the ground, or spinning the whole globe. */
@@ -589,6 +602,9 @@ export default function Globe3D({
           if (!viewer || viewer.isDestroyed() || performance.now() - lastPick < 80) return
           lastPick = performance.now()
           const hit = scene.pick(at) as { id?: PickId } | undefined
+          // A traffic incident: its own small card.
+          const inc = hit?.id?.kind === 'incident' && hit.id.id ? traffic3d.current?.incident(hit.id.id) : undefined
+          setIncHover(inc ? { i: inc, x: at.x, y: at.y } : null)
           const sel = hit?.id ? selectionFor(hit.id, true) : null
           if (sel) {
             clearTimeout(hideT)
@@ -791,12 +807,31 @@ export default function Globe3D({
       widget.imageryLayers.remove(trafficLayer.current, true)
       trafficLayer.current = null
     }
+    traffic3d.current?.destroy()
+    traffic3d.current = null
     if (traffic) {
+      traffic3d.current = new Traffic3D(widget, Cesium, {
+        onStatus: s => {
+          setTrafficStatus(s)
+          onTrafficStatusRef.current?.(s)
+        },
+        onLive: on => {
+          trafficLive.current = on
+          applyRender()
+        },
+      })
       trafficLayer.current = Cesium.ImageryLayer.fromProviderAsync(Promise.resolve(new Cesium.UrlTemplateImageryProvider({ url: `https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=${encodeURIComponent(traffic)}`, minimumLevel: 3, maximumLevel: 18, credit: 'Traffic © TomTom' })), {})
       widget.imageryLayers.add(trafficLayer.current)
     }
     widget.scene.requestRender()
   }, [widget, traffic])
+  useEffect(
+    () => () => {
+      traffic3d.current?.destroy()
+      traffic3d.current = null
+    },
+    [],
+  )
 
   // Conflict events from the Intelligence panel.
   useEffect(() => {
@@ -1178,6 +1213,8 @@ export default function Globe3D({
 
   return (
     <div className="absolute inset-0 z-30 bg-black">
+      {traffic && trafficStatus && <TrafficPill s={trafficStatus} />}
+      {incHover && <IncidentCard i={incHover.i} style={{ left: Math.max(8, incHover.x - 140), top: incHover.y + 14 }} />}
       <div ref={box} className="absolute inset-0" style={{ filter: display ? MODE_FILTER[display.mode] : undefined }} />
       {display && <DisplayFx mode={display.mode} scope={display.scope} />}
       {display?.hud && hudSource && !follow && <TacticalHud map={hudSource} mode={display.mode} counts={{ flights: counts.flights, ships: counts.ships, satellites: counts.sats, cameras: counts.cameras }} />}

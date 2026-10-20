@@ -16,6 +16,7 @@ import { CAMERA_COVERAGE, kmBetween, type Camera, type Flight, type FlightRoute,
 import { cameraFeatures, cleanError, deadReckon, flightFeatures, launchFeatures, radioFeatures, rainTiles, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
 import { nearbyItems, type NearbyItem } from './hover.ts'
 import { HoverCard } from './HoverCard.tsx'
+import { TrafficLayer2D, TrafficPill, type TrafficStatus } from './TrafficLayer2D.tsx'
 import type { Selected } from './Inspector.tsx'
 import { layerDef, LAYERS, OWN_SOURCES, PICKABLE, readLayers, ROUTE_LAYERS, SELECTED_LAYER, TRAIL_LAYER, type LayerId } from './layers.ts'
 import { groundTrack, horizonKm, nextPasses, orbitFacts, ring } from './passes.ts'
@@ -159,6 +160,7 @@ export function MapView({
   // Live traffic (TomTom, the owner's key): the chip, and the key once read.
   const [traffic, setTraffic] = useState(false)
   const [trafficKey, setTrafficKey] = useState<string | null>(null)
+  const [trafficStatus, setTrafficStatus] = useState<TrafficStatus | null>(null)
   const toggleTraffic = async () => {
     if (traffic) return setTraffic(false)
     const keys = await window.world.map3dKeys().catch(() => null)
@@ -213,6 +215,8 @@ export function MapView({
     if (!box.current) return
     const m = new maplibregl.Map({ container: box.current, style: BASE_URL.dark, center: [70, 28], zoom: 2.2, attributionControl: false, pixelRatio: isLite() ? 1 : window.devicePixelRatio })
     map.current = m
+    // Dev runs only: a handle for checking the map from the debugger.
+    if (location.protocol === 'http:') (window as unknown as { __map2d?: unknown }).__map2d = m
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
     // Credits: our own small line at the bottom (MapCredit), not the library's white pill.
     // Style switches drop images added at runtime; draw them again when a layer asks.
@@ -1210,6 +1214,8 @@ export function MapView({
   return (
     <div className="relative h-full w-full overflow-hidden">
       <DisplayDefs />
+      {!threeD && <TrafficLayer2D map={ready ? map.current : null} on={traffic} idle={idle} onStatus={setTrafficStatus} />}
+      {traffic && trafficStatus && !threeD && <TrafficPill s={trafficStatus} />}
       <div ref={box} className="h-full w-full" aria-label="World map" role="region" style={{ filter: MODE_FILTER[display.mode], transition: isLite() ? 'none' : 'filter 500ms ease-in-out' }} />
       <DisplayFx mode={display.mode} scope={display.scope} />
       {display.hud && ready && <TacticalHud map={map.current} mode={display.mode} counts={counts} />}
@@ -1273,7 +1279,7 @@ export function MapView({
       {threeD && (
         <Guard3D onClose={() => setThreeD(null)}>
         <Suspense fallback={<div className="absolute inset-0 z-30 grid place-items-center bg-black/80 text-xs text-muted">Loading the 3D world…</div>}>
-          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} world={world} now={now} display={display} displayButton={<>{displayButton}{dockButtons}</>} intel={intelOnMap ? intel?.events : undefined} traffic={traffic ? trafficKey : null} />
+          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} world={world} now={now} display={display} displayButton={<>{displayButton}{dockButtons}</>} intel={intelOnMap ? intel?.events : undefined} traffic={traffic ? trafficKey : null} onTrafficStatus={setTrafficStatus} />
         </Suspense>
         </Guard3D>
       )}
@@ -1376,3 +1382,4 @@ function MapCredit({ parts }: { parts: CreditPart[] }) {
     </p>
   )
 }
+

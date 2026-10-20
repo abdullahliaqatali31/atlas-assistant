@@ -802,6 +802,8 @@ export const WLD = {
   intelUkraine: 'world:intel-ukraine',
   track: 'world:track',
   launches: 'world:launches',
+  trafficFlow: 'world:traffic-flow',
+  trafficIncidents: 'world:traffic-incidents',
   radio: 'world:radio',
   rain: 'world:rain',
   map3dKeys: 'world:map3d-keys',
@@ -856,6 +858,10 @@ export interface WorldBridge {
   track(hex: string): Promise<FlightTrack | null>
   /** Space launches: the next 30 days and the last 7 (Launch Library 2, keyless). */
   launches(): Promise<Launch[]>
+  /** Roads with live flow around a view (TomTom; OpenStreetMap roads, simulated, where TomTom has none). */
+  trafficFlow(box: GeoBox, zoom: number): Promise<import('./traffic.ts').TrafficFlowView>
+  /** Traffic incidents in a view (TomTom). */
+  trafficIncidents(box: GeoBox): Promise<import('./traffic.ts').TrafficIncident[]>
   /** Internet radio stations with a place (Radio Browser, keyless). */
   radio(): Promise<RadioStation[]>
   /** The newest global rain frame (NASA IMERG, 30-minute) as a GIBS time; null: use yesterday's daily. */
