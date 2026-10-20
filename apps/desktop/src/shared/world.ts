@@ -6,6 +6,7 @@
  */
 
 import type { CableDetail, CablesResult } from './space.ts'
+import type { AlertRegion, countryStats, IntelEvent } from './intel.ts'
 
 export interface Place {
   id: string
@@ -696,6 +697,11 @@ export const WLD = {
   flightRoute: 'world:flight-route',
   aircraft: 'world:aircraft',
   wiki: 'world:wiki',
+  intelEvents: 'world:intel-events',
+  intelStats: 'world:intel-stats',
+  intelCountries: 'world:intel-countries',
+  intelAlerts: 'world:intel-alerts',
+  intelUkraine: 'world:intel-ukraine',
   track: 'world:track',
   launches: 'world:launches',
   radio: 'world:radio',
@@ -728,6 +734,16 @@ export interface WorldBridge {
   aircraft(hex: string): Promise<AircraftInfo | null>
   /** Wikidata on a notable ship (MMSI) or satellite (NORAD number): photo, description, operator; null when unknown. */
   wiki(kind: 'ship' | 'satellite', id: string): Promise<WikiThing | null>
+  /** Conflict events of the last hours (GDELT, filtered and categorised), newest first. */
+  intelEvents(hours: number): Promise<IntelEvent[]>
+  /** Events per country, most first. */
+  intelStats(hours: number): Promise<ReturnType<typeof countryStats>>
+  /** Country shapes (Natural Earth 110m) with iso and name, for highlighting. */
+  intelCountries(): Promise<{ type: 'FeatureCollection'; features: { type: 'Feature'; geometry: unknown; properties: Record<string, unknown> }[] }>
+  /** Ukraine's oblasts under an air-raid alert right now. */
+  intelAlerts(): Promise<AlertRegion[]>
+  /** Ukraine's oblast shapes, for the alert highlight. */
+  intelUkraine(): Promise<{ type: 'FeatureCollection'; features: { type: 'Feature'; geometry: unknown; properties: Record<string, unknown> }[] }>
   /** This flight's track so far (OpenSky, keyless, sparing): null when it has none. */
   track(hex: string): Promise<FlightTrack | null>
   /** Space launches: the next 30 days and the last 7 (Launch Library 2, keyless). */

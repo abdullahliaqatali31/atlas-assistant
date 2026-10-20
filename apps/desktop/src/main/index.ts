@@ -590,7 +590,7 @@ const ui = new UiService({
 })
 ui.register()
 /** The live world at the owner's places, for the World page. */
-const world = new WorldService({ handle, toRenderer, toRuntime: msg => supervisor.world(msg), requireOwner: () => requireOwner(), log: (level, message) => log(level, message) })
+const world = new WorldService({ handle, toRenderer, toRuntime: msg => supervisor.world(msg), requireOwner: () => requireOwner(), log: (level, message) => log(level, message), cacheDir: join(app.getPath('userData'), 'world-cache') })
 world.register()
 handle(CH.send, arg => {
   const text = parseMessage(arg)

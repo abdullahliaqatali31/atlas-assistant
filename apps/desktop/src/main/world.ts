@@ -10,6 +10,7 @@ import { osCredentialStore } from '@assistant/runtime'
 import { EMPTY_WORLD, isHex, isWikiId, parseWikiThing, wikiQuery, type WikiThing, parseAdsbdbAircraft, parseOpenSkyTrack, type AircraftInfo, type FlightTrack, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
 import { isCableId, parseCableDetail, parseCables, parseLandings, SAT_GROUPS, type CableDetail, type CablesResult } from '../shared/space.ts'
 import { CameraDirectory } from './cameras.ts'
+import { IntelFeed } from './intel.ts'
 import { AdsbFeed, FlightSweep, RouteBook } from './flights.ts'
 import { ShipFeed } from './ships.ts'
 import { WebcamService } from './webcams.ts'
@@ -76,8 +77,13 @@ export class WorldService {
       toRuntime: (msg: Extract<HostRequest, { type: 'world-op' }>) => boolean
       requireOwner: () => void
       log?: (level: 'info' | 'warn', message: string) => void
+      /** Where shape files are kept between runs. */
+      cacheDir: string
     },
-  ) {}
+  ) {
+    this.intel = new IntelFeed({ cacheDir: deps.cacheDir, log: deps.log })
+  }
+  private readonly intel: IntelFeed
 
   onHostEvent(e: Extract<HostEvent, { type: 'world' | 'world-result' }>) {
     if (e.type === 'world') {
@@ -398,6 +404,12 @@ export class WorldService {
     handle(WLD.flightRoute, callsign => (typeof callsign === 'string' ? this.routes.get(callsign) : null))
     handle(WLD.aircraft, hex => this.aircraft(hex))
     handle(WLD.wiki, (kind, id) => this.wiki(kind, id))
+    const hours = (h: unknown) => (typeof h === 'number' && Number.isFinite(h) ? h : 24)
+    handle(WLD.intelEvents, h => this.intel.list(hours(h)))
+    handle(WLD.intelStats, h => this.intel.stats(hours(h)))
+    handle(WLD.intelCountries, async () => (await this.intel.countryShapes()).shapes)
+    handle(WLD.intelAlerts, () => this.intel.ukraineAlerts())
+    handle(WLD.intelUkraine, () => this.intel.ukraineShapes())
     handle(WLD.track, hex => this.track(hex))
     handle(WLD.satellites, which => (which === 'all' ? this.satelliteListAll() : this.satelliteList()))
     handle(WLD.cables, () => this.cables())

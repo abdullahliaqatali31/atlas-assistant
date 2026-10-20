@@ -40,6 +40,7 @@ import { HoverOverlay } from './HoverCard.tsx'
 import { hoverInfo } from './hover.ts'
 import { MODE_FILTER, type DisplayPrefs } from './hud.ts'
 import type { WorldSnapshot } from '../../../shared/world.ts'
+import { CATEGORY_COLOR, type IntelEvent } from '../../../shared/intel.ts'
 import { MODEL_HEADING_OFFSET, headingTape, heightForZoom, modelFor, type ModelId } from './models3d.ts'
 import { Satellites3D } from './sats3d.ts'
 import { latLonLabel } from './sky.ts'
@@ -121,6 +122,7 @@ export default function Globe3D({
   now: clock,
   display,
   displayButton,
+  intel,
 }: {
   start: { lat: number; lon: number; zoom: number }
   onClose: () => void
@@ -135,6 +137,8 @@ export default function Globe3D({
   display?: DisplayPrefs
   /** The flat map's Display button, shown in the 3D top bar. */
   displayButton?: ReactNode
+  /** Conflict events (the Intelligence panel), as points. */
+  intel?: IntelEvent[] | undefined
 }) {
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -155,7 +159,7 @@ export default function Globe3D({
   const layersRef = useRef(layers)
   layersRef.current = layers
   const [widget, setWidget] = useState<Cesium.CesiumWidget | null>(null)
-  const parts = useRef<{ bills: Cesium.BillboardCollection; shipBills: Cesium.BillboardCollection; sats: Satellites3D; cables: Cables3D; cams: Cameras3D; radio: Points3D<RadioStation>; news: Points3D<NewsItem> } | null>(null)
+  const parts = useRef<{ bills: Cesium.BillboardCollection; shipBills: Cesium.BillboardCollection; sats: Satellites3D; cables: Cables3D; cams: Cameras3D; radio: Points3D<RadioStation>; news: Points3D<NewsItem>; intel: Points3D<IntelEvent> } | null>(null)
   const [radioPick, setRadioPick] = useState<number | null>(null)
   const [newsPick, setNewsPick] = useState<number | null>(null)
   const [camPick, setCamPick] = useState<number | null>(null)
@@ -473,7 +477,8 @@ export default function Globe3D({
       const cams = new Cameras3D(scene)
       const radio = new Points3D<RadioStation>(scene, 'radio')
       const news = new Points3D<NewsItem>(scene, 'news')
-      parts.current = { bills, shipBills, sats, cables, cams, radio, news }
+      const intelPoints = new Points3D<IntelEvent>(scene, 'intel')
+      parts.current = { bills, shipBills, sats, cables, cams, radio, news, intel: intelPoints }
       setWidget(viewer)
       void window.world.satellites('all').then(
         list => {
@@ -774,6 +779,15 @@ export default function Globe3D({
     setRadioPick(null)
     setNewsPick(null)
   }, [selectedId])
+
+  // Conflict events from the Intelligence panel.
+  useEffect(() => {
+    const pt = parts.current
+    if (!widget || !pt || widget.isDestroyed()) return
+    pt.intel.load(intel ?? [], e => ({ lat: e.lat, lon: e.lon, color: CATEGORY_COLOR[e.category], size: 4 + e.severity * 1.5 }))
+    pt.intel.setVisible(!!intel?.length)
+    widget.scene.requestRender()
+  }, [widget, intel])
 
   // Continuous frames only while the camera rides something.
   useEffect(() => {

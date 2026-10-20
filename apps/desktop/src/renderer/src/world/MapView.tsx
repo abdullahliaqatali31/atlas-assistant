@@ -32,6 +32,8 @@ import { DISPLAY_MODES, MODE_FILTER, MODE_LABEL, readDisplay, saveDisplay, type 
 const Globe3D = lazy(() => import('./Globe3D.tsx'))
 import type { Globe3DControl } from './Globe3D.tsx'
 import type { Globe3dLayer } from '../../../shared/map.ts'
+import { CATEGORY_COLOR, type AlertRegion, type IntelEvent } from '../../../shared/intel.ts'
+import { DockButtons, DockPanel, DOCK, type DockContext, type DockId } from './Dock.tsx'
 import { MAP3D_STATE_EVENT } from '../../../shared/ui.ts'
 /** If the 3D view fails (no WebGL, a bad driver), say so and keep the 2D map working. */
 class Guard3D extends Component<{ onClose: () => void; children: ReactNode }, { error: string | null }> {
@@ -135,6 +137,24 @@ export function MapView({
   const [threeD, setThreeD] = useState<{ lat: number; lon: number; zoom: number } | null>(null)
   const threeDRef = useRef(threeD)
   threeDRef.current = threeD
+  // The dock: Intelligence, Markets, VIP, Geography (one panel at a time).
+  const [dock, setDock] = useState<DockId | null>(null)
+  const [intelOnMap, setIntelOnMapState] = useState(() => {
+    try {
+      return localStorage.getItem('atlas.intel.onMap') !== '0'
+    } catch {
+      return true
+    }
+  })
+  const setIntelOnMap = (on: boolean) => {
+    setIntelOnMapState(on)
+    try {
+      localStorage.setItem('atlas.intel.onMap', on ? '1' : '0')
+    } catch {
+      // A private window: not remembered.
+    }
+  }
+  const [intel, setIntel] = useState<{ events: IntelEvent[]; alerts: AlertRegion[] } | null>(null)
   // Tell the app (and so Atlas) which map is in front.
   useEffect(() => {
     window.dispatchEvent(new CustomEvent(MAP3D_STATE_EVENT, { detail: threeD !== null }))
@@ -341,6 +361,48 @@ export function MapView({
       routeSource()?.setData(routeFeatures(null, [0, 0]))
     }
   }, [ready, selectedId])
+
+  // Intelligence on the flat map: countries shaded by how much happens there, Ukraine's oblasts under
+  // an air-raid alert, and the events themselves (sized by severity). Kept across style changes.
+  const shapes = useRef<{ countries: FC | null; ukraine: FC | null }>({ countries: null, ukraine: null })
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !intel) return
+    let gone = false
+    const empty: FC = { type: 'FeatureCollection', features: [] }
+    const counts = new Map<string, number>()
+    for (const e of intel.events) if (e.country) counts.set(e.country, (counts.get(e.country) ?? 0) + 1)
+    const top = Math.max(1, ...counts.values())
+    const alertBy = new Map(intel.alerts.map(a => [a.name, a.level]))
+    const draw = () => {
+      if (gone || !m.isStyleLoaded()) return
+      const below = LAYERS.flatMap(l => l.draw.map(d => d.id)).find(id => m.getLayer(id))
+      const source = (id: string, data: FC) => {
+        const src = m.getSource(id) as GeoJSONSource | undefined
+        if (src) src.setData(data)
+        else m.addSource(id, { type: 'geojson', data })
+      }
+      const vis = intelOnMap ? 'visible' : 'none'
+      source('intel-countries', shapes.current.countries ? { ...shapes.current.countries, features: shapes.current.countries.features.map(f => ({ ...f, properties: { ...f.properties, heat: (counts.get(String(f.properties.iso)) ?? 0) / top } })) } : empty)
+      source('ua-alerts', shapes.current.ukraine ? { ...shapes.current.ukraine, features: shapes.current.ukraine.features.filter(f => alertBy.has(String(f.properties.name))).map(f => ({ ...f, properties: { ...f.properties, level: alertBy.get(String(f.properties.name)) ?? '' } })) } : empty)
+      source('intel-events', { type: 'FeatureCollection', features: intel.events.map(e => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lon, e.lat] }, properties: { id: e.id, title: e.title, color: CATEGORY_COLOR[e.category], severity: e.severity } })) })
+      if (!m.getLayer('intel-countries')) m.addLayer({ id: 'intel-countries', type: 'fill', source: 'intel-countries', filter: ['>', ['get', 'heat'], 0], paint: { 'fill-color': '#f59e0b', 'fill-opacity': ['interpolate', ['linear'], ['get', 'heat'], 0, 0.06, 1, 0.32] } }, below)
+      if (!m.getLayer('ua-alerts')) m.addLayer({ id: 'ua-alerts', type: 'fill', source: 'ua-alerts', paint: { 'fill-color': ['match', ['get', 'level'], 'full', '#ef4444', '#fb923c'], 'fill-opacity': 0.35 } }, below)
+      if (!m.getLayer('ua-alerts-line')) m.addLayer({ id: 'ua-alerts-line', type: 'line', source: 'ua-alerts', paint: { 'line-color': '#ef4444', 'line-width': 1, 'line-opacity': 0.7 } }, below)
+      if (!m.getLayer('intel-events')) m.addLayer({ id: 'intel-events', type: 'circle', source: 'intel-events', paint: { 'circle-color': ['get', 'color'], 'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, ['+', 1.5, ['get', 'severity']], 8, ['+', 3, ['*', 1.5, ['get', 'severity']]]], 'circle-stroke-color': '#000', 'circle-stroke-width': 0.8, 'circle-opacity': 0.9 } })
+      for (const id of ['intel-countries', 'ua-alerts', 'ua-alerts-line', 'intel-events']) m.setLayoutProperty(id, 'visibility', vis)
+    }
+    void Promise.all([
+      shapes.current.countries ? null : window.world.intelCountries().then(c => (shapes.current.countries = c as unknown as FC)),
+      shapes.current.ukraine ? null : window.world.intelUkraine().then(u => (shapes.current.ukraine = u as unknown as FC)),
+    ]).then(draw, draw)
+    draw()
+    m.on('styledata', draw)
+    return () => {
+      gone = true
+      m.off('styledata', draw)
+    }
+  }, [ready, intel, intelOnMap])
 
   // The ring around the picked item.
   useEffect(() => {
@@ -677,6 +739,8 @@ export function MapView({
       const n = Number(e.key)
       if (Number.isInteger(n) && n >= 1 && n <= DISPLAY_MODES.length) return setDisplay(d => ({ ...d, mode: DISPLAY_MODES[n - 1]! }))
       if (e.key.toLowerCase() === 'h') return setDisplay(d => ({ ...d, hud: !d.hud }))
+      const dk = DOCK.find(x => x.key === e.key.toLowerCase())
+      if (dk) return setDock(o => (o === dk.id ? null : dk.id))
       const r = RAIL.find(x => x.key === e.key.toLowerCase())
       if (!r) return
       setLayers(x => ({ ...x, [r.id]: !x[r.id] }))
@@ -1034,6 +1098,17 @@ export function MapView({
   const on = LAYERS.filter(l => layers[l.id]).length
   const current = STYLES.find(s => s.id === prefs.style)!
   const toggle = (which: 'layers' | 'style' | 'display') => setOpen(o => (o === which ? null : which))
+  const dockCtx: DockContext = {
+    flyTo: (lat, lon, zoom) => {
+      if (threeDRef.current && globeCtl.current) void globeCtl.current.run({ kind: '3d', action: 'open', lat, lon, zoom, show: [], hide: [] })
+      else if (map.current) void fly(map.current, { center: [lon, lat], zoom })
+    },
+    inView: (lat, lon) => (threeDRef.current ? true : (map.current?.getBounds().contains([lon, lat]) ?? true)),
+    intelOnMap,
+    setIntelOnMap,
+    onIntel: (events, alerts) => setIntel({ events, alerts }),
+  }
+  const dockButtons = <DockButtons open={dock} onOpen={setDock} badge={intel ? { intel: String(intel.events.length) } : undefined} />
   const displayButton = (
     <button type="button" onClick={() => toggle('display')} aria-expanded={open === 'display'} className={`map-chip px-2 ${open === 'display' || display.mode !== 'normal' || display.hud ? 'border-accent text-accent' : ''}`} title="Display: night vision, thermal, CRT, HUD (keys 1-5, H)">
       <ScanEye className="size-3.5" aria-hidden />
@@ -1077,6 +1152,7 @@ export function MapView({
         <span className="hidden @[640px]:inline">3D</span>
       </button>
       {displayButton}
+      {dockButtons}
       <button type="button" onClick={() => toggle('layers')} aria-expanded={open === 'layers'} className={`map-chip @[640px]:hidden ${open === 'layers' ? 'border-accent text-accent' : ''}`} title="Map layers">
         <Layers className="size-3.5" aria-hidden />
         <span className="hidden @[520px]:inline">Layers</span>
@@ -1142,11 +1218,18 @@ export function MapView({
         />
       )}
       {!threeD && toolbar(controls)}
+      {dock && (
+        <div className={`pointer-events-none absolute bottom-4 top-14 z-40 flex ${threeD ? 'right-3' : 'right-[64px]'}`}>
+          <DockPanel which={dock} onClose={() => setDock(null)} ctx={dockCtx}>
+            <p className="p-4 text-xs text-muted">Coming next in this build.</p>
+          </DockPanel>
+        </div>
+      )}
       {note3d && <p className="glass absolute left-1/2 top-14 z-40 max-w-md -translate-x-1/2 rounded-lg bg-solid/90 px-3 py-1.5 text-xs text-warm">{note3d}</p>}
       {threeD && (
         <Guard3D onClose={() => setThreeD(null)}>
         <Suspense fallback={<div className="absolute inset-0 z-30 grid place-items-center bg-black/80 text-xs text-muted">Loading the 3D world…</div>}>
-          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} world={world} now={now} display={display} displayButton={displayButton} />
+          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} world={world} now={now} display={display} displayButton={<>{displayButton}{dockButtons}</>} intel={intelOnMap ? intel?.events : undefined} />
         </Suspense>
         </Guard3D>
       )}
