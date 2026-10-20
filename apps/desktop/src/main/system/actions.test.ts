@@ -13,6 +13,8 @@ vi.mock('electron', () => ({
   app: { getPath: (k: string) => join(dir, k) },
   shell: { openPath: async (p: string) => (opened.push(p), ''), openExternal: async (u: string) => void opened.push(u), showItemInFolder: (p: string) => void opened.push(p) },
 }))
+// VS Code itself is never started by the tests: record what would open, in its own window.
+vi.mock('./vscode.ts', () => ({ openInVsCode: async (path: string, wsl: string | null) => void opened.push(`code --new-window${wsl ? ` --remote wsl+${wsl}` : ''} ${path}`) }))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
 const entry = (kind: MapEntry['kind'], name: string, path: string | null, extra: Partial<MapEntry> = {}): MapEntry => ({ id: `${kind[0]}-${name}`, kind, name, path, wsl: null, appId: null, source: 'scan', usedAt: 0, ...extra })
@@ -72,7 +74,7 @@ describe('PC actions, doing', async () => {
 
   it('opens WSL projects in VS Code and the Claude app, and knows "this project"', async () => {
     expect(await pc.open('atlas', 'vscode', '')).toMatch(/VS Code \(Remote - WSL\)/)
-    expect(opened.at(-1)).toBe('vscode://vscode-remote/wsl+Ubuntu/home/a/atlas')
+    expect(opened.at(-1)).toBe('code --new-window --remote wsl+Ubuntu /home/a/atlas')
     await pc.open('p-atlas', 'claude', '')
     expect(opened.at(-1)).toBe(`claude://code/new?folder=${encodeURIComponent('\\\\wsl.localhost\\Ubuntu\\home\\a\\atlas')}`)
     expect(await pc.foreground()).toContain('[p-atlas] "atlas" in WSL Ubuntu')
