@@ -66,6 +66,10 @@ export const hoverInfo = (kind: LayerId, props: Props, world: WorldSnapshot, now
       return { ...base, kind: `NEWS · ${str(props.n)}`, title, facts: [[str(props.place), str(props.source)].filter(Boolean).join(' · '), str(props.summary)].filter(Boolean) }
     case 'pins':
       return { ...base, title, facts: [str(props.note)].filter(Boolean) }
+    case 'fires': {
+      const at = typeof props.time === 'number' ? props.time : 0
+      return { ...base, kind: `FIRE · ${str(props.conf).toUpperCase()} CONFIDENCE`, title: `${props.frp} MW`, facts: [at ? `Seen ${shortAge(at, now)} ago, by ${props.day === 1 ? 'day' : 'night'}` : '', 'NASA FIRMS · VIIRS NOAA-20'].filter(Boolean) }
+    }
     case 'launches': {
       const at = typeof props.at === 'number' ? props.at : 0
       const when = at ? (at > now ? `T−${shortAge(now - (at - now), now)}` : `${shortAge(at, now)} ago`) : ''

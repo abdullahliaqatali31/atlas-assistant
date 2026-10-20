@@ -5,7 +5,7 @@
  * "Now" (what is happening in that layer) and "Filters". A pin keeps the
  * panel open. Hidden on narrow windows, where the Layers button remains.
  */
-import { Activity, BookOpen, CloudRain, Flame, TriangleAlert, MapPin, Newspaper, Pin, PinOff, Plane, Radio, Rocket, Satellite, Ship, Video, type LucideIcon } from 'lucide-react'
+import { Activity, BookOpen, CloudRain, Flame, FlameKindling, TriangleAlert, MapPin, Newspaper, Pin, PinOff, Plane, Radio, Rocket, Satellite, Ship, Video, type LucideIcon } from 'lucide-react'
 import type * as satellite from 'satellite.js'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
@@ -31,6 +31,7 @@ export const RAIL: { id: LayerId; icon: LucideIcon; key: string }[] = [
   { id: 'cameras', icon: Video, key: 'c' },
   { id: 'quakes', icon: Activity, key: 'q' },
   { id: 'events', icon: Flame, key: 'e' },
+  { id: 'fires', icon: FlameKindling, key: 'x' },
   { id: 'disasters', icon: TriangleAlert, key: 'd' },
   { id: 'launches', icon: Rocket, key: 'l' },
   { id: 'radio', icon: Radio, key: 'r' },
@@ -241,6 +242,22 @@ function NowTab({ id, ctx }: { id: LayerId; ctx: RailContext }) {
         </>
       ) : (
         <Empty>No current disaster alerts.</Empty>
+      )
+    }
+    case 'fires': {
+      const strongest = topBy(fc, 'frp', 10)
+      const inView = all.length
+      return inView ? (
+        <>
+          <p className="px-1.5 text-xs">
+            <span className="font-mono text-base">{(ctx.sources.fires?.features.length ?? 0).toLocaleString()}</span> fires seen from space in the last day
+          </p>
+          <Label>Strongest</Label>
+          <ul>{strongest.map(f => <Row key={String(f.properties.id)} f={f} kind={id} right={`${Math.round(Number(f.properties.frp))} MW`} onFocus={ctx.onFocus} />)}</ul>
+          <p className="mt-1 px-1.5 text-[10px] text-muted">NASA FIRMS, VIIRS on NOAA-20: hot spots the satellite saw (fires, also flares and volcanoes). MW is how strongly it burns.</p>
+        </>
+      ) : (
+        <Empty>Loading the last day’s fires from NASA…</Empty>
       )
     }
     case 'launches': {

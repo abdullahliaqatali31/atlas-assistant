@@ -131,6 +131,17 @@ export const POWER_PROVIDERS: readonly PowerProvider[] = Object.freeze([
     manageUrl: 'https://developer.tomtom.com/user/me/apps',
     without: 'No live traffic layer; everything else on the map works.',
   },
+  {
+    id: 'opensky',
+    title: 'OpenSky Network',
+    group: 'world',
+    unlocks: 'About ten times more flight data from OpenSky: aircraft filled in where the volunteer feeds are thin (much of Pakistan and Asia) and each plane’s flown track. Make an API client in your OpenSky account and paste it as clientId:clientSecret.',
+    secret: 'OPENSKY_CLIENT',
+    tier: 'free',
+    getUrl: 'https://opensky-network.org/my-opensky/account',
+    manageUrl: 'https://opensky-network.org/my-opensky/account',
+    without: 'OpenSky is still used anonymously, about 400 credits a day.',
+  },
 ])
 
 export const powerProvider = (id: string) => POWER_PROVIDERS.find(p => p.id === id)

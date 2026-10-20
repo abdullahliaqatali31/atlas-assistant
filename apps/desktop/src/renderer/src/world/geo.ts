@@ -2,7 +2,7 @@
 import * as satellite from 'satellite.js'
 
 import { aircraftName, squawkMeaning } from '../../../shared/aircraft.ts'
-import type { Camera, Flight, Launch, RadioStation, Ship, WorldSnapshot } from '../../../shared/world.ts'
+import type { Camera, Flight, Launch, FireSpot, RadioStation, Ship, WorldSnapshot } from '../../../shared/world.ts'
 
 export const cleanError = (err: unknown) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.'
@@ -221,6 +221,16 @@ export const launchWhen = (at: number, now: number) => {
 }
 
 const LAUNCH_COLOR: Record<string, string> = { Go: '#22c55e', TBC: '#94a3b8', TBD: '#94a3b8', 'In Flight': '#22d3ee', Success: '#84cc16', Failure: '#ef4444', 'Partial Failure': '#f97316', Hold: '#f59e0b' }
+
+/** Fires from space as points: the strongest drawn on top. */
+export const fireFeatures = (list: readonly FireSpot[]): FC => ({
+  type: 'FeatureCollection',
+  features: [...list].reverse().map((f, i) => ({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [f.lon, f.lat] },
+    properties: { id: `fire:${i}:${f.lat.toFixed(3)},${f.lon.toFixed(3)}`, title: `Fire · ${Math.round(f.frp)} MW`, frp: Math.round(f.frp * 10) / 10, conf: f.conf === 'h' ? 'high' : 'nominal', time: f.at, day: f.day ? 1 : 0 },
+  })),
+})
 
 export const launchFeatures = (list: Launch[], now: number): FC => {
   const nextId = [...list].filter(l => l.at > now - 3_600_000).sort((a, b) => a.at - b.at)[0]?.id

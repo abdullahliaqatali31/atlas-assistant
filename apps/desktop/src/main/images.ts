@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-const HOSTS = new Set(['commons.wikimedia.org', 'upload.wikimedia.org', 'image.airport-data.com', 'airport-data.com', 'www.airport-data.com'])
+const HOSTS = new Set(['commons.wikimedia.org', 'upload.wikimedia.org', 'image.airport-data.com', 'airport-data.com', 'www.airport-data.com', 'thespacedevs-prod.nyc3.digitaloceanspaces.com'])
 const MAX_BYTES = 4 * 1024 * 1024
 const PARALLEL = 2
 const UA = 'Atlas personal assistant (open source desktop app) Electron'

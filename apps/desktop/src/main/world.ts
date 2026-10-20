@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import type { HostEvent, HostRequest } from '../shared/ipc.ts'
 import { osCredentialStore } from '@assistant/runtime'
 
-import { EMPTY_WORLD, countryQuery, parseCountryCard, type CountryCard, isHex, isWikiId, parseWikiThing, wikiQuery, type WikiThing, parseAdsbdbAircraft, parseOpenSkyTrack, type AircraftInfo, type FlightTrack, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
+import { EMPTY_WORLD, parseFirms, type FireSpot, countryQuery, parseCountryCard, type CountryCard, isHex, isWikiId, parseWikiThing, wikiQuery, type WikiThing, parseAdsbdbAircraft, parseOpenSkyTrack, type AircraftInfo, type FlightTrack, parseFlights, parseLaunches, parseOpenSky, parseRadio, WLD, type Flight, type Launch, type RadioStation, type FlightsArea, type GeoBox, type SatelliteElements, type WorldOp, type WorldSnapshot } from '../shared/world.ts'
 import { isCableId, parseCableDetail, parseCables, parseLandings, SAT_GROUPS, type CableDetail, type CablesResult } from '../shared/space.ts'
 import { CameraDirectory } from './cameras.ts'
 import { IntelFeed } from './intel.ts'
@@ -19,6 +19,7 @@ import { join } from 'node:path'
 import { AdsbFeed, FlightSweep, RouteBook } from './flights.ts'
 import { ShipFeed } from './ships.ts'
 import { TrafficService } from './traffic.ts'
+import { OpenSkyAuth } from './opensky.ts'
 import { WebcamService } from './webcams.ts'
 
 const TIMEOUT_MS = 60_000
@@ -60,6 +61,19 @@ export class WorldService {
   private openSkyCache: { at: number; lat: number; lon: number; flights: Flight[] } | null = null
   private openSkyDay = { day: '', calls: 0 }
   private openSkyPausedUntil = 0
+  /** The owner's OpenSky API client, when set in Power up (else anonymous). */
+  private readonly openSkyAuth = new OpenSkyAuth({ client: () => osCredentialStore().get('OPENSKY_CLIENT') ?? null })
+
+  /** OpenSky JSON, signed in when the owner has a client (and anonymous if the client is refused). */
+  private async openSkyJson(url: string): Promise<unknown> {
+    const headers = await this.openSkyAuth.headers().catch((e: unknown) => {
+      this.deps.log?.('warn', `OpenSky sign-in: ${e instanceof Error ? e.message : String(e)}`)
+      return {}
+    })
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return res.json()
+  }
   private satellites: { at: number; list: SatelliteElements[] } | null = null
   private satellitesAll: { at: number; list: SatelliteElements[] } | null = null
   private cablesCache: { at: number; data: CablesResult } | null = null
@@ -182,14 +196,15 @@ export class WorldService {
     if (this.openSkyDay.day !== day) this.openSkyDay = { day, calls: 0 }
     const near = this.openSkyCache && Math.abs(this.openSkyCache.lat - lat) < 3 && Math.abs(this.openSkyCache.lon - lon) < 3
     if (near && now - this.openSkyCache!.at < OPENSKY_GAP) return this.openSkyCache!.flights
-    if (this.openSkyDay.calls >= OPENSKY_DAILY || now < this.openSkyPausedUntil) return near ? this.openSkyCache!.flights : []
+    // Signed in, OpenSky allows about ten times more.
+    if (this.openSkyDay.calls >= (this.openSkyAuth.signedIn ? OPENSKY_DAILY * 8 : OPENSKY_DAILY) || now < this.openSkyPausedUntil) return near ? this.openSkyCache!.flights : []
     // A box about the view's size, at most 20° on a side (bigger boxes cost more credits).
     const dLat = Math.min(10, radiusNm / 60)
     const dLon = Math.min(10, radiusNm / 60 / Math.max(0.2, Math.cos((lat * Math.PI) / 180)))
     const box = `lamin=${(lat - dLat).toFixed(2)}&lomin=${(lon - dLon).toFixed(2)}&lamax=${(lat + dLat).toFixed(2)}&lomax=${(lon + dLon).toFixed(2)}`
     this.openSkyDay.calls++
     try {
-      const flights = parseOpenSky(await getJson(`https://opensky-network.org/api/states/all?${box}`))
+      const flights = parseOpenSky(await this.openSkyJson(`https://opensky-network.org/api/states/all?${box}`))
       this.openSkyCache = { at: now, lat, lon, flights }
       return flights
     } catch (e) {
@@ -268,7 +283,7 @@ export class WorldService {
     const key = hex.toLowerCase()
     const hit = this.tracks.get(key)
     if (hit && Date.now() - hit.at < 120_000) return hit.track
-    const track = await getJson(`https://opensky-network.org/api/tracks/all?icao24=${key}&time=0`).then(parseOpenSkyTrack, () => null)
+    const track = await this.openSkyJson(`https://opensky-network.org/api/tracks/all?icao24=${key}&time=0`).then(parseOpenSkyTrack, () => null)
     if (this.tracks.size > 100) this.tracks.delete(this.tracks.keys().next().value!)
     this.tracks.set(key, { at: Date.now(), track })
     return track
@@ -438,6 +453,42 @@ export class WorldService {
   }
 
   private launchCache: { at: number; list: Launch[] } | null = null
+  private fireCache: { at: number; list: FireSpot[] } | null = null
+  private fireLoading: Promise<FireSpot[]> | null = null
+
+  /** The last day's fires (NASA FIRMS VIIRS, keyless, ~9 MB): every three hours, kept on disk between runs. */
+  async fires(): Promise<FireSpot[]> {
+    const fresh = (c: { at: number } | null) => c && Date.now() - c.at < 3 * 3600_000
+    if (fresh(this.fireCache)) return this.fireCache!.list
+    const file = join(this.deps.cacheDir, 'fires.json')
+    if (!this.fireCache) {
+      try {
+        const disk = JSON.parse(await readFile(file, 'utf8')) as { at: number; list: FireSpot[] }
+        this.fireCache = disk
+        if (fresh(disk)) return disk.list
+      } catch {
+        // First run: nothing kept yet.
+      }
+    }
+    this.fireLoading ??= (async () => {
+      try {
+        const res = await fetch('https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-20-viirs-c2/csv/J1_VIIRS_C2_Global_24h.csv', { signal: AbortSignal.timeout(60_000) })
+        if (!res.ok) throw new Error(`NASA FIRMS answered ${res.status}.`)
+        const list = parseFirms(await res.text())
+        if (!list.length) throw new Error('NASA FIRMS sent no fires.')
+        this.fireCache = { at: Date.now(), list }
+        await mkdir(this.deps.cacheDir, { recursive: true }).catch(() => undefined)
+        await writeFile(file, JSON.stringify(this.fireCache)).catch(() => undefined)
+        return list
+      } catch (e) {
+        this.deps.log?.('warn', `Fires: ${e instanceof Error ? e.message : String(e)}`)
+        return this.fireCache?.list ?? []
+      } finally {
+        this.fireLoading = null
+      }
+    })()
+    return this.fireLoading
+  }
   private radioCache: { at: number; list: RadioStation[] } | null = null
   private rainCache: { at: number; time: string | null } | null = null
 
@@ -533,6 +584,7 @@ export class WorldService {
     handle(WLD.cables, () => this.cables())
     handle(WLD.cable, id => this.cable(id))
     handle(WLD.launches, () => this.launches())
+    handle(WLD.fires, () => this.fires())
     handle(WLD.trafficFlow, (box, zoom) => this.traffic.flow(box, zoom))
     handle(WLD.trafficIncidents, box => this.traffic.incidents(box))
     handle(WLD.radio, () => this.radio())

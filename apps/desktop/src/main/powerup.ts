@@ -8,6 +8,7 @@
 import type { CredentialStore } from '@assistant/runtime'
 
 import { keyProblem, powerProvider, POWER_PROVIDERS, type PowerProvider, type PowerRow } from '../shared/powerup.ts'
+import { OpenSkyAuth } from './opensky.ts'
 import type { LlmProviderId } from '@assistant/providers/llm-presets'
 
 const TIMEOUT_MS = 15_000
@@ -128,6 +129,14 @@ export class PowerUp {
       case 'tomtom': {
         const s = await fetchStatus(`https://api.tomtom.com/traffic/map/4/tile/flow/relative0/1/0/0.png?key=${encodeURIComponent(key)}`, {})
         return s === 200 ? { ok: true, message: 'Works · live traffic on.' } : { ok: false, message: bad(s) }
+      }
+      case 'opensky': {
+        try {
+          await new OpenSkyAuth({ client: () => key }).headers()
+          return { ok: true, message: 'Works · more flight data on.' }
+        } catch (e) {
+          return { ok: false, message: e instanceof Error ? e.message : String(e) }
+        }
       }
       case 'google-maps': {
         const s = await fetchStatus(`https://tile.googleapis.com/v1/3dtiles/root.json?key=${encodeURIComponent(key)}`, {})

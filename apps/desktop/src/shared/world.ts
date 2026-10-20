@@ -718,6 +718,16 @@ export interface Launch {
   lat: number
   lon: number
   webcast: boolean
+  /** A picture of the rocket or mission (thumbnail). */
+  image: string
+  /** What the mission is, in a few sentences. */
+  description: string
+  /** A video or live stream page (https), when Launch Library knows one. */
+  video: string
+  /** Chance the weather allows it, 0-100, when forecast. */
+  probability: number | null
+  /** The launch window's end, epoch ms. */
+  windowEnd: number | null
 }
 
 export const parseLaunches = (j: unknown): Launch[] => {
@@ -725,7 +735,7 @@ export const parseLaunches = (j: unknown): Launch[] => {
   const out: Launch[] = []
   const str = (v: unknown, n = 120) => (typeof v === 'string' ? v.slice(0, n) : '')
   for (const r of results) {
-    const o = (r ?? {}) as { id?: unknown; name?: unknown; net?: unknown; webcast_live?: unknown; status?: { abbrev?: unknown; name?: unknown }; launch_service_provider?: { name?: unknown }; rocket?: { configuration?: { name?: unknown } }; mission?: { name?: unknown; orbit?: { name?: unknown } }; pad?: { name?: unknown; latitude?: unknown; longitude?: unknown; location?: { name?: unknown } } }
+    const o = (r ?? {}) as { id?: unknown; name?: unknown; net?: unknown; webcast_live?: unknown; probability?: unknown; window_end?: unknown; image?: { thumbnail_url?: unknown; image_url?: unknown }; status?: { abbrev?: unknown; name?: unknown }; launch_service_provider?: { name?: unknown }; rocket?: { configuration?: { name?: unknown } }; mission?: { name?: unknown; description?: unknown; orbit?: { name?: unknown }; vid_urls?: { url?: unknown; priority?: unknown }[] }; pad?: { name?: unknown; latitude?: unknown; longitude?: unknown; location?: { name?: unknown } } }
     const lat = Number(o.pad?.latitude)
     const lon = Number(o.pad?.longitude)
     const at = Date.parse(str(o.net, 40))
@@ -744,9 +754,54 @@ export const parseLaunches = (j: unknown): Launch[] => {
       lat,
       lon,
       webcast: o.webcast_live === true,
+      image: /^https:\/\//.test(str(o.image?.thumbnail_url, 400)) ? str(o.image?.thumbnail_url, 400) : '',
+      description: str(o.mission?.description, 600),
+      video: (o.mission?.vid_urls ?? []).map(v => str(v?.url, 400)).find(u => /^https:\/\//.test(u)) ?? '',
+      probability: typeof o.probability === 'number' && o.probability >= 0 && o.probability <= 100 ? o.probability : null,
+      windowEnd: Number.isFinite(Date.parse(str(o.window_end, 40))) ? Date.parse(str(o.window_end, 40)) : null,
     })
   }
   return out
+}
+
+/** A fire seen from space in the last day (NASA FIRMS, VIIRS on NOAA-20). */
+export interface FireSpot {
+  lat: number
+  lon: number
+  /** Fire radiative power, megawatts: how strong it burns. */
+  frp: number
+  /** n nominal, h high. */
+  conf: 'n' | 'h'
+  /** When the satellite saw it, epoch ms. */
+  at: number
+  /** Seen by day (D) or night (N). */
+  day: boolean
+}
+
+/** FIRMS' global CSV to the strongest fires (nominal or high confidence), at most `max`. */
+export const parseFirms = (csv: string, max = 30_000): FireSpot[] => {
+  const lines = csv.split(/\r?\n/)
+  const head = (lines[0] ?? '').split(',')
+  const col = (n: string) => head.indexOf(n)
+  const [iLat, iLon, iFrp, iConf, iDate, iTime, iDn] = ['latitude', 'longitude', 'frp', 'confidence', 'acq_date', 'acq_time', 'daynight'].map(col)
+  if ([iLat, iLon, iFrp, iConf, iDate, iTime].some(i => i! < 0)) return []
+  const out: FireSpot[] = []
+  for (let k = 1; k < lines.length; k++) {
+    const c = lines[k]!.split(',')
+    if (c.length < head.length) continue
+    const conf = c[iConf!]!.trim().toLowerCase()
+    const cf = conf === 'high' || conf === 'h' ? 'h' : conf === 'nominal' || conf === 'n' ? 'n' : null
+    if (!cf) continue
+    const lat = Number(c[iLat!])
+    const lon = Number(c[iLon!])
+    const frp = Number(c[iFrp!])
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(frp)) continue
+    const t = c[iTime!]!.padStart(4, '0')
+    const at = Date.parse(`${c[iDate!]}T${t.slice(0, 2)}:${t.slice(2)}:00Z`)
+    out.push({ lat, lon, frp, conf: cf, at: Number.isFinite(at) ? at : 0, day: iDn! >= 0 ? c[iDn!]!.trim() === 'D' : true })
+  }
+  out.sort((a, b) => b.frp - a.frp)
+  return out.slice(0, max)
 }
 
 /** An internet radio station with a place (Radio Browser). */
@@ -803,6 +858,7 @@ export const WLD = {
   track: 'world:track',
   launches: 'world:launches',
   trafficFlow: 'world:traffic-flow',
+  fires: 'world:fires',
   trafficIncidents: 'world:traffic-incidents',
   radio: 'world:radio',
   rain: 'world:rain',
@@ -858,6 +914,8 @@ export interface WorldBridge {
   track(hex: string): Promise<FlightTrack | null>
   /** Space launches: the next 30 days and the last 7 (Launch Library 2, keyless). */
   launches(): Promise<Launch[]>
+  /** Fires seen from space in the last day (NASA FIRMS, keyless), strongest first. */
+  fires(): Promise<FireSpot[]>
   /** Roads with live flow around a view (TomTom; OpenStreetMap roads, simulated, where TomTom has none). */
   trafficFlow(box: GeoBox, zoom: number): Promise<import('./traffic.ts').TrafficFlowView>
   /** Traffic incidents in a view (TomTom). */

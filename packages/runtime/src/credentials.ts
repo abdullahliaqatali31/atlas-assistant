@@ -31,6 +31,8 @@ export const SECRET_NAMES = [
   'CESIUM_ION_TOKEN',
   // Live traffic flow on the World map (TomTom; free tier).
   'TOMTOM_API_KEY',
+  // More flight data (OpenSky Network API client, stored as clientId:clientSecret).
+  'OPENSKY_CLIENT',
 ] as const
 export type SecretName = (typeof SECRET_NAMES)[number]
 

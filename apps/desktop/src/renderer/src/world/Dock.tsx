@@ -4,7 +4,7 @@
  * and one panel at a time, docked on the right so the item card keeps the
  * left. Each panel reads main's keyless feeds; the map shows what it can.
  */
-import { Briefcase, Globe2, Search, Shield, Star, Video, X } from 'lucide-react'
+import { Briefcase, Globe2, Search, Shield, Star, Video, X, Rocket } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { CATEGORY_COLOR, CATEGORY_LABEL, INTEL_CATEGORIES, type AlertRegion, type IntelCategory, type IntelEvent } from '../../../shared/intel.ts'
@@ -14,9 +14,10 @@ import type { Selected } from './Inspector.tsx'
 import { cameraFeatures } from './geo.ts'
 import { VIP_CATEGORIES, VIP_LABEL, type RichPerson, type VipCategory, type VipFlying } from '../../../shared/vip.ts'
 import { MAP3D_EVENT } from './mapops.ts'
+import type { Launch } from '../../../shared/world.ts'
 import { initialsOf, RemoteImg } from './RemoteImg.tsx'
 
-export type DockId = 'intel' | 'cams' | 'markets' | 'vip' | 'geo'
+export type DockId = 'intel' | 'cams' | 'markets' | 'vip' | 'geo' | 'launches'
 
 export const DOCK: { id: DockId; label: string; icon: typeof Shield; key: string; color: string }[] = [
   { id: 'intel', label: 'Intelligence', icon: Shield, key: 'i', color: '#f59e0b' },
@@ -24,6 +25,7 @@ export const DOCK: { id: DockId; label: string; icon: typeof Shield; key: string
   { id: 'markets', label: 'Markets', icon: Briefcase, key: 'k', color: '#eab308' },
   { id: 'vip', label: 'VIP people', icon: Star, key: 'v', color: '#facc15' },
   { id: 'geo', label: 'Geography', icon: Globe2, key: 'z', color: '#22c55e' },
+  { id: 'launches', label: 'Launches', icon: Rocket, key: 'u', color: '#a3e635' },
 ]
 
 /** What a panel can do with the map it sits on. */
@@ -278,7 +280,7 @@ export function DockPanel({ which, onClose, ctx, children }: { which: DockId; on
           <X className="size-4" aria-hidden />
         </button>
       </header>
-      {which === 'intel' ? <IntelPanel ctx={ctx} /> : which === 'markets' ? <MarketsPanel /> : which === 'geo' ? <GeoPanel ctx={ctx} /> : which === 'vip' ? <VipPanel ctx={ctx} /> : which === 'cams' ? <CamerasPanel ctx={ctx} /> : children}
+      {which === 'intel' ? <IntelPanel ctx={ctx} /> : which === 'markets' ? <MarketsPanel /> : which === 'geo' ? <GeoPanel ctx={ctx} /> : which === 'vip' ? <VipPanel ctx={ctx} /> : which === 'cams' ? <CamerasPanel ctx={ctx} /> : which === 'launches' ? <LaunchesPanel ctx={ctx} /> : children}
     </section>
   )
 }
@@ -749,6 +751,104 @@ function CamerasPanel({ ctx }: { ctx: DockContext }) {
         )}
       </div>
       <p className="text-[10px] text-muted">Official open feeds only (road agencies and cities); Windy webcams with your key appear on the map.</p>
+    </div>
+  )
+}
+
+const countdown = (t: number, now: number) => {
+  const s = Math.round((t - now) / 1000)
+  if (s <= 0) return s > -3600 ? 'Lifting off' : ''
+  const d = Math.floor(s / 86_400)
+  const h = Math.floor((s % 86_400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  return d ? `T−${d}d ${h}h ${m}m` : `T−${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+}
+
+const STATUS_TONE: Record<string, string> = { Go: 'text-ok border-ok/50', Success: 'text-ok border-ok/50', TBC: 'text-warm border-warm/50', TBD: 'text-muted border-border', Hold: 'text-warm border-warm/50', Failure: 'text-danger border-danger/50', 'In Flight': 'text-accent border-accent/50' }
+
+/** Space launches: the next ones with a live countdown, the rocket's picture and the stream, and the last week's results. */
+function LaunchesPanel({ ctx }: { ctx: DockContext }) {
+  const [list, setList] = useState<Launch[] | null>(null)
+  const [error, setError] = useState('')
+  const [past, setPast] = useState(false)
+  const [open, setOpen] = useState<string | null>(null)
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    let gone = false
+    const load = () => void window.world.launches().then(l => !gone && (setList(l), setError('')), () => !gone && setError('Launch Library is unavailable right now.'))
+    load()
+    const t = setInterval(load, 5 * 60_000)
+    const tick = setInterval(() => !document.hidden && setNow(Date.now()), 1000)
+    return () => {
+      gone = true
+      clearInterval(t)
+      clearInterval(tick)
+    }
+  }, [])
+  const shown = (list ?? []).filter(l => (past ? l.at <= now - 3_600_000 : l.at > now - 3_600_000)).sort((a, b) => (past ? b.at - a.at : a.at - b.at))
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2 p-2.5">
+      <div className="flex gap-1 text-[11px]">
+        {[false, true].map(p => (
+          <button key={String(p)} type="button" onClick={() => setPast(p)} aria-pressed={past === p} className={`rounded-full border px-2.5 py-0.5 ${past === p ? 'border-accent text-accent' : 'border-border text-muted hover:text-text'}`}>
+            {p ? 'Last 7 days' : 'Upcoming'}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+        {error && <p className="px-1 text-xs text-warm">{error}</p>}
+        {!list && !error && <p className="px-1 text-xs text-muted">Loading launches…</p>}
+        {list && !shown.length && <p className="px-1 text-xs text-muted">{past ? 'No launches in the last week.' : 'No launches known yet.'}</p>}
+        {shown.slice(0, 30).map((l, i) => {
+          const isOpen = open === l.id || (!past && i === 0 && open === null)
+          return (
+            <article key={l.id} className={`tile overflow-hidden ${!past && i === 0 ? 'border-lime-400/40' : ''}`}>
+              <button type="button" className="flex w-full gap-2.5 p-2 text-left" onClick={() => setOpen(isOpen ? '' : l.id)} aria-expanded={isOpen}>
+                <RemoteImg src={l.image || null} alt="" className="size-14 shrink-0 rounded-lg object-cover" initials={(l.rocket || l.name).slice(0, 2)} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className={`rounded-full border px-1.5 text-[9px] uppercase tracking-wide ${STATUS_TONE[l.status] ?? 'border-border text-muted'}`}>{l.status || '—'}</span>
+                    {l.webcast && <span className="rounded-full bg-danger/20 px-1.5 text-[9px] font-semibold uppercase text-danger">Live</span>}
+                  </span>
+                  <span className="mt-0.5 line-clamp-2 block text-[13px] font-medium leading-snug">{l.name}</span>
+                  <span className="block truncate text-[11px] text-muted">{[l.provider, l.location].filter(Boolean).join(' · ')}</span>
+                  <span className="mt-0.5 block font-mono text-xs text-lime-300">{past ? new Date(l.at).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : countdown(l.at, now) || new Date(l.at).toLocaleString()}</span>
+                </span>
+              </button>
+              {isOpen && (
+                <div className="space-y-1.5 border-t border-border px-2.5 pb-2.5 pt-2 text-xs">
+                  {!past && <p className="text-muted">{new Date(l.at).toLocaleString([], { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}{l.probability !== null ? ` · weather ${l.probability}% go` : ''}</p>}
+                  <p>
+                    <span className="text-muted">Rocket </span>
+                    {l.rocket || '—'}
+                    {l.mission ? (
+                      <>
+                        <span className="text-muted"> · Mission </span>
+                        {l.mission}
+                        {l.orbit ? ` → ${l.orbit}` : ''}
+                      </>
+                    ) : null}
+                  </p>
+                  <p className="text-muted">{[l.pad, l.location].filter(Boolean).join(', ')}</p>
+                  {l.description && <p className="leading-relaxed">{l.description}</p>}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    <button type="button" onClick={() => ctx.flyTo(l.lat, l.lon, 14)} className="rounded-md border border-border px-2 py-1 text-[11px] hover:border-accent hover:text-accent">
+                      Show the pad
+                    </button>
+                    {l.video && (
+                      <a href={l.video} target="_blank" rel="noreferrer" className="rounded-md border border-danger/50 px-2 py-1 text-[11px] text-danger hover:bg-danger/10">
+                        {l.webcast ? 'Watch live' : 'Watch'}
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </article>
+          )
+        })}
+      </div>
+      <p className="text-[10px] text-muted">Launch Library 2 (The Space Devs), free and keyless: updated every few minutes.</p>
     </div>
   )
 }

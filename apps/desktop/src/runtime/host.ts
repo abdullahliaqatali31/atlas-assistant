@@ -221,7 +221,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   for (const t of memory.recoverInterrupted()) log('warn', `"${t.title}" was interrupted last time; it is waiting for verification.`)
   learning?.stop()
   world?.stop()
-  world = new WorldWatch({ memory, now: () => systemClock.now(), localNews: place => news.mentions(place), publish: snapshot => post({ type: 'world', snapshot }), log: (level, message) => log(level, message) })
+  world = new WorldWatch({ memory, now: () => systemClock.now(), utcOffsetMin: config.owner.utcOffsetMin, localNews: place => news.mentions(place), publish: snapshot => post({ type: 'world', snapshot }), log: (level, message) => log(level, message) })
   world.start()
   const watch = world
   const improvements = new Improvements({ memory, clock: systemClock, writeBrief: (project, file, text) => code.writeBrief(project, file, text) })

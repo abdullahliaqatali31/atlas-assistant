@@ -296,6 +296,7 @@ const world: WorldBridge = {
   intelUkraine: () => ipcRenderer.invoke(WLD.intelUkraine),
   track: hex => ipcRenderer.invoke(WLD.track, hex),
   launches: () => ipcRenderer.invoke(WLD.launches),
+  fires: () => ipcRenderer.invoke(WLD.fires),
   trafficFlow: (box, zoom) => ipcRenderer.invoke(WLD.trafficFlow, box, zoom),
   trafficIncidents: box => ipcRenderer.invoke(WLD.trafficIncidents, box),
   radio: () => ipcRenderer.invoke(WLD.radio),

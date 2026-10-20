@@ -5,7 +5,7 @@
  */
 import type { GeoJSONSourceSpecification, LayerSpecification } from 'maplibre-gl'
 
-export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras' | 'pins' | 'story' | 'disasters' | 'news' | 'rain' | 'launches' | 'radio'
+export type LayerId = 'places' | 'quakes' | 'events' | 'flights' | 'ships' | 'satellites' | 'cameras' | 'pins' | 'story' | 'disasters' | 'news' | 'rain' | 'launches' | 'radio' | 'fires'
 
 export interface LayerDef {
   id: LayerId
@@ -150,6 +150,28 @@ export const LAYERS: LayerDef[] = [
     source: 'events',
     pickRank: 5,
     draw: [{ id: 'events', type: 'circle', source: 'events', paint: { 'circle-radius': 5, 'circle-color': ['get', 'color'], 'circle-opacity': 0.85, 'circle-stroke-width': 1, 'circle-stroke-color': HALO } }],
+  },
+  {
+    id: 'fires',
+    label: 'Fires from space (NASA FIRMS, last 24 h)',
+    kind: 'Fire seen from space',
+    dot: '#fb923c',
+    source: 'fires',
+    pickRank: 6.5,
+    draw: [
+      {
+        id: 'fires',
+        type: 'circle',
+        source: 'fires',
+        paint: {
+          // Stronger fires are bigger and redder; more of them show as you zoom in.
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, ['interpolate', ['linear'], ['get', 'frp'], 0, 1.2, 100, 2.5, 1000, 5], 8, ['interpolate', ['linear'], ['get', 'frp'], 0, 3, 100, 6, 1000, 11]],
+          'circle-color': ['interpolate', ['linear'], ['get', 'frp'], 0, '#fde047', 20, '#fb923c', 100, '#ef4444', 500, '#b91c1c'],
+          'circle-opacity': 0.85,
+          'circle-blur': 0.35,
+        },
+      },
+    ],
   },
   {
     id: 'disasters',

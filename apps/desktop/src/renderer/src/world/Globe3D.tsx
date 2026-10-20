@@ -23,7 +23,7 @@ import { Cartesian2, FixedFrameTransforms as Transforms } from '@cesium/core'
 import { ArrowLeftRight, Box, Cable, ChevronLeft, ChevronRight, Crosshair, Eye, Orbit, Plane, Satellite, Ship as ShipIcon, Sparkles, Video, Cctv, Newspaper, Radio, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { kmBetween, type Flight, type FlightRoute, type RadioStation, type Ship } from '../../../shared/world.ts'
+import { kmBetween, type FireSpot, type Flight, type FlightRoute, type RadioStation, type Ship } from '../../../shared/world.ts'
 import type { Map3dOp } from '../../../shared/map.ts'
 import { aircraftName } from '../../../shared/aircraft.ts'
 import { satGroup, SAT_GROUPS, type CableDetail, type SatGroupId } from '../../../shared/space.ts'
@@ -34,7 +34,7 @@ import { Points3D } from './points3d.ts'
 import { newsFeatures } from './newsmap.ts'
 import type { FC } from './geo.ts'
 import { CelestialRing } from './CelestialRing.tsx'
-import { cameraFeatures, deadReckon, flightFeatures, flightLabel, planeIcon, radioFeatures, satelliteFeatures, shipFeatures, shipIcon } from './geo.ts'
+import { cameraFeatures, deadReckon, fireFeatures, flightFeatures, flightLabel, planeIcon, radioFeatures, satelliteFeatures, shipFeatures, shipIcon } from './geo.ts'
 import { DisplayFx, TacticalHud, type HudSource } from './Display.tsx'
 import { HoverOverlay } from './HoverCard.tsx'
 import { hoverInfo } from './hover.ts'
@@ -128,6 +128,7 @@ export default function Globe3D({
   intel,
   traffic,
   onTrafficStatus,
+  fires,
 }: {
   start: { lat: number; lon: number; zoom: number }
   onClose: () => void
@@ -148,6 +149,8 @@ export default function Globe3D({
   traffic?: string | null
   /** What moving traffic shows (cars, incidents, simulated or live). */
   onTrafficStatus?: (s: TrafficStatus | null) => void
+  /** Fires from space (NASA FIRMS), when the layer is on. */
+  fires?: FireSpot[] | undefined
 }) {
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -168,7 +171,7 @@ export default function Globe3D({
   const layersRef = useRef(layers)
   layersRef.current = layers
   const [widget, setWidget] = useState<Cesium.CesiumWidget | null>(null)
-  const parts = useRef<{ bills: Cesium.BillboardCollection; shipBills: Cesium.BillboardCollection; sats: Satellites3D; cables: Cables3D; cams: Cameras3D; radio: Points3D<RadioStation>; news: Points3D<NewsItem>; intel: Points3D<IntelEvent> } | null>(null)
+  const parts = useRef<{ bills: Cesium.BillboardCollection; shipBills: Cesium.BillboardCollection; sats: Satellites3D; cables: Cables3D; cams: Cameras3D; radio: Points3D<RadioStation>; news: Points3D<NewsItem>; intel: Points3D<IntelEvent>; fires: Points3D<FireSpot> } | null>(null)
   const [radioPick, setRadioPick] = useState<number | null>(null)
   const [newsPick, setNewsPick] = useState<number | null>(null)
   const [camPick, setCamPick] = useState<number | null>(null)
@@ -494,7 +497,8 @@ export default function Globe3D({
       const radio = new Points3D<RadioStation>(scene, 'radio')
       const news = new Points3D<NewsItem>(scene, 'news')
       const intelPoints = new Points3D<IntelEvent>(scene, 'intel')
-      parts.current = { bills, shipBills, sats, cables, cams, radio, news, intel: intelPoints }
+      const firePoints = new Points3D<FireSpot>(scene, 'fire')
+      parts.current = { bills, shipBills, sats, cables, cams, radio, news, intel: intelPoints, fires: firePoints }
       setWidget(viewer)
       void window.world.satellites('all').then(
         list => {
@@ -580,6 +584,7 @@ export default function Globe3D({
           : id?.kind === 'cam' && typeof id.i === 'number' && pts?.cams.list[id.i] ? card('cameras', cameraFeatures([pts.cams.list[id.i]!]).features[0])
           : id?.kind === 'radio' && typeof id.i === 'number' && pts?.radio.items[id.i] ? card('radio', radioFeatures([pts.radio.items[id.i]!]).features[0])
           : id?.kind === 'news' && typeof id.i === 'number' && pts?.news.items[id.i] ? card('news', pts.news.items[id.i] as never)
+          : id?.kind === 'fire' && typeof id.i === 'number' && pts?.fires.items[id.i] ? card('fires', fireFeatures([pts.fires.items[id.i]!]).features[0])
           : null
       }
 
@@ -832,6 +837,15 @@ export default function Globe3D({
     },
     [],
   )
+
+  // Fires from space, when the layer is on.
+  useEffect(() => {
+    const pt = parts.current
+    if (!widget || !pt || widget.isDestroyed()) return
+    pt.fires.load(fires ?? [], f => ({ lat: f.lat, lon: f.lon, color: f.frp >= 500 ? '#b91c1c' : f.frp >= 100 ? '#ef4444' : f.frp >= 20 ? '#fb923c' : '#fde047', size: f.frp >= 100 ? 6 : 4 }))
+    pt.fires.setVisible(!!fires?.length)
+    widget.scene.requestRender()
+  }, [widget, fires])
 
   // Conflict events from the Intelligence panel.
   useEffect(() => {

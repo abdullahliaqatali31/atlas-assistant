@@ -12,8 +12,8 @@ import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type R
 
 import { MAX_PINS, type MapOp, type Pin, type Story } from '../../../shared/map.ts'
 import type { NewsResult } from '../../../shared/news.ts'
-import { CAMERA_COVERAGE, kmBetween, type Camera, type Flight, type FlightRoute, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
-import { cameraFeatures, cleanError, deadReckon, flightFeatures, launchFeatures, radioFeatures, rainTiles, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
+import { CAMERA_COVERAGE, kmBetween, type FireSpot, type Camera, type Flight, type FlightRoute, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
+import { cameraFeatures, cleanError, deadReckon, fireFeatures, flightFeatures, launchFeatures, radioFeatures, rainTiles, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
 import { nearbyItems, type NearbyItem } from './hover.ts'
 import { HoverCard } from './HoverCard.tsx'
 import { TrafficLayer2D, TrafficPill, type TrafficStatus } from './TrafficLayer2D.tsx'
@@ -805,6 +805,29 @@ export function MapView({
     }
   }, [layers, ready])
 
+  // Fires from space: the last day (main refreshes every three hours).
+  const [fireList, setFireList] = useState<FireSpot[] | null>(null)
+  useEffect(() => {
+    if (!ready || !layers.fires) return
+    let stopped = false
+    const load = () =>
+      void window.world.fires().then(
+        list => {
+          if (stopped) return
+          put('fires', fireFeatures(list))
+          setFireList(list)
+          setCounts(c => ({ ...c, fires: list.length }))
+        },
+        () => undefined,
+      )
+    load()
+    const t = setInterval(load, 30 * 60_000)
+    return () => {
+      stopped = true
+      clearInterval(t)
+    }
+  }, [ready, layers.fires])
+
   // Space launches: the next 30 days and the last 7, refreshed every 5 minutes (main caches 15).
   useEffect(() => {
     if (!ready || !layers.launches) return
@@ -1279,7 +1302,7 @@ export function MapView({
       {threeD && (
         <Guard3D onClose={() => setThreeD(null)}>
         <Suspense fallback={<div className="absolute inset-0 z-30 grid place-items-center bg-black/80 text-xs text-muted">Loading the 3D world…</div>}>
-          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} world={world} now={now} display={display} displayButton={<>{displayButton}{dockButtons}</>} intel={intelOnMap ? intel?.events : undefined} traffic={traffic ? trafficKey : null} onTrafficStatus={setTrafficStatus} />
+          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} world={world} now={now} display={display} displayButton={<>{displayButton}{dockButtons}</>} intel={intelOnMap ? intel?.events : undefined} traffic={traffic ? trafficKey : null} onTrafficStatus={setTrafficStatus} fires={layers.fires ? (fireList ?? undefined) : undefined} />
         </Suspense>
         </Guard3D>
       )}
