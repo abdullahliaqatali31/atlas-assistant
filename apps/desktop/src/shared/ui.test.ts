@@ -25,7 +25,7 @@ describe('Atlas’s own window', () => {
   })
 
   it('describes the window in plain words', () => {
-    expect(describeUi(base)).toBe('Showing Home; conversation open; 1180×760 (wide layout); in front.')
+    expect(describeUi(base)).toBe('Showing Home (Atlas’s mind); conversation open; 1180×760 (wide layout); in front.')
     expect(describeUi({ ...base, compact: true, pinned: true, focused: false })).toBe('Compact mode: a small chat-only window; 1180×760 (wide layout); kept on top of other windows; behind other windows.')
     expect(describeUi({ ...base, visible: false })).toMatch(/window is closed/)
     expect(describeUi({ ...base, view: 'news', chatOpen: false, maximized: true })).toBe('Showing News; conversation hidden; maximized; in front.')

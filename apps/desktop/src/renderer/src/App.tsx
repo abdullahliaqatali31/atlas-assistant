@@ -1,7 +1,10 @@
 import {
   AppWindow,
+  ArrowLeftRight,
   Bell,
   Brain,
+  Columns2,
+  Compass,
   CheckSquare,
   Feather,
   MapPin,
@@ -37,6 +40,19 @@ import type { ControlState } from "../../shared/control.ts";
 import type { IdentityView } from "../../shared/identity.ts";
 import type { RuntimeStatus } from "../../shared/ipc.ts";
 import { MAP3D_STATE_EVENT, type UiChange, type View } from "../../shared/ui.ts";
+import {
+  clampRatio,
+  dropSurface,
+  isSurface,
+  setSide,
+  showSurface,
+  SURFACE_LABEL,
+  SURFACES,
+  type BrowserMode,
+  type StageLayout,
+  type Surface,
+} from "../../shared/browser.ts";
+import { AtlasBrowser, BrowserSlot } from "./browser/AtlasBrowser.tsx";
 import logo from "./assets/logo.svg";
 import { Companion } from "./Companion.tsx";
 import { PausedBanner } from "./Controls.tsx";
@@ -90,7 +106,6 @@ const SetupSections = lazy(() =>
   import("./Personality.tsx").then((m) => ({ default: m.SetupSections })),
 );
 
-type Stage = "home" | "world";
 type DrawerId =
   | "chat"
   | "alerts"
@@ -171,9 +186,31 @@ const store = (key: string, value: string) => {
 export function App() {
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [controls, setControls] = useState<ControlState | null>(null);
-  const [stage, setStage] = useState<Stage>(() =>
-    stored("stage", "home") === "world" ? "world" : "home",
-  );
+  const [layout, setLayoutState] = useState<StageLayout>(() => {
+    try {
+      const l = JSON.parse(stored("layout", "")) as Partial<StageLayout>;
+      if (isSurface(l.main))
+        return {
+          main: l.main,
+          side: isSurface(l.side) && l.side !== l.main ? l.side : null,
+          ratio: clampRatio(Number(l.ratio)),
+        };
+    } catch {
+      // First run or an old choice: start from the old single stage.
+    }
+    return {
+      main: stored("stage", "home") === "world" ? "world" : "home",
+      side: null,
+      ratio: 0.5,
+    };
+  });
+  /** The pane a tab opens in when two show. */
+  const [focusedPane, setFocusedPane] = useState<"main" | "side">("main");
+  /** Where the browser shows when it is not one of the panes. */
+  const [browserFloat, setBrowserFloat] = useState<"mini" | "full" | "hidden">("hidden");
+  const [driving, setDriving] = useState(false);
+  const panesRef = useRef<HTMLDivElement>(null);
+  const stage = layout.main;
   const [drawer, setDrawer] = useState<DrawerId | null>(() => {
     const d = stored("drawer", "chat");
     return d in DRAWER_TITLE ? (d as DrawerId) : null;
@@ -202,10 +239,32 @@ export function App() {
     store("drawer", d ?? "");
     if (d === "chat") setUnread(0);
   };
-  const goStage = (s: Stage) => {
-    setStage(s);
-    store("stage", s);
+  const setLayout = (f: (l: StageLayout) => StageLayout) =>
+    setLayoutState((l) => {
+      const next = f(l);
+      store("layout", JSON.stringify(next));
+      return next;
+    });
+  const focusedRef = useRef(focusedPane);
+  focusedRef.current = focusedPane;
+  /** Show a surface (a tab): where it already shows, else in the focused pane. */
+  const goStage = (s: Surface) => {
+    setLayout((l) => showSurface(l, s, focusedRef.current));
+    if (s !== "browser") setBrowserFloat((f) => (f === "full" ? "mini" : f));
   };
+  /** The browser's place: a pane, the corner, the whole window or away. */
+  const setBrowserMode = (m: BrowserMode) => {
+    if (m === "pane") {
+      setLayout((l) => (l.main === "browser" || l.side === "browser" ? l : setSide(l, "browser")));
+      setBrowserFloat("hidden");
+    } else if (m === "full") setBrowserFloat("full");
+    else {
+      setLayout((l) => dropSurface(l, "browser"));
+      setBrowserFloat(m);
+    }
+  };
+  const setBrowserModeRef = useRef(setBrowserMode);
+  setBrowserModeRef.current = setBrowserMode;
   const openChat = (yes: boolean) => open(yes ? "chat" : null);
   /** "/" and the palette: open the conversation with its box ready to type in. */
   const focusAsk = () => {
@@ -241,10 +300,13 @@ export function App() {
     // Atlas (through main) changes the stage, a drawer, the conversation or compact mode.
     const offCommand = window.ui.onCommand((c) => {
       if (c.compact !== undefined) setCompact(c.compact);
-      if (c.view === "home" || c.view === "world") {
+      if (isSurface(c.view)) {
         goStage(c.view);
         setDrawer((d) => (d === "chat" ? d : null));
       } else if (c.view) open(c.view as DrawerId);
+      if (c.side !== undefined) setLayout((l) => setSide(l, c.side ?? null));
+      if (c.browser?.mode) setBrowserModeRef.current(c.browser.mode);
+      if (c.browser?.driving !== undefined) setDriving(c.browser.driving);
       if (c.news) {
         open("news");
         requestNewsFocus(c.news);
@@ -263,10 +325,20 @@ export function App() {
   }, []);
 
   // Main (and so Atlas) always knows what the window shows.
+  const inPanes = layout.main === "browser" || layout.side === "browser";
+  const browserMode: BrowserMode =
+    browserFloat === "full" ? "full" : inPanes ? "pane" : browserFloat;
   useEffect(() => {
     const view: View = drawer && drawer !== "chat" ? drawer : stage;
-    window.ui.report({ view, chatOpen: drawer === "chat", compact, map3d });
-  }, [stage, drawer, compact, map3d]);
+    window.ui.report({
+      view,
+      chatOpen: drawer === "chat",
+      compact,
+      map3d,
+      side: layout.side,
+      browser: browserMode,
+    });
+  }, [stage, drawer, compact, map3d, layout.side, browserMode]);
 
   // Which World map is in front, 2D or 3D, so Atlas works on the one the owner sees.
   useEffect(() => {
@@ -298,10 +370,10 @@ export function App() {
       } else if (e.key === "g" || e.key === "G") gRef.current = Date.now();
       else if (
         Date.now() - gRef.current < 1200 &&
-        (e.key === "h" || e.key === "w")
+        (e.key === "h" || e.key === "w" || e.key === "b")
       ) {
         gRef.current = 0;
-        goStage(e.key === "h" ? "home" : "world");
+        goStage(e.key === "h" ? "home" : e.key === "w" ? "world" : "browser");
         if (drawer && drawer !== "chat" && !pinned) open(null);
       } else if (e.key === "[" || e.key === "]") {
         const at = drawer ? PANEL_ORDER.indexOf(drawer) : -1;
@@ -385,7 +457,7 @@ export function App() {
       id: "home",
       label: "Home",
       icon: <HomeIcon />,
-      active: stage === "home" && (!drawer || drawer === "chat"),
+      active: (layout.main === "home" || layout.side === "home") && (!drawer || drawer === "chat"),
       onClick: () => goStage("home"),
       peek: peek("home"),
     },
@@ -394,9 +466,16 @@ export function App() {
       label: "World",
       icon: <Globe2 />,
       count: counts.world,
-      active: stage === "world" && (!drawer || drawer === "chat"),
+      active: (layout.main === "world" || layout.side === "world") && (!drawer || drawer === "chat"),
       onClick: () => goStage("world"),
       peek: peek("world"),
+    },
+    {
+      id: "browser",
+      label: "Browser",
+      icon: <Compass />,
+      active: browserMode !== "hidden" && (!drawer || drawer === "chat"),
+      onClick: () => (browserMode === "hidden" ? setBrowserMode("pane") : goStage("browser")),
     },
   ];
   const items: RailItem[] = [
@@ -616,6 +695,9 @@ export function App() {
     }
   };
 
+  const panes: Surface[] =
+    layout.side && roomy && !phone ? [layout.main, layout.side] : [layout.main];
+
   // The drawer sits beside the stage when pinned in a roomy window; otherwise it floats over the stage's edge.
   const docked = pinned && roomy && !phone;
   const wideDrawer =
@@ -636,6 +718,23 @@ export function App() {
     <Frame
       status={status}
       locked={locked}
+      tabs={
+        !compact && !phone ? (
+          <StageTabs
+            layout={layout}
+            focused={focusedPane}
+            browserShown={browserMode !== "hidden"}
+            canSplit={roomy}
+            onShow={(x) => (x === "browser" && browserMode !== "pane" && browserMode !== "hidden" && !inPanes ? setBrowserMode("pane") : goStage(x))}
+            onSplit={() =>
+              setLayout((l) =>
+                l.side ? { ...l, side: null } : setSide(l, l.main === "home" ? "world" : "home"),
+              )
+            }
+            onSwap={() => setLayout((l) => (l.side ? { ...l, main: l.side, side: l.main, ratio: 1 - l.ratio } : l))}
+          />
+        ) : null
+      }
       overlay={
         identity && locked ? (
           <LockScreen
@@ -651,43 +750,72 @@ export function App() {
           {/* Stage and drawer: a floating drawer covers the stage's edge, never the rail. */}
           <div className="relative flex min-h-0 min-w-0 flex-1">
             {!compact && (
-              <main
-                className={`@container glass relative mx-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl ${phone ? "mb-1" : "mb-2"}`}
-              >
-                {controls && <PausedBanner state={controls} />}
-                <div
-                  className="min-h-0 flex-1"
-                >
-                  <Suspense fallback={<Loading />}>
-                    {stage === "home" ? (
-                      <Home
-                        status={status}
-                        controls={controls}
-                        presence={presence}
-                        ownerName={status.setup.ownerName}
-                        open={(t) => (t === "world" ? goStage("world") : open(t))}
-                      />
-                    ) : (
-                      <WorldPage />
-                    )}
-                  </Suspense>
-                </div>
-                {stage === "world" && (
-                  <div className="pointer-events-none absolute bottom-3 left-3 z-10 hidden @[960px]:block">
-                    <CornerWidget
-                      state={
-                        controls?.paused
-                          ? "paused"
-                          : status.phase !== "ready"
-                            ? "offline"
-                            : presence.state
-                      }
-                      presence={presence}
-                      onHome={() => goStage("home")}
-                    />
-                  </div>
+              <div ref={panesRef} className={`relative flex min-h-0 min-w-0 flex-1 ${phone ? "mb-1" : "mb-2"}`}>
+                {SURFACES.filter((x) => panes.includes(x)).map((x) => {
+                  const at = panes.indexOf(x);
+                  return (
+                    <main
+                      key={x}
+                      style={{
+                        order: at * 2,
+                        flex: panes.length > 1 ? `${at === 0 ? layout.ratio : 1 - layout.ratio} 1 0` : "1 1 0",
+                      }}
+                      onPointerDownCapture={() => setFocusedPane(at === 0 ? "main" : "side")}
+                      className={`@container glass relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl ${panes.length > 1 ? (at === 0 ? "ml-2" : "mr-2") : "mx-2"} ${panes.length > 1 && (focusedPane === "main") === (at === 0) ? "ring-1 ring-accent/40" : ""}`}
+                    >
+                      {controls && at === 0 && <PausedBanner state={controls} />}
+                      <div className="min-h-0 flex-1">
+                        <Suspense fallback={<Loading />}>
+                          {x === "home" ? (
+                            <Home
+                              status={status}
+                              controls={controls}
+                              presence={presence}
+                              ownerName={status.setup.ownerName}
+                              open={(t) => (t === "world" ? goStage("world") : open(t))}
+                            />
+                          ) : x === "world" ? (
+                            <WorldPage />
+                          ) : (
+                            <BrowserSlot />
+                          )}
+                        </Suspense>
+                      </div>
+                      {x === "world" && (
+                        <div className="pointer-events-none absolute bottom-3 left-3 z-10 hidden @[960px]:block">
+                          <CornerWidget
+                            state={
+                              controls?.paused
+                                ? "paused"
+                                : status.phase !== "ready"
+                                  ? "offline"
+                                  : presence.state
+                            }
+                            presence={presence}
+                            onHome={() => goStage("home")}
+                          />
+                        </div>
+                      )}
+                    </main>
+                  );
+                })}
+                {panes.length > 1 && (
+                  <PaneDivider
+                    onRatio={(r) => setLayout((l) => ({ ...l, ratio: clampRatio(r) }))}
+                    container={panesRef}
+                  />
                 )}
-              </main>
+              </div>
+            )}
+
+            {/* Atlas's own browser: over its pane, in the corner, or over everything. */}
+            {!compact && (
+              <AtlasBrowser
+                mode={browserMode}
+                driving={driving}
+                panes={panesRef}
+                onMode={setBrowserMode}
+              />
             )}
 
             {/* Atlas's presence on any page while the conversation is closed. */}
@@ -839,16 +967,18 @@ function Frame({
   status,
   locked = false,
   overlay,
+  tabs,
 }: {
   children: ReactNode;
   status?: RuntimeStatus | null;
   locked?: boolean;
   overlay?: ReactNode;
+  tabs?: ReactNode;
 }) {
   return (
     <div className="relative flex h-full flex-col">
       <div className="aurora" aria-hidden />
-      <TitleBar status={status ?? null} />
+      <TitleBar status={status ?? null} tabs={tabs} />
       <div
         className={`flex min-h-0 flex-1 ${locked ? "invisible" : ""}`}
         inert={locked}
@@ -880,7 +1010,7 @@ type RuntimePhaseName = RuntimeStatus["phase"];
  * Windows draws its real caption buttons over the right edge (titleBarOverlay);
  * the env() insets keep our content clear of them.
  */
-function TitleBar({ status }: { status: RuntimeStatus | null }) {
+function TitleBar({ status, tabs }: { status: RuntimeStatus | null; tabs?: ReactNode }) {
   const phase = status?.phase ?? "starting";
   // Full control is never on unnoticed: an amber badge here, one click turns it off.
   const [fullControl, setFullControl] = useState(false);
@@ -906,6 +1036,7 @@ function TitleBar({ status }: { status: RuntimeStatus | null }) {
           <span className="capitalize"> · {status.mode}</span>
         ) : null}
       </span>
+      {tabs}
       {fullControl && (
         <button
           type="button"
@@ -919,5 +1050,105 @@ function TitleBar({ status }: { status: RuntimeStatus | null }) {
         </button>
       )}
     </header>
+  );
+}
+
+const SURFACE_ICON: Record<Surface, ReactNode> = {
+  home: <Brain className="size-3.5" aria-hidden />,
+  world: <Globe2 className="size-3.5" aria-hidden />,
+  browser: <Compass className="size-3.5" aria-hidden />,
+};
+
+/** The window's tabs: Brain, World, Browser; split into two panes side by side, and swap them. */
+function StageTabs({
+  layout,
+  focused,
+  browserShown,
+  canSplit,
+  onShow,
+  onSplit,
+  onSwap,
+}: {
+  layout: StageLayout;
+  focused: "main" | "side";
+  browserShown: boolean;
+  canSplit: boolean;
+  onShow: (s: Surface) => void;
+  onSplit: () => void;
+  onSwap: () => void;
+}) {
+  const split = canSplit && layout.side !== null;
+  return (
+    <nav
+      aria-label="Views"
+      className="ml-2 flex items-center gap-0.5 rounded-full border border-border bg-surface p-0.5"
+      style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
+    >
+      {SURFACES.map((x) => {
+        const where = layout.main === x ? "main" : split && layout.side === x ? "side" : null;
+        const on = where !== null || (x === "browser" && browserShown);
+        return (
+          <button
+            key={x}
+            type="button"
+            onClick={() => onShow(x)}
+            aria-pressed={on}
+            title={where ? `${SURFACE_LABEL[x]} (${split ? (where === "main" ? "left pane" : "right pane") : "showing"})` : `Show ${SURFACE_LABEL[x]}${split ? ` in the ${focused === "main" ? "left" : "right"} pane` : ""}`}
+            className={`flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${on ? "bg-accent/20 text-text" : "text-muted hover:text-text"} ${where && split && where === focused ? "ring-1 ring-accent/60" : ""}`}
+          >
+            {SURFACE_ICON[x]}
+            {SURFACE_LABEL[x]}
+          </button>
+        );
+      })}
+      {canSplit && (
+        <button
+          type="button"
+          onClick={onSplit}
+          aria-pressed={split}
+          title={split ? "One pane" : "Two panes side by side"}
+          className={`icon-btn size-6 ${split ? "text-accent" : ""}`}
+        >
+          <Columns2 className="size-3.5" aria-hidden />
+        </button>
+      )}
+      {split && (
+        <button type="button" onClick={onSwap} title="Swap the panes" className="icon-btn size-6">
+          <ArrowLeftRight className="size-3.5" aria-hidden />
+        </button>
+      )}
+    </nav>
+  );
+}
+
+/** The bar between two panes: drag to share the width. */
+function PaneDivider({
+  onRatio,
+  container,
+}: {
+  onRatio: (r: number) => void;
+  container: React.RefObject<HTMLDivElement | null>;
+}) {
+  const [drag, setDrag] = useState(false);
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the panes"
+      style={{ order: 1 }}
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setDrag(true);
+      }}
+      onPointerMove={(e) => {
+        if (!drag) return;
+        const r = container.current?.getBoundingClientRect();
+        if (r) onRatio((e.clientX - r.left) / r.width);
+      }}
+      onPointerUp={() => setDrag(false)}
+      className="group relative z-20 mx-0.5 flex w-2 shrink-0 cursor-col-resize items-center justify-center"
+    >
+      <span className={`h-12 w-1 rounded-full transition-colors ${drag ? "bg-accent" : "bg-border group-hover:bg-accent/60"}`} />
+    </div>
   );
 }

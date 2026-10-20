@@ -3,16 +3,18 @@
  * open, compact mode, the window size, and the commands Atlas (or the owner)
  * uses to change them. The page reports its part; main owns the window.
  */
+import { isSurface, SURFACE_LABEL, type BrowserMode, type BrowserOp, type Surface } from './browser.ts'
 import type { GlassOp } from './glass.ts'
 import type { MapOp } from './map.ts'
 import type { SystemOp } from './system.ts'
 
-export const VIEWS = ['home', 'world', 'alerts', 'today', 'news', 'projects', 'files', 'apps', 'learning', 'controls', 'setup'] as const
+export const VIEWS = ['home', 'world', 'browser', 'alerts', 'today', 'news', 'projects', 'files', 'apps', 'learning', 'controls', 'setup'] as const
 export type View = (typeof VIEWS)[number]
 
 export const VIEW_LABEL: Record<View, string> = {
-  home: 'Home',
+  home: 'Home (Atlas’s mind)',
   world: 'World',
+  browser: 'your own browser',
   alerts: 'Alerts (the last 24 hours)',
   today: 'Today',
   news: 'News',
@@ -40,6 +42,10 @@ export interface PageUi {
   compact: boolean
   /** On the World page: the 3D view is open over the flat map. */
   map3d?: boolean | undefined
+  /** A second pane beside the main one. */
+  side?: Surface | null | undefined
+  /** Where Atlas's browser shows (pane when it is one of the panes). */
+  browser?: BrowserMode | undefined
 }
 
 /** The World page says when its 3D view opens or closes (detail: boolean). */
@@ -61,6 +67,8 @@ export interface UiState extends PageUi {
 /** A change to the window; anything left out stays as it is. */
 export interface UiChange {
   view?: View | undefined
+  /** A second pane beside the main one (home, world or browser), or none to close it. */
+  side?: Surface | 'none' | undefined
   chat?: boolean | undefined
   size?: WindowSize | undefined
   pinned?: boolean | undefined
@@ -69,13 +77,16 @@ export interface UiChange {
 }
 
 /** The model's window tools; map ops drive the World map (shared/map.ts). */
-export type UiOp = { kind: 'state' } | { kind: 'set'; change: UiChange } | { kind: 'map'; op: MapOp } | { kind: 'glass'; op: GlassOp } | { kind: 'system'; op: SystemOp }
+export type UiOp = { kind: 'state' } | { kind: 'set'; change: UiChange } | { kind: 'map'; op: MapOp } | { kind: 'glass'; op: GlassOp } | { kind: 'system'; op: SystemOp } | { kind: 'browser'; op: BrowserOp }
 
 /** Page-side commands main sends (view, chat, compact). */
 export interface PageCommand {
   view?: View | undefined
   chat?: boolean | undefined
   compact?: boolean | undefined
+  side?: Surface | null | undefined
+  /** Show Atlas's browser (mode), mark that Atlas is using it (driving). */
+  browser?: { mode?: BrowserMode | undefined; driving?: boolean | undefined } | undefined
   /** Open the News page on this tab, scrolled to this story (from the glass panel). */
   news?: { tab: string; focus: string | null } | undefined
 }
@@ -107,6 +118,10 @@ export const parseUiChange = (v: unknown): UiChange | null => {
     if (!isView(o.view)) return null
     change.view = o.view
   }
+  if (o.side !== undefined) {
+    if (o.side !== 'none' && !isSurface(o.side)) return null
+    change.side = o.side
+  }
   if (o.chat !== undefined) {
     if (typeof o.chat !== 'boolean') return null
     change.chat = o.chat
@@ -130,7 +145,9 @@ export const parseUiChange = (v: unknown): UiChange | null => {
 export const describeUi = (s: UiState): string => {
   if (!s.visible) return 'Atlas’s window is closed (only the tray icon is showing).'
   const parts = [
-    s.compact ? 'Compact mode: a small chat-only window' : `Showing ${VIEW_LABEL[s.view]}${s.view === 'world' ? (s.map3d ? ' in the 3D view (the map_* tools and map_3d act on it)' : ' on the flat map') : ''}`,
+    s.compact ? 'Compact mode: a small chat-only window' : `Showing ${VIEW_LABEL[s.view]}${s.view === 'world' || s.side === 'world' ? (s.map3d ? ' (World in the 3D view: the map_* tools and map_3d act on it)' : '') : ''}`,
+    !s.compact && s.side ? `with ${SURFACE_LABEL[s.side]} beside it in a second pane` : '',
+    !s.compact && s.browser && s.browser !== 'hidden' && s.browser !== 'pane' ? `your browser is open ${s.browser === 'full' ? 'over the whole window' : 'as a mini view in the corner'}` : '',
     s.compact ? '' : s.chatOpen ? 'conversation open' : 'conversation hidden',
     s.minimized ? 'minimized' : s.maximized ? 'maximized' : `${s.width}×${s.height} (${s.layout} layout)`,
     s.pinned ? 'kept on top of other windows' : '',

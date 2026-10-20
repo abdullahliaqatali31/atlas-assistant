@@ -12,6 +12,7 @@ import { MC, type MapOp } from '../shared/map.ts'
 import { describeUi, layoutFor, parseUiChange, UC, isView, type PageCommand, type PageUi, type UiChange, type UiOp, type UiState } from '../shared/ui.ts'
 import type { GlassOp } from '../shared/glass.ts'
 import type { SystemOp } from '../shared/system.ts'
+import { isSurface, type BrowserMode, type BrowserOp } from '../shared/browser.ts'
 
 const COMPACT = { width: 400, height: 640 }
 const NORMAL = { width: 1180, height: 760 }
@@ -44,6 +45,8 @@ export class UiService {
       glass?: (op: GlassOp) => Promise<string>
       /** The PC itself: status, Settings pages, and (later) opening and making things. */
       system?: (op: SystemOp) => Promise<string>
+      /** Atlas's own browser. */
+      browser?: (op: BrowserOp) => Promise<string>
     },
   ) {}
 
@@ -88,6 +91,16 @@ export class UiService {
     win.moveTop()
     win.focus()
     setTimeout(() => !win.isDestroyed() && win.setAlwaysOnTop(pinned, 'floating'), 300)
+  }
+
+  /** What Atlas's browser shows as now. */
+  browserMode(): BrowserMode {
+    return this.page.browser ?? 'hidden'
+  }
+
+  /** Page commands from other main parts (the browser). */
+  send(c: PageCommand) {
+    this.command(c)
   }
 
   /** Open the News page on a tab, scrolled to one story (the glass panel handing over). */
@@ -167,8 +180,8 @@ export class UiService {
     if (change.pinned !== undefined) win.setAlwaysOnTop(change.pinned, 'floating')
     // The owner asked for it: over whatever app is in front, not just restored behind it.
     this.raise(win)
-    if (change.view !== undefined || change.chat !== undefined) this.command({ view: change.view, chat: change.chat })
-    if (change.view !== undefined || change.chat !== undefined || change.size === 'compact' || change.size === 'normal' || change.size === 'large' || change.size === 'maximized') await this.settle()
+    if (change.view !== undefined || change.chat !== undefined || change.side !== undefined) this.command({ view: change.view, chat: change.chat, ...(change.side !== undefined ? { side: change.side === 'none' ? null : change.side } : {}) })
+    if (change.view !== undefined || change.chat !== undefined || change.side !== undefined || change.size === 'compact' || change.size === 'normal' || change.size === 'large' || change.size === 'maximized') await this.settle()
     const s = this.state()
     this.deps.onChange(s)
     return s
@@ -182,6 +195,10 @@ export class UiService {
       if (!this.deps.system) throw new Error('PC control is not available.')
       return this.deps.system(op.op)
     }
+    if (op.kind === 'browser') {
+      if (!this.deps.browser) throw new Error('The browser is not available.')
+      return this.deps.browser(op.op)
+    }
     if (op.kind === 'glass') {
       if (!this.deps.glass) throw new Error('The glass panel is not available.')
       return this.deps.glass(op.op)
@@ -192,7 +209,7 @@ export class UiService {
   /** Map ops run on the World page: open it first if something else shows. */
   private async mapOp(op: MapOp): Promise<string> {
     const s = this.state()
-    if (this.page.view !== 'world' || this.page.compact || !s.visible || s.minimized) await this.apply({ view: 'world' })
+    if ((this.page.view !== 'world' && this.page.side !== 'world') || this.page.compact || !s.visible || s.minimized) await this.apply({ view: 'world' })
     return this.askMap(op)
   }
 
@@ -242,7 +259,8 @@ export class UiService {
       if (!o || !isView(o.view) || typeof o.chatOpen !== 'boolean' || typeof o.compact !== 'boolean') return
       // A reloaded page starts full-size; the window may still be compact.
       if (this.fullBounds && !o.compact) this.command({ compact: true })
-      this.page = { view: o.view, chatOpen: o.chatOpen, compact: o.compact || this.fullBounds !== null, map3d: o.map3d === true }
+      const modes: readonly unknown[] = ['pane', 'mini', 'full', 'hidden']
+      this.page = { view: o.view, chatOpen: o.chatOpen, compact: o.compact || this.fullBounds !== null, map3d: o.map3d === true, side: isSurface(o.side) ? o.side : null, browser: modes.includes(o.browser) ? (o.browser as BrowserMode) : 'hidden' }
       for (const w of this.waiters.splice(0)) w()
       this.deps.onChange(this.state())
     })

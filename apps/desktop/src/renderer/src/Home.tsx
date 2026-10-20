@@ -361,7 +361,7 @@ function BrainStage({ brain, mood, ready, openLearning }: { brain: ReturnType<ty
           </p>
           <p className="mt-0.5 font-mono text-[11px] text-slate-400">{view ? `${memories} memories · ${view.links.length} connections · ${counts.skill} skills` : ready ? 'Waking up…' : 'Offline'}</p>
         </div>
-        <button type="button" onClick={() => setAbout(a => !a)} aria-pressed={about} className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-slate-950/50 px-2.5 py-1 text-[11px] text-slate-300 hover:text-white">
+        <button type="button" onClick={() => setAbout(a => !a)} aria-pressed={about} className="pointer-events-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-white/10 bg-slate-950/50 px-2.5 py-1 text-[11px] text-slate-300 hover:text-white">
           <UserRound className="size-3.5" aria-hidden /> About you
         </button>
       </header>

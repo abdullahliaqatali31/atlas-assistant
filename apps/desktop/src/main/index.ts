@@ -41,6 +41,8 @@ import { CodeService } from './code/service.ts'
 import { registerStartupIpc, startedHidden } from './startup.ts'
 import { registerLearningIpc } from './learning.ts'
 import { registerBrainIpc } from './brain.ts'
+import { BrowserService } from './browser.ts'
+import type { BrowserMode } from '../shared/browser.ts'
 import { NewsService, newsSchemePrivileges } from './news.ts'
 import { modelSchemePrivileges, WakeService } from './wake.ts'
 import { registerDataIpc } from './data.ts'
@@ -434,8 +436,10 @@ const createWindow = ({ inactive = false } = {}) => {
     titleBarStyle: 'hidden',
     titleBarOverlay: titleBarOverlay(),
     autoHideMenuBar: true,
-    webPreferences: mainWebPreferences(join(import.meta.dirname, '../preload/index.cjs'), isDev),
+    // Only this window may host a webview: Atlas's own browser (hardened in browser.ts before it attaches).
+    webPreferences: { ...mainWebPreferences(join(import.meta.dirname, '../preload/index.cjs'), isDev), webviewTag: true },
   })
+  atlasBrowser.watch(win.webContents)
   // Belt and braces: should tools open anyway in the installed app, close them at once.
   if (!isDev) win.webContents.on('devtools-opened', () => win?.webContents.closeDevTools())
   win.once('ready-to-show', () => (inactive ? win?.showInactive() : win?.show()))
@@ -576,6 +580,17 @@ files.register()
 const desktop = new DesktopService({ handle, toRenderer, requireOwner: () => requireOwner(), log: (level, message) => log(level, message) })
 desktop.register()
 /** Atlas's own window: page, conversation, size, compact mode, kept on top. */
+/** Atlas's own browser inside its window. */
+const atlasBrowser: BrowserService = new BrowserService({
+  ensureWindow: async (): Promise<BrowserWindow> => {
+    await ui.apply({})
+    if (!win) throw new Error('The window did not open.')
+    return win
+  },
+  command: c => ui.send(c),
+  mode: (): BrowserMode => ui.browserMode(),
+  log: (level, message) => log(level, message),
+})
 const ui = new UiService({
   window: () => win,
   open: async () => {
@@ -590,6 +605,7 @@ const ui = new UiService({
   onChange: state => supervisor.ui(state),
   glass: op => glass.handle(op),
   system: op => pcOp(op),
+  browser: (op): Promise<string> => atlasBrowser.handle(op),
 })
 ui.register()
 /** The live world at the owner's places, for the World page. */
