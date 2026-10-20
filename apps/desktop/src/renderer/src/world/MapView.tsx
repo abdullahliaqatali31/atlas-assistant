@@ -31,6 +31,8 @@ import { DISPLAY_MODES, MODE_FILTER, MODE_LABEL, readDisplay, saveDisplay, type 
 // CesiumJS is large: the 3D view loads only when opened.
 const Globe3D = lazy(() => import('./Globe3D.tsx'))
 import type { Globe3DControl } from './Globe3D.tsx'
+import type { Globe3dLayer } from '../../../shared/map.ts'
+import { MAP3D_STATE_EVENT } from '../../../shared/ui.ts'
 /** If the 3D view fails (no WebGL, a bad driver), say so and keep the 2D map working. */
 class Guard3D extends Component<{ onClose: () => void; children: ReactNode }, { error: string | null }> {
   state = { error: null as string | null }
@@ -133,6 +135,11 @@ export function MapView({
   const [threeD, setThreeD] = useState<{ lat: number; lon: number; zoom: number } | null>(null)
   const threeDRef = useRef(threeD)
   threeDRef.current = threeD
+  // Tell the app (and so Atlas) which map is in front.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent(MAP3D_STATE_EVENT, { detail: threeD !== null }))
+  }, [threeD])
+  useEffect(() => () => void window.dispatchEvent(new CustomEvent(MAP3D_STATE_EVENT, { detail: false })), [])
   /** Nothing to draw: the window is hidden, or the 3D view covers the flat map. */
   const idle = () => document.hidden || threeDRef.current !== null
   /** The open 3D view's handle, for Atlas's map_3d. */
@@ -440,6 +447,8 @@ export function MapView({
         return globeCtl.current.run(op)
       }
       case 'view': {
+        if (threeDRef.current && globeCtl.current && op.lat !== undefined && op.lon !== undefined)
+          return globeCtl.current.run({ kind: '3d', action: 'open', lat: op.lat, lon: op.lon, zoom: op.zoom, label: op.label, show: [], hide: [] })
         if (op.style !== undefined || op.globe !== undefined) onPrefs({ style: op.style ?? p.style, globe: op.globe ?? p.globe })
         if (op.lat !== undefined && op.lon !== undefined) await fly(m, { center: [op.lon, op.lat], zoom: op.zoom ?? Math.max(m.getZoom(), 6) })
         else if (op.zoom !== undefined) await fly(m, { zoom: op.zoom })
@@ -449,6 +458,13 @@ export function MapView({
         return `Showing ${where} at zoom ${m.getZoom().toFixed(1)} on the ${STYLES.find(s => s.id === style)?.label ?? style} map${wantsGlobe ? (isLite() ? ' (Lite mode keeps it flat, not a globe)' : ' as a globe') : ''}.`
       }
       case 'layers': {
+        // The same layers in 3D, where it has them.
+        if (threeDRef.current && globeCtl.current) {
+          const to3d = (l: LayerId): Globe3dLayer | null => (l === 'satellites' ? 'sats' : l === 'flights' || l === 'ships' || l === 'cameras' || l === 'news' || l === 'radio' ? l : null)
+          const show = op.show.map(to3d).filter((x): x is Globe3dLayer => x !== null)
+          const hide = op.hide.map(to3d).filter((x): x is Globe3dLayer => x !== null)
+          if (show.length || hide.length) await globeCtl.current.run({ kind: '3d', action: 'layers', show, hide })
+        }
         setLayers(x => {
           const next = { ...x }
           for (const id of op.show) next[id] = true
@@ -459,6 +475,7 @@ export function MapView({
         return `Layers on now: ${after.join(', ') || 'none'}.`
       }
       case 'visible': {
+        if (threeDRef.current && globeCtl.current) return `The owner is looking at the 3D view. ${await globeCtl.current.run({ kind: '3d', action: 'state', show: [], hide: [] })}`
         const b = m.getBounds()
         const c = m.getCenter()
         return describeVisible(
@@ -1017,6 +1034,12 @@ export function MapView({
   const on = LAYERS.filter(l => layers[l.id]).length
   const current = STYLES.find(s => s.id === prefs.style)!
   const toggle = (which: 'layers' | 'style' | 'display') => setOpen(o => (o === which ? null : which))
+  const displayButton = (
+    <button type="button" onClick={() => toggle('display')} aria-expanded={open === 'display'} className={`map-chip px-2 ${open === 'display' || display.mode !== 'normal' || display.hud ? 'border-accent text-accent' : ''}`} title="Display: night vision, thermal, CRT, HUD (keys 1-5, H)">
+      <ScanEye className="size-3.5" aria-hidden />
+      <span className="hidden @[760px]:inline">{display.mode === 'normal' ? 'Display' : MODE_LABEL[display.mode]}</span>
+    </button>
+  )
   const controls = (
     <>
       {canGoBack && (
@@ -1053,10 +1076,7 @@ export function MapView({
         <Box className="size-3.5" aria-hidden />
         <span className="hidden @[640px]:inline">3D</span>
       </button>
-      <button type="button" onClick={() => toggle('display')} aria-expanded={open === 'display'} className={`map-chip px-2 ${open === 'display' || display.mode !== 'normal' || display.hud ? 'border-accent text-accent' : ''}`} title="Display: night vision, thermal, CRT, HUD (keys 1-5, H)">
-        <ScanEye className="size-3.5" aria-hidden />
-        <span className="hidden @[760px]:inline">{display.mode === 'normal' ? 'Display' : MODE_LABEL[display.mode]}</span>
-      </button>
+      {displayButton}
       <button type="button" onClick={() => toggle('layers')} aria-expanded={open === 'layers'} className={`map-chip @[640px]:hidden ${open === 'layers' ? 'border-accent text-accent' : ''}`} title="Map layers">
         <Layers className="size-3.5" aria-hidden />
         <span className="hidden @[520px]:inline">Layers</span>
@@ -1126,7 +1146,7 @@ export function MapView({
       {threeD && (
         <Guard3D onClose={() => setThreeD(null)}>
         <Suspense fallback={<div className="absolute inset-0 z-30 grid place-items-center bg-black/80 text-xs text-muted">Loading the 3D world…</div>}>
-          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} />
+          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} world={world} now={now} display={display} displayButton={displayButton} />
         </Suspense>
         </Guard3D>
       )}
@@ -1139,7 +1159,7 @@ export function MapView({
       />
       {styleError && <p className="glass absolute bottom-16 left-2 z-10 rounded-lg bg-solid/85 px-2 py-1 text-[11px] text-warm">{styleError}</p>}
       {open === 'display' && (
-        <fieldset className="ask-pop glass absolute left-2 top-12 z-20 w-[min(260px,calc(100%-1rem))] space-y-1 rounded-xl bg-solid/90 p-2 text-xs shadow-2xl">
+        <fieldset className={`ask-pop glass absolute w-[min(260px,calc(100%-1rem))] space-y-1 rounded-xl bg-solid/90 p-2 text-xs shadow-2xl ${threeD ? 'left-3 top-14 z-40' : 'left-2 top-12 z-20'}`}>
           <legend className="sr-only">Display</legend>
           <p className="hud-label px-1">Vision</p>
           <div className="grid grid-cols-2 gap-1">

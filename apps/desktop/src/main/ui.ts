@@ -242,7 +242,7 @@ export class UiService {
       if (!o || !isView(o.view) || typeof o.chatOpen !== 'boolean' || typeof o.compact !== 'boolean') return
       // A reloaded page starts full-size; the window may still be compact.
       if (this.fullBounds && !o.compact) this.command({ compact: true })
-      this.page = { view: o.view, chatOpen: o.chatOpen, compact: o.compact || this.fullBounds !== null }
+      this.page = { view: o.view, chatOpen: o.chatOpen, compact: o.compact || this.fullBounds !== null, map3d: o.map3d === true }
       for (const w of this.waiters.splice(0)) w()
       this.deps.onChange(this.state())
     })

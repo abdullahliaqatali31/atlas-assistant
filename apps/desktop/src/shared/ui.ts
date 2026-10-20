@@ -38,7 +38,12 @@ export interface PageUi {
   view: View
   chatOpen: boolean
   compact: boolean
+  /** On the World page: the 3D view is open over the flat map. */
+  map3d?: boolean | undefined
 }
+
+/** The World page says when its 3D view opens or closes (detail: boolean). */
+export const MAP3D_STATE_EVENT = 'atlas:map3d-state'
 
 export interface UiState extends PageUi {
   width: number
@@ -125,7 +130,7 @@ export const parseUiChange = (v: unknown): UiChange | null => {
 export const describeUi = (s: UiState): string => {
   if (!s.visible) return 'Atlas’s window is closed (only the tray icon is showing).'
   const parts = [
-    s.compact ? 'Compact mode: a small chat-only window' : `Showing ${VIEW_LABEL[s.view]}`,
+    s.compact ? 'Compact mode: a small chat-only window' : `Showing ${VIEW_LABEL[s.view]}${s.view === 'world' ? (s.map3d ? ' in the 3D view (the map_* tools and map_3d act on it)' : ' on the flat map') : ''}`,
     s.compact ? '' : s.chatOpen ? 'conversation open' : 'conversation hidden',
     s.minimized ? 'minimized' : s.maximized ? 'maximized' : `${s.width}×${s.height} (${s.layout} layout)`,
     s.pinned ? 'kept on top of other windows' : '',

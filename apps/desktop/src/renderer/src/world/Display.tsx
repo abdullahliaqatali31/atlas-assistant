@@ -55,7 +55,15 @@ const LABEL: Partial<Record<LayerId, string>> = { flights: 'FLT', ships: 'SHIP',
  * the centre in degrees, ground resolution, sun elevation, and live counts.
  * All real numbers from the map; repainted on move and once a second.
  */
-export function TacticalHud({ map, mode, counts }: { map: MapLibre | null; mode: DisplayMode; counts: Partial<Record<LayerId, number>> }) {
+/** Where the HUD reads the view from: the flat map, or the 3D view through a small adapter. */
+export interface HudSource {
+  getCenter(): { lat: number; lng: number }
+  getZoom(): number
+  on(type: 'move', fn: () => void): unknown
+  off(type: 'move', fn: () => void): unknown
+}
+
+export function TacticalHud({ map, mode, counts }: { map: HudSource | MapLibre | null; mode: DisplayMode; counts: Partial<Record<LayerId, number>> }) {
   const [, tick] = useState(0)
   const [blink, setBlink] = useState(true)
   useEffect(() => {

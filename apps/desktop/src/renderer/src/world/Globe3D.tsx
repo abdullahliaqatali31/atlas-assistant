@@ -21,7 +21,7 @@ import '@cesium/engine/Source/Widget/CesiumWidget.css'
 import * as Cesium from '@cesium/engine'
 import { Cartesian2, FixedFrameTransforms as Transforms } from '@cesium/core'
 import { ArrowLeftRight, Box, Cable, ChevronLeft, ChevronRight, Crosshair, Eye, Orbit, Plane, Satellite, Ship as ShipIcon, Sparkles, Video, Cctv, Newspaper, Radio, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { kmBetween, type Flight, type FlightRoute, type RadioStation, type Ship } from '../../../shared/world.ts'
 import type { Map3dOp } from '../../../shared/map.ts'
@@ -34,7 +34,12 @@ import { Points3D } from './points3d.ts'
 import { newsFeatures } from './newsmap.ts'
 import type { FC } from './geo.ts'
 import { CelestialRing } from './CelestialRing.tsx'
-import { cameraFeatures, deadReckon, flightFeatures, flightLabel, planeIcon, radioFeatures, shipFeatures, shipIcon } from './geo.ts'
+import { cameraFeatures, deadReckon, flightFeatures, flightLabel, planeIcon, radioFeatures, satelliteFeatures, shipFeatures, shipIcon } from './geo.ts'
+import { DisplayFx, TacticalHud, type HudSource } from './Display.tsx'
+import { HoverOverlay } from './HoverCard.tsx'
+import { hoverInfo } from './hover.ts'
+import { MODE_FILTER, type DisplayPrefs } from './hud.ts'
+import type { WorldSnapshot } from '../../../shared/world.ts'
 import { MODEL_HEADING_OFFSET, headingTape, heightForZoom, modelFor, type ModelId } from './models3d.ts'
 import { Satellites3D } from './sats3d.ts'
 import { latLonLabel } from './sky.ts'
@@ -112,6 +117,10 @@ export default function Globe3D({
   controlRef,
   onSelect,
   selectedId,
+  world,
+  now: clock,
+  display,
+  displayButton,
 }: {
   start: { lat: number; lon: number; zoom: number }
   onClose: () => void
@@ -119,6 +128,13 @@ export default function Globe3D({
   /** The World page's card: the same full card as the flat map shows. */
   onSelect?: (s: Selected | null) => void
   selectedId?: string | null
+  /** The flat map's world snapshot and clock, for the hover cards. */
+  world?: WorldSnapshot
+  now?: number
+  /** The flat map's visual mode (night vision, thermal, CRT…), HUD and scope: the same in 3D. */
+  display?: DisplayPrefs
+  /** The flat map's Display button, shown in the 3D top bar. */
+  displayButton?: ReactNode
 }) {
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -153,6 +169,7 @@ export default function Globe3D({
   const [satCounts, setSatCounts] = useState<Partial<Record<SatGroupId, number>>>({})
   const [cable, setCable] = useState<{ id: string; name: string; detail: CableDetail | null } | null>(null)
   const [landing, setLanding] = useState<string | null>(null)
+  const [hover, setHover] = useState<{ key: string; sel: Selected; x: number; y: number } | null>(null)
   const nightLights = useRef<ReturnType<typeof Cesium.ImageryLayer.fromProviderAsync> | null>(null)
   /** Planes close enough to watch move: the view draws continuously while true. */
   const nearHold = useRef(false)
@@ -525,28 +542,74 @@ export default function Globe3D({
         orbitRef.current = null
         setOrbit(false)
       }
-      handler.setInputAction(takeBack, Cesium.ScreenSpaceEventType.LEFT_DOWN)
+      handler.setInputAction(() => (takeBack(), setHover(null)), Cesium.ScreenSpaceEventType.LEFT_DOWN)
       handler.setInputAction(takeBack, Cesium.ScreenSpaceEventType.RIGHT_DOWN)
       handler.setInputAction(takeBack, Cesium.ScreenSpaceEventType.WHEEL)
-      handler.setInputAction((click: { position: Cartesian2 }) => {
-        const hit = scene.pick(click.position) as { id?: { kind?: string; hex?: string; i?: number; id?: string; name?: string; mmsi?: number } } | undefined
-        const id = hit?.id
-        const hex = id?.kind === 'flight' ? id.hex : undefined
-        const flight = hex ? flights.current.byHex.get(hex) : undefined
-        setPicked(flight ?? null)
-        if (satRideRef.current) return
-        // Flights, ships, cameras, radio and news open the same card as on the flat map.
+      type PickId = { kind?: string; hex?: string; i?: number; id?: string; name?: string; mmsi?: number }
+      /** What a picked point is, as the flat map's card sees it (satellites too, for the hover card). */
+      const selectionFor = (id: PickId | undefined, withSats = false): Selected | null => {
         const pts = parts.current
         const card = (kind: Selected['kind'], f: { geometry: { coordinates: unknown }; properties: Record<string, string | number> } | undefined): Selected | null => (f ? { kind, lngLat: f.geometry.coordinates as [number, number], props: f.properties } : null)
+        const flight = id?.kind === 'flight' && id.hex ? flights.current.byHex.get(id.hex) : undefined
         const ship = id?.kind === 'ship' && typeof id.mmsi === 'number' ? shipData.get(id.mmsi) : undefined
-        const selection =
-          flight ? card('flights', flightFeatures([flight]).features[0])
+        const sat = withSats && id?.kind === 'sat' && typeof id.i === 'number' ? pts?.sats.list[id.i] : undefined
+        return flight ? card('flights', flightFeatures([flight]).features[0])
           : ship ? card('ships', shipFeatures([ship]).features[0])
+          : sat ? card('satellites', satelliteFeatures([sat], new Date()).features[0])
           : id?.kind === 'cam' && typeof id.i === 'number' && pts?.cams.list[id.i] ? card('cameras', cameraFeatures([pts.cams.list[id.i]!]).features[0])
           : id?.kind === 'radio' && typeof id.i === 'number' && pts?.radio.items[id.i] ? card('radio', radioFeatures([pts.radio.items[id.i]!]).features[0])
           : id?.kind === 'news' && typeof id.i === 'number' && pts?.news.items[id.i] ? card('news', pts.news.items[id.i] as never)
           : null
-        onSelectRef.current?.(selection)
+      }
+
+      // ── hover: rest the pointer on a point for the same animated card as the flat map ──
+      let hoverKey: string | null = null
+      let hoverFrame = 0
+      let lastPick = 0
+      let showT: ReturnType<typeof setTimeout> | undefined
+      let hideT: ReturnType<typeof setTimeout> | undefined
+      const hideHover = () => {
+        clearTimeout(showT)
+        hoverKey = null
+        setHover(null)
+      }
+      handler.setInputAction((m: { endPosition: Cartesian2 }) => {
+        const at = Cesium.Cartesian2.clone(m.endPosition)
+        cancelAnimationFrame(hoverFrame)
+        hoverFrame = requestAnimationFrame(() => {
+          // Picking draws a frame of its own: a dozen times a second is plenty.
+          if (!viewer || viewer.isDestroyed() || performance.now() - lastPick < 80) return
+          lastPick = performance.now()
+          const hit = scene.pick(at) as { id?: PickId } | undefined
+          const sel = hit?.id ? selectionFor(hit.id, true) : null
+          if (sel) {
+            clearTimeout(hideT)
+            const key = `${sel.kind}:${String(sel.props.id ?? sel.props.title)}`
+            if (key === hoverKey) return
+            clearTimeout(showT)
+            const show = () => {
+              hoverKey = key
+              setHover({ key, sel, x: at.x, y: at.y })
+            }
+            if (hoverKey) show()
+            else showT = setTimeout(show, 120)
+          } else if (hoverKey) {
+            clearTimeout(hideT)
+            hideT = setTimeout(hideHover, 200)
+          } else clearTimeout(showT)
+        })
+      }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
+      cleanups.push(() => (cancelAnimationFrame(hoverFrame), clearTimeout(showT), clearTimeout(hideT)))
+
+      handler.setInputAction((click: { position: Cartesian2 }) => {
+        hideHover()
+        const hit = scene.pick(click.position) as { id?: PickId } | undefined
+        const id = hit?.id
+        const flight = id?.kind === 'flight' && id.hex ? flights.current.byHex.get(id.hex) : undefined
+        setPicked(flight ?? null)
+        if (satRideRef.current) return
+        // Flights, ships, cameras, radio and news open the same card as on the flat map.
+        onSelectRef.current?.(selectionFor(id))
         setSatPick(id?.kind === 'sat' && typeof id.i === 'number' ? id.i : null)
         setCamPick(id?.kind === 'cam' && typeof id.i === 'number' ? id.i : null)
         setRadioPick(id?.kind === 'radio' && typeof id.i === 'number' ? id.i : null)
@@ -597,6 +660,27 @@ export default function Globe3D({
       gone = true
     }
   }, [routeHex])
+
+  const hudSource = useMemo((): HudSource | null => {
+    if (!widget) return null
+    const fns = new Set<() => void>()
+    widget.camera.percentageChanged = 0.002
+    widget.camera.changed.addEventListener(() => fns.forEach(f => f()))
+    return {
+      getCenter() {
+        const c = widget.scene.canvas
+        const hit = widget.camera.pickEllipsoid(new Cesium.Cartesian2(c.clientWidth / 2, c.clientHeight / 2))
+        const g = hit ? Cesium.Cartographic.fromCartesian(hit) : widget.camera.positionCartographic
+        return { lat: Cesium.Math.toDegrees(g.latitude), lng: Cesium.Math.toDegrees(g.longitude) }
+      },
+      getZoom() {
+        const h = Math.max(300, widget.camera.positionCartographic.height)
+        return Math.max(0, Math.min(22, Math.log2((40_075_016.686 * 1.6) / h)))
+      },
+      on: (_t, fn) => fns.add(fn),
+      off: (_t, fn) => fns.delete(fn),
+    }
+  }, [widget])
 
   // Layers: remembered on this PC, and applied to the scene.
   useEffect(() => {
@@ -1062,7 +1146,10 @@ export default function Globe3D({
 
   return (
     <div className="absolute inset-0 z-30 bg-black">
-      <div ref={box} className="absolute inset-0" />
+      <div ref={box} className="absolute inset-0" style={{ filter: display ? MODE_FILTER[display.mode] : undefined }} />
+      {display && <DisplayFx mode={display.mode} scope={display.scope} />}
+      {display?.hud && hudSource && !follow && <TacticalHud map={hudSource} mode={display.mode} counts={{ flights: counts.flights, ships: counts.ships, satellites: counts.sats, cameras: counts.cameras }} />}
+      {hover && world && box.current && <HoverOverlay itemKey={hover.key} info={hoverInfo(hover.sel.kind, hover.sel.props, world, clock ?? Date.now())} p={{ x: hover.x, y: hover.y }} w={box.current.clientWidth} h={box.current.clientHeight} />}
       <div ref={credits} className="hidden" />
       {layers.celestial && widget && !follow && !satRide && <CelestialRing widget={widget} />}
       {/* Top bar: tier, counts, back to 2D. */}
@@ -1070,6 +1157,7 @@ export default function Globe3D({
         <span className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] ${panel}`}>
           <Box className="size-3.5 text-accent" aria-hidden /> 3D · {tier ? TIER_LABEL[tier] : 'loading…'}
         </span>
+        {displayButton}
         <span className={`rounded-full px-3 py-1 text-[10px] text-accent/80 ${panel} ${mono}`}>
           FLT {counts.flights} · SHIP {counts.ships} · SAT {counts.sats}
           {layers.cables && counts.cables ? ` · CBL ${counts.cables}` : ''}

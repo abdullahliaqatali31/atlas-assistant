@@ -36,7 +36,7 @@ import {
 import type { ControlState } from "../../shared/control.ts";
 import type { IdentityView } from "../../shared/identity.ts";
 import type { RuntimeStatus } from "../../shared/ipc.ts";
-import type { UiChange, View } from "../../shared/ui.ts";
+import { MAP3D_STATE_EVENT, type UiChange, type View } from "../../shared/ui.ts";
 import logo from "./assets/logo.svg";
 import { Companion } from "./Companion.tsx";
 import { PausedBanner } from "./Controls.tsx";
@@ -189,6 +189,7 @@ export function App() {
   const roomy = useMedia(ROOMY);
   const phone = useMedia(PHONE);
   const [compact, setCompact] = useState(false);
+  const [map3d, setMap3d] = useState(false);
   const [onTop, setOnTop] = useState(false);
   const [identity, setIdentity] = useState<IdentityView | null>(null);
   const [suggestions, setSuggestions] = useState(0);
@@ -260,8 +261,15 @@ export function App() {
   // Main (and so Atlas) always knows what the window shows.
   useEffect(() => {
     const view: View = drawer && drawer !== "chat" ? drawer : stage;
-    window.ui.report({ view, chatOpen: drawer === "chat", compact });
-  }, [stage, drawer, compact]);
+    window.ui.report({ view, chatOpen: drawer === "chat", compact, map3d });
+  }, [stage, drawer, compact, map3d]);
+
+  // Which World map is in front, 2D or 3D, so Atlas works on the one the owner sees.
+  useEffect(() => {
+    const on = (e: Event) => setMap3d((e as CustomEvent<boolean>).detail === true);
+    window.addEventListener(MAP3D_STATE_EVENT, on);
+    return () => window.removeEventListener(MAP3D_STATE_EVENT, on);
+  }, []);
 
   // Keys: Ctrl+K palette, Esc puts the drawer away (unless pinned), "/" asks,
   // G H / G W switch the stage, [ and ] step through the panels.

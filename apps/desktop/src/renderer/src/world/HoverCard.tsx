@@ -115,9 +115,11 @@ export function HoverCard({ map, ready, world, now }: { map: MapLibre | null; re
   if (!map || !item) return null
   const info: HoverInfo = hoverInfo(item.kind, item.props, worldRef.current, now)
   const box = map.getContainer()
-  const w = box.clientWidth
-  const h = box.clientHeight
-  const p = map.project(item.lngLat)
+  return <HoverOverlay itemKey={item.key} info={info} p={map.project(item.lngLat)} w={box.clientWidth} h={box.clientHeight} />
+}
+
+/** The card itself, at a screen point: shared by the flat map and the 3D view. */
+export function HoverOverlay({ itemKey, info, p, w, h }: { itemKey: string; info: HoverInfo; p: { x: number; y: number }; w: number; h: number }) {
   // Away from the edges: to the right unless that would clip, above unless too near the top.
   const sx = p.x + 40 + CARD_W > w ? -1 : 1
   const sy = p.y < 150 ? -1 : 1
@@ -130,11 +132,11 @@ export function HoverCard({ map, ready, world, now }: { map: MapLibre | null; re
   }
   return (
     <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-live="polite">
-      <svg key={`l-${item.key}`} className="absolute inset-0 h-full w-full" aria-hidden>
+      <svg key={`l-${itemKey}`} className="absolute inset-0 h-full w-full" aria-hidden>
         <circle cx={p.x} cy={p.y} r={9} fill="none" stroke={info.color} strokeOpacity={0.9} strokeWidth={1.5} className="hover-ring" />
         <polyline points={`${p.x + 9 * 0.7 * sx},${p.y - 9 * 0.7 * sy} ${elbow.x},${elbow.y} ${end.x},${end.y}`} fill="none" stroke={info.color} strokeWidth={1.5} pathLength={1} className="hover-leader" />
       </svg>
-      <div key={`c-${item.key}`} className="hover-card glass absolute overflow-hidden rounded-lg bg-solid/90 shadow-2xl" style={{ ...place, transformOrigin: `${sx === 1 ? 'left' : 'right'} ${sy === 1 ? 'bottom' : 'top'}` }}>
+      <div key={`c-${itemKey}`} className="hover-card glass absolute overflow-hidden rounded-lg bg-solid/90 shadow-2xl" style={{ ...place, transformOrigin: `${sx === 1 ? 'left' : 'right'} ${sy === 1 ? 'bottom' : 'top'}` }}>
         <div className="h-0.5 w-full" style={{ background: info.color }} />
         <div className="px-2.5 py-2">
           <p className="truncate text-[13px] font-semibold leading-snug" title={info.title} dir="auto">
