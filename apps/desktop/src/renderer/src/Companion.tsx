@@ -527,21 +527,22 @@ export function Companion({
   const presence: Presence['state'] = live.active ? (live.phase === 'speaking' ? 'speaking' : live.phase === 'listening' ? 'listening' : 'thinking') : listening ? 'listening' : speaking ? 'speaking' : replyId || transcribing ? 'thinking' : 'idle'
   useEffect(() => onPresence?.({ state: presence, level: listening ? level : 0 }), [onPresence, presence, level, listening])
 
-  // The desktop widget mirrors this: what Atlas is doing and its newest words, at most four times a second.
+  // The desktop widget mirrors this: what Atlas is doing and its newest words. Sent on each change (not on a
+  // timer: a minimised window's timers slow to once a minute), the mic level at most about four times a second.
   const lastReply = lines.findLast(l => l.who === 'assistant')?.text ?? ''
-  const presenceNow = useRef({ activity: presence, caption: '', level: 0 })
-  presenceNow.current = { activity: presence, caption: presence === 'idle' || presence === 'listening' ? '' : lastReply, level: listening ? level : 0 }
+  const widgetCaption = presence === 'idle' || presence === 'listening' ? '' : lastReply
+  const widgetLevel = Math.round((listening ? level : 0) * 10)
+  const widgetSent = useRef({ key: '', at: 0, shape: '' })
   useEffect(() => {
-    let sent = ''
-    const t = setInterval(() => {
-      const now = presenceNow.current
-      const key = `${now.activity}|${now.caption}|${Math.round(now.level * 10)}`
-      if (key === sent) return
-      sent = key
-      void window.presenceHost.update(now).catch(() => undefined)
-    }, 250)
-    return () => clearInterval(t)
-  }, [])
+    const shape = `${presence}|${widgetCaption}`
+    const key = `${shape}|${widgetLevel}`
+    const last = widgetSent.current
+    if (key === last.key) return
+    // Only the level moved, and very recently: skip this one.
+    if (shape === last.shape && Date.now() - last.at < 240) return
+    widgetSent.current = { key, at: Date.now(), shape }
+    void window.presenceHost.update({ activity: presence, caption: widgetCaption, level: widgetLevel / 10 }).catch(() => undefined)
+  }, [presence, widgetCaption, widgetLevel])
 
   // The widget's Stop and Talk act here, where the microphone and the speech are.
   const widgetAsks = useRef<(c: 'stop' | 'talk') => void>(() => undefined)

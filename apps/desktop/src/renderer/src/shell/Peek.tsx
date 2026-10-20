@@ -121,7 +121,7 @@ export function Peek({ kind, ctx }: { kind: PeekKind; ctx: PeekContext }) {
     case 'chat': {
       const ask = ctx.status.approvals[0]
       if (ask) lead = <p className="text-warm">{ask.question ?? `May I use ${ask.tool}?`}</p>
-      fixed = lastReply ? [{ text: lastReply }] : [{ text: 'Nothing said yet. Type in the Ask bar or press the mic.' }]
+      fixed = lastReply ? [{ text: lastReply }] : [{ text: 'Nothing said yet. Press / to type, or the mic to talk.' }]
       break
     }
     case 'alerts': {

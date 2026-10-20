@@ -223,7 +223,10 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
   onControl: e => controls.onHostEvent(e),
   onPersonality: e => personality.onHostEvent(e),
   onData: e => data.onHostEvent(e),
-  onBrain: e => brain.onHostEvent(e),
+  onBrain: e => {
+    brain.onHostEvent(e)
+    if (e.type === 'memory-used' && e.why !== 'saved') presence.memories(e.ids.length)
+  },
   onLearning: e => learning.onHostEvent(e),
   onUsage: u => {
     usage = u
@@ -280,6 +283,8 @@ const presence = new PresenceWidget({
   approvals: () => status.approvals,
   locked: () => identity.locked,
   name: () => 'Atlas',
+  openView: view => void ui.apply({ view }).catch(() => undefined),
+  later: () => status.later.length,
 })
 presence.register()
 
@@ -405,6 +410,8 @@ const handOffGlass = () => {
       )
     case 'note':
       return done(ui.apply({ chat: true }))
+    case 'files':
+      return done(ui.apply({ view: 'files' }))
   }
 }
 
@@ -587,7 +594,11 @@ const atlasBrowser: BrowserService = new BrowserService({
     if (!win) throw new Error('The window did not open.')
     return win
   },
-  command: c => ui.send(c),
+  command: c => {
+    ui.send(c)
+    // The widget says where Atlas is browsing while the window is away.
+    if (c.browser?.driving !== undefined) presence.browsing(c.browser.driving ? atlasBrowser.site() : null)
+  },
   mode: (): BrowserMode => ui.browserMode(),
   log: (level, message) => log(level, message),
 })

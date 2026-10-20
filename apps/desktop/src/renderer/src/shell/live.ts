@@ -8,8 +8,6 @@ import { useSyncExternalStore } from 'react'
 /** Window events the floating Ask bar uses to talk through the conversation. */
 export const ASK_EVENT = 'atlas:ask'
 export const MIC_EVENT = 'atlas:mic'
-/** Focus the Ask bar from anywhere (the "/" shortcut and the command palette). */
-export const FOCUS_ASK_EVENT = 'atlas:focus-ask'
 
 export interface LiveState {
   replyId: string | null

@@ -91,6 +91,15 @@ export class BrowserService {
     },
   ) {}
 
+  /** The site the browser shows (host name), for the widget. */
+  site(): string | null {
+    try {
+      return this.guest && !this.guest.isDestroyed() ? new URL(this.guest.getURL()).hostname.replace(/^www\./, '') || null : null
+    } catch {
+      return null
+    }
+  }
+
   /** The browser's own session: Chrome's face, no permission prompts, nothing but web pages. */
   private prepare() {
     if (this.prepared) return

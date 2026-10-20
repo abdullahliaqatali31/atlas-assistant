@@ -35,6 +35,14 @@ export interface PresenceState {
   glass: boolean
   /** Full control is on: an amber ring, so it is never on unnoticed. */
   fullControl: boolean
+  /** The site Atlas is using in its own browser right now, or null. */
+  browsing: string | null
+  /** How many of the owner's memories this turn is using (0 when none or idle). */
+  memories: number
+  /** Questions waiting for the owner's yes or no. */
+  waiting: number
+  /** Things Atlas held back for later (a badge on the dot). */
+  later: number
 }
 
 /** What the main window's conversation reports; main adds the card, name and scale. */

@@ -94,12 +94,17 @@ export function PresenceApp() {
           {...talkDrag}
           role="button"
           tabIndex={0}
-          onKeyDown={e => e.key === 'Enter' && void window.presence.talk()}
-          className="grid size-14 cursor-grab touch-none select-none place-items-center rounded-full border border-border bg-solid/95 shadow-lg transition-shadow hover:shadow-[0_0_18px_var(--accent-soft)] active:cursor-grabbing"
+          onKeyDown={e => e.key === 'Enter' && void (s && s.activity !== 'idle' ? window.presence.stop() : window.presence.talk())}
+          className="relative grid size-14 cursor-grab touch-none select-none place-items-center rounded-full border border-border bg-solid/95 shadow-lg transition-shadow hover:shadow-[0_0_18px_var(--accent-soft)] active:cursor-grabbing"
           title={s && s.activity !== 'idle' ? 'Click to stop · drag to move' : 'Click to talk · drag to move · right-click for options'}
           aria-label="Talk to Atlas"
         >
           <Orb state={ORB[s?.activity ?? 'idle']} level={s?.level ?? 0} size={44} />
+          {!!s && s.waiting + s.later > 0 && (
+            <span className={`absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full px-1 text-[9px] font-bold text-black ${s.waiting ? 'bg-warm' : 'bg-accent'}`} aria-label={`${s.waiting} waiting, ${s.later} for later`}>
+              {s.waiting || s.later}
+            </span>
+          )}
         </div>
       ) : shape === 'pill' && s ? (
         <div {...openDrag} className="flex w-[340px] cursor-grab touch-none select-none items-center gap-2 rounded-full border border-border bg-solid/95 py-1 pl-1 pr-1.5 shadow-lg active:cursor-grabbing" title="Click to open the conversation · drag to move">
@@ -113,6 +118,12 @@ export function PresenceApp() {
             {s.caption && (
               <p className="line-clamp-2 text-xs leading-snug text-text" dir="auto">
                 {tail(s.caption)}
+              </p>
+            )}
+            {(s.browsing || s.memories > 0) && (
+              <p className="mt-0.5 flex gap-2 truncate text-[10px] text-muted">
+                {s.browsing && <span className="truncate">🌐 Browsing {s.browsing}</span>}
+                {s.memories > 0 && <span>🧠 Using {s.memories} {s.memories === 1 ? 'memory' : 'memories'}</span>}
               </p>
             )}
           </div>
@@ -142,7 +153,10 @@ export function PresenceApp() {
                 <p className="text-sm leading-snug text-text" dir="auto">
                   {s.card.summary}
                 </p>
-                <p className="mt-1 font-mono text-[11px] text-muted">{s.card.tool}</p>
+                <p className="mt-1 font-mono text-[11px] text-muted">
+                  {s.card.tool}
+                  {s.waiting > 1 ? ` · +${s.waiting - 1} more waiting` : ''}
+                </p>
               </>
             ) : (
               <p className="text-sm leading-snug text-text" dir="auto">

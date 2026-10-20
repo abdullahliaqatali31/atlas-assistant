@@ -74,6 +74,10 @@ export class PresenceWidget {
       approvals: () => ApprovalRequest[]
       locked: () => boolean
       name: () => string
+      /** Open one of Atlas's views (Home, World, the browser). */
+      openView?: (view: 'home' | 'world' | 'browser') => void
+      /** Things held back for later. */
+      later?: () => number
     },
   ) {
     this.saved = this.read()
@@ -121,6 +125,8 @@ export class PresenceWidget {
   update(raw: unknown) {
     const u = parsePresenceUpdate(raw)
     if (!u) return
+    // A finished turn forgets how many memories it used.
+    if (u.activity === 'idle') this.memoriesInUse = 0
     this.live = u
     this.push()
   }
@@ -140,6 +146,21 @@ export class PresenceWidget {
   /** The glass panel opened or closed beside the widget. */
   glass(open: boolean) {
     this.glassOpen = open
+    this.push()
+  }
+
+  private browsingSite: string | null = null
+  private memoriesInUse = 0
+
+  /** Atlas is using its browser on this site (null when it stops). */
+  browsing(site: string | null) {
+    this.browsingSite = site
+    this.push()
+  }
+
+  /** A turn is using some of the owner's memories. */
+  memories(n: number) {
+    this.memoriesInUse = this.live.activity === 'idle' ? 0 : Math.max(this.memoriesInUse, n)
     this.push()
   }
 
@@ -170,6 +191,10 @@ export class PresenceWidget {
       scale: this.saved.scale,
       glass: this.glassOpen,
       fullControl: this.fullControlOn,
+      browsing: locked ? null : this.browsingSite,
+      memories: this.live.activity === 'idle' ? 0 : this.memoriesInUse,
+      waiting: this.deps.approvals().length,
+      later: this.deps.later?.() ?? 0,
     }
   }
 
@@ -292,6 +317,18 @@ export class PresenceWidget {
     const when = (w: WidgetWhen, label: string) => ({ label, type: 'radio' as const, checked: this.saved.when === w, click: () => this.setWhen(w) })
     Menu.buildFromTemplate([
       { label: 'Open Atlas', click: () => this.deps.openMain() },
+      ...(this.deps.openView
+        ? [
+            {
+              label: 'Open in Atlas',
+              submenu: [
+                { label: 'Brain (Home)', click: () => this.deps.openView?.('home') },
+                { label: 'World', click: () => this.deps.openView?.('world') },
+                { label: 'Browser', click: () => this.deps.openView?.('browser') },
+              ],
+            },
+          ]
+        : []),
       { label: 'Talk', click: () => this.talk() },
       { type: 'separator' },
       { label: 'Size', submenu: [scale('s', 'Small'), scale('m', 'Medium'), scale('l', 'Large')] },
