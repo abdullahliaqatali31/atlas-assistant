@@ -56,6 +56,21 @@ describe('public cameras', () => {
     expect(cams.find(c => c.id === 'no:3000063_1')?.video?.url).toBe('https://kamera.vegvesen.no/public/3000063_1/manifest.m3u8')
   })
 
+  it('reads the 511 (IBI) and CARS networks, Spain, Oregon and Queensland', () => {
+    const cams = parseCameraSources({
+      ibi: [{ host: '511ga.org', data: [{ id: 11141, location: 'BART-0209: SR 140 at Princeton Blvd', direction: 'Eastbound', country: 'United States', latLng: { geography: { wellKnownText: 'POINT (-84.91445 34.37697)' } }, images: [{ imageUrl: '/map/Cctv/18551' }] }, { id: 2, latLng: { geography: { wellKnownText: 'POINT (1 2)' } }, images: [{ imageUrl: 'https://elsewhere/x.jpg' }] }] }, { host: 'evil.example', data: [{ id: 3, latLng: { geography: { wellKnownText: 'POINT (1 2)' } }, images: [{ imageUrl: '/map/Cctv/1' }] }] }],
+      cars: [{ state: 'mn', list: [{ id: 512359, public: true, name: 'T.H.47 SB N of I-694', location: { latitude: 45.0697, longitude: -93.2632 }, views: [{ videoPreviewUrl: 'https://public.carsprogram.org/cameras/MN/C4707' }] }] }],
+      dgt: '<x><ns2:device xsi:type="fse:ExtendedDevice" id="176130" version="2"><ns2:typeOfDevice>camera</ns2:typeOfDevice><loc:roadDestination>BURGOS</loc:roadDestination><loc:roadName>A-62</loc:roadName><loc:latitude>42.2624</loc:latitude><loc:longitude>-3.9403</loc:longitude><fse:deviceUrl>https://etraffic.dgt.es/camarasEtraffic/176130.jpg</fse:deviceUrl></ns2:device></x>',
+      oregon: { features: [{ attributes: { cameraId: 7, filename: 'I-5 Bridge SB North_pid4676.jpg', latitude: 45.61, longitude: -122.67, title: 'I-5 at Interstate Bridge' } }] },
+      qld: { features: [{ geometry: { coordinates: [153.0087, -27.5552] }, properties: { id: 1, description: 'Archerfield - Ipswich Motorway', direction: 'NorthEast', image_url: 'https://cameras.qldtraffic.qld.gov.au/Metropolitan/Archerfield_Ipswich_Mwy_sth.jpg' } }] },
+    })
+    expect(cams.map(c => c.id)).toEqual(['ibi:511ga.org:11141', 'cars:mn:512359', 'es:176130', 'or:7', 'qld:1'])
+    expect(cams[0]).toMatchObject({ lat: 34.37697, lon: -84.91445, image: 'https://511ga.org/map/Cctv/18551', heading: 90, source: 'Georgia DOT (511GA)' })
+    expect(cams[2]).toMatchObject({ name: 'A-62 · towards BURGOS', lat: 42.2624, country: 'Spain' })
+    expect(cams[3]?.image).toBe('https://tripcheck.com/RoadCams/cams/I-5%20Bridge%20SB%20North_pid4676.jpg')
+    expect(cams[4]?.heading).toBe(45)
+  })
+
   it('reads compass words as degrees', () => {
     expect([compassDegrees('N'), compassDegrees('se'), compassDegrees('NB'), compassDegrees('Westbound'), compassDegrees('B'), compassDegrees('')]).toEqual([0, 135, 0, 270, undefined, undefined])
   })

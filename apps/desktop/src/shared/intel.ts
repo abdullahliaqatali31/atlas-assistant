@@ -38,10 +38,10 @@ const CRIME = /police|court|bail|sexual|rape|murder|stabb|robber|domestic|teache
 const DRONES = /\bdrones?\b|\buavs?\b|shahed|quadcopter|kamikaze|loitering/
 const MISSILES = /missiles?|ballistic|\brockets?\b|cruise|iskander|kinzhal|interceptors?|air-defen[cs]e|iron-dome/
 const AIRSTRIKES = /air-?strikes?|airstrikes?|bomb(s|ing|ed|ard\w*)?\b|warplanes?|fighter-jets?|air-raids?/
-const GROUND = /troops|offensive|front-?lines?|battle|fighting|clash(es)?|artiller\w*|shell(s|ing|ed)?\b|soldiers|\barmy\b|militants?|insurgents?|rebels?|\btanks?\b|ambush|incursion|counter-?offensive|siege|frontline|brigade|battalion/
+const GROUND = /troops|offensive|front-?lines?|fighting|clash(es)?|artiller\w*|shell(s|ing|ed)?\b|soldiers|\barmy\b|militants?|insurgents?|rebels?|\btanks?\b|ambush|incursion|counter-?offensive|siege|frontline|brigade|battalion/
 // Only words that mean armed conflict on their own ("attack", "killed", "blast" alone are mostly crime and accidents).
 const WAR = /\bwar\b|military|invasion|ceasefire|hostages?|terror\w*|gunmen|militia|hamas|hezbollah|houthis?|\bidf\b|kremlin|\bnato\b|occupied|annex\w*|genocide|massacre|insurgen\w*|jihad\w*|al-shabaab|\bisis\b|wagner|warlord|junta|coup/
-const PROTEST = /protests?|protesters|demonstrators|demonstrations|riots?|rioters|marchers|march-against|walkout|tear-gas|crackdown/
+const PROTEST = /protests?|protesters|demonstrators|demonstrations|rioters|marchers|march-against|walkout|tear-gas|crackdown/
 
 /** The article's address as words, for the filters and the title. */
 const slugWords = (url: string) => {

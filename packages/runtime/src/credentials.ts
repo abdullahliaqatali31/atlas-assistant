@@ -29,6 +29,8 @@ export const SECRET_NAMES = [
   // The 3D World view: photorealistic cities (Google) and world terrain + buildings (Cesium ion).
   'GOOGLE_MAPS_API_KEY',
   'CESIUM_ION_TOKEN',
+  // Live traffic flow on the World map (TomTom; free tier).
+  'TOMTOM_API_KEY',
 ] as const
 export type SecretName = (typeof SECRET_NAMES)[number]
 

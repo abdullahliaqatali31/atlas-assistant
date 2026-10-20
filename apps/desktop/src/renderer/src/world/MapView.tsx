@@ -5,7 +5,7 @@
  */
 import 'maplibre-gl/dist/maplibre-gl.css'
 
-import { ArrowLeft, Box, Globe2, Layers, Map as MapIcon, ScanEye } from 'lucide-react'
+import { ArrowLeft, Box, CarFront, Globe2, Layers, Map as MapIcon, ScanEye } from 'lucide-react'
 import maplibregl, { type FilterSpecification, type GeoJSONSource, type Map as MapLibre, type RasterTileSource, type StyleSpecification } from 'maplibre-gl'
 import * as satellite from 'satellite.js'
 import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -155,6 +155,21 @@ export function MapView({
     }
   }
   const [intel, setIntel] = useState<{ events: IntelEvent[]; alerts: AlertRegion[] } | null>(null)
+  const [note3d, setNote3d] = useState('')
+  // Live traffic (TomTom, the owner's key): the chip, and the key once read.
+  const [traffic, setTraffic] = useState(false)
+  const [trafficKey, setTrafficKey] = useState<string | null>(null)
+  const toggleTraffic = async () => {
+    if (traffic) return setTraffic(false)
+    const keys = await window.world.map3dKeys().catch(() => null)
+    if (!keys?.tomtom) {
+      setNote3d('Live traffic needs a free TomTom key: Setup › Power up › TomTom Traffic (GET KEY). About 50,000 map tiles a day are free.')
+      setTimeout(() => setNote3d(''), 9000)
+      return
+    }
+    setTrafficKey(keys.tomtom)
+    setTraffic(true)
+  }
   // Tell the app (and so Atlas) which map is in front.
   useEffect(() => {
     window.dispatchEvent(new CustomEvent(MAP3D_STATE_EVENT, { detail: threeD !== null }))
@@ -404,6 +419,25 @@ export function MapView({
     }
   }, [ready, intel, intelOnMap])
 
+  // Live traffic on the flat map: TomTom's flow tiles above the base map, under the markers.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const draw = () => {
+      if (!m.isStyleLoaded()) return
+      if (traffic && trafficKey) {
+        if (!m.getSource('traffic')) m.addSource('traffic', { type: 'raster', tiles: [`https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=${encodeURIComponent(trafficKey)}`], tileSize: 256, minzoom: 3, maxzoom: 20, attribution: 'Traffic © TomTom' })
+        if (!m.getLayer('traffic')) m.addLayer({ id: 'traffic', type: 'raster', source: 'traffic', paint: { 'raster-opacity': 0.85 } }, LAYERS.flatMap(l => l.draw.map(d => d.id)).find(id => m.getLayer(id)))
+      } else {
+        if (m.getLayer('traffic')) m.removeLayer('traffic')
+        if (m.getSource('traffic')) m.removeSource('traffic')
+      }
+    }
+    draw()
+    m.on('styledata', draw)
+    return () => void m.off('styledata', draw)
+  }, [ready, traffic, trafficKey])
+
   // The ring around the picked item.
   useEffect(() => {
     const m = map.current
@@ -611,7 +645,6 @@ export function MapView({
       }
     }
   }
-  const [note3d, setNote3d] = useState('')
   useEffect(() => {
     const on = (e: Event) => {
       const op = (e as CustomEvent<MapOp>).detail
@@ -1108,8 +1141,18 @@ export function MapView({
     setIntelOnMap,
     onIntel: (events, alerts) => setIntel({ events, alerts }),
     intelEvents: intel?.events ?? null,
+    select: s => onSelect(s),
+    world,
   }
-  const dockButtons = <DockButtons open={dock} onOpen={setDock} badge={intel ? { intel: String(intel.events.length) } : undefined} />
+  const dockButtons = (
+    <>
+      <button type="button" onClick={() => void toggleTraffic()} aria-pressed={traffic} className={`map-chip px-2 ${traffic ? 'border-accent text-accent' : ''}`} title="Live traffic (TomTom, your free key)">
+        <CarFront className="size-3.5" aria-hidden />
+        <span className="hidden @[1400px]:inline">Traffic</span>
+      </button>
+      <DockButtons open={dock} onOpen={setDock} badge={intel ? { intel: String(intel.events.length) } : undefined} />
+    </>
+  )
   const displayButton = (
     <button type="button" onClick={() => toggle('display')} aria-expanded={open === 'display'} className={`map-chip px-2 ${open === 'display' || display.mode !== 'normal' || display.hud ? 'border-accent text-accent' : ''}`} title="Display: night vision, thermal, CRT, HUD (keys 1-5, H)">
       <ScanEye className="size-3.5" aria-hidden />
@@ -1230,7 +1273,7 @@ export function MapView({
       {threeD && (
         <Guard3D onClose={() => setThreeD(null)}>
         <Suspense fallback={<div className="absolute inset-0 z-30 grid place-items-center bg-black/80 text-xs text-muted">Loading the 3D world…</div>}>
-          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} world={world} now={now} display={display} displayButton={<>{displayButton}{dockButtons}</>} intel={intelOnMap ? intel?.events : undefined} />
+          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} world={world} now={now} display={display} displayButton={<>{displayButton}{dockButtons}</>} intel={intelOnMap ? intel?.events : undefined} traffic={traffic ? trafficKey : null} />
         </Suspense>
         </Guard3D>
       )}

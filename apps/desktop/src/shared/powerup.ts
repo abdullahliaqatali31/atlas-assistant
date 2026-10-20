@@ -120,6 +120,17 @@ export const POWER_PROVIDERS: readonly PowerProvider[] = Object.freeze([
     manageUrl: 'https://console.cloud.google.com/google/maps-apis/credentials',
     without: 'The 3D view uses Cesium ion or free imagery instead.',
   },
+  {
+    id: 'tomtom',
+    title: 'TomTom Traffic',
+    group: 'world',
+    unlocks: 'Live traffic on the World map, flat and 3D: every road coloured by how fast it is moving now. Used from the page (map tiles), about 50,000 free tiles a day.',
+    secret: 'TOMTOM_API_KEY',
+    tier: 'free-tier',
+    getUrl: 'https://developer.tomtom.com/user/register',
+    manageUrl: 'https://developer.tomtom.com/user/me/apps',
+    without: 'No live traffic layer; everything else on the map works.',
+  },
 ])
 
 export const powerProvider = (id: string) => POWER_PROVIDERS.find(p => p.id === id)

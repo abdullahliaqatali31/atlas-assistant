@@ -9,7 +9,10 @@
  * (Pakistan among them) simply have none. Like the agencies' own sites, only
  * the latest still frame is shown; nothing is recorded or analysed.
  */
-import { parseCameraSources, type Camera } from '../shared/world.ts'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+import { CARS_STATES, IBI_HOSTS, parseCameraSources, type Camera } from '../shared/world.ts'
 
 const LIST_TTL = 12 * 3_600_000
 const IMAGE_TTL = 30_000
@@ -46,7 +49,27 @@ export class CameraDirectory {
   /** Singapore's image links change with every snapshot: the latest list, briefly cached. */
   private singapore: { at: number; urls: Map<string, string> } | null = null
 
+  /** Where the merged list is kept between runs (the 511 networks take a while to page through). */
+  private cacheDir: string | undefined
+
   constructor(private readonly log: (level: 'info' | 'warn', message: string) => void = () => {}) {}
+
+  useCache(dir: string) {
+    this.cacheDir = dir
+  }
+
+  /** One IBI 511 network, a hundred cameras per page, a quarter-second apart. */
+  private async ibi(host: string): Promise<{ host: string; data: unknown[] }> {
+    const data: unknown[] = []
+    for (let start = 0; start < 20_000; start += 100) {
+      const q = encodeURIComponent(JSON.stringify({ columns: [], start, length: 100 }))
+      const j = (await (await get(`https://${host}/List/GetData/Cameras?query=${q}&lang=en`)).json()) as { recordsTotal?: number; data?: unknown[] }
+      data.push(...(j.data ?? []))
+      if (!j.data?.length || data.length >= (j.recordsTotal ?? 0)) break
+      await new Promise(r => setTimeout(r, 250))
+    }
+    return { host, data }
+  }
 
   async cameras(): Promise<Camera[]> {
     if (this.list && Date.now() - this.list.at < LIST_TTL) return this.list.cameras
@@ -57,6 +80,19 @@ export class CameraDirectory {
   }
 
   private async load(): Promise<Camera[]> {
+    const file = this.cacheDir ? join(this.cacheDir, 'cameras.json') : null
+    if (file)
+      try {
+        if (Date.now() - (await stat(file)).mtimeMs < LIST_TTL) {
+          const cameras = JSON.parse(await readFile(file, 'utf8')) as Camera[]
+          if (cameras.length) {
+            this.list = { at: Date.now(), cameras }
+            return cameras
+          }
+        }
+      } catch {
+        // No list kept yet.
+      }
     const text = async (url: string) => (await get(url)).text()
     const json = async (url: string) => (await get(url)).json() as Promise<unknown>
     const tries = await Promise.allSettled([
@@ -75,11 +111,19 @@ export class CameraDirectory {
       text('https://opendata.toronto.ca/transportation/tmc/rescucameraimages/Data/tmcearthcameras.json').then(x => ({ toronto: x })),
       json('https://tmc.deldot.gov/json/videocamera.json').then(j => ({ deldot: j })),
       json('https://ogckart-sn1.atlas.vegvesen.no/ogc/features/v1/collections/datex_3_1:CctvSimple/items?f=application/geo%2Bjson&limit=5000').then(j => ({ norway: j })),
+      Promise.allSettled(Object.keys(IBI_HOSTS).map(h => this.ibi(h))).then(r => ({ ibi: r.flatMap(x => (x.status === 'fulfilled' ? [x.value] : [])) })),
+      Promise.allSettled(Object.keys(CARS_STATES).map(st => json(`https://${st}tg.carsprogram.org/cameras_v1/api/cameras`).then(list => ({ state: st, list })))).then(r => ({ cars: r.flatMap(x => (x.status === 'fulfilled' ? [x.value] : [])) })),
+      text('https://nap.dgt.es/datex2/v3/dgt/DevicePublication/camaras_datex2_v36.xml').then(x => ({ dgt: x })),
+      json('https://tripcheck.com/Scripts/map/data/cctvinventory.js').then(j => ({ oregon: j })),
+      json('https://api.qldtraffic.qld.gov.au/v1/webcams?apikey=3e83add325cbb69ac4d8e5bf433d770b').then(j => ({ qld: j })),
     ])
     const raw = Object.assign({}, ...tries.flatMap(t => (t.status === 'fulfilled' ? [t.value] : [])))
     for (const t of tries) if (t.status === 'rejected') this.log('warn', `Cameras: a source failed (${t.reason instanceof Error ? t.reason.message : String(t.reason)}).`)
     const cameras = parseCameraSources(raw)
-    if (cameras.length) this.list = { at: Date.now(), cameras }
+    if (cameras.length) {
+      this.list = { at: Date.now(), cameras }
+      if (file) await mkdir(this.cacheDir!, { recursive: true }).then(() => writeFile(file, JSON.stringify(cameras)), () => undefined).catch(() => undefined)
+    }
     return cameras
   }
 

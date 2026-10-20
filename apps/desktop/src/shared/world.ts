@@ -472,13 +472,30 @@ export interface Camera {
 }
 
 /** Where official public cameras are available without a key. */
-export const CAMERA_COVERAGE = 'London (TfL), California (Caltrans), Washington State (WSDOT), Delaware (DelDOT, live video), British Columbia (DriveBC), Calgary, Toronto, Finland (Fintraffic), Norway (Statens vegvesen), New South Wales, New Zealand (NZTA), Hong Kong (Transport Department), Singapore (LTA)'
+/** The IBI "511" networks (one platform, one parser): host and who runs it. */
+export const IBI_HOSTS: Record<string, string> = {
+  '511ga.org': 'Georgia DOT (511GA)',
+  'fl511.com': 'Florida DOT (FL511)',
+  'www.511pa.com': 'PennDOT (511PA)',
+  '511on.ca': 'Ontario MTO (511ON)',
+  'www.nvroads.com': 'Nevada DOT',
+  'az511.com': 'Arizona DOT (AZ511)',
+  '511.idaho.gov': 'Idaho Transportation Department',
+  '511.alberta.ca': 'Alberta 511',
+  '511la.org': 'Louisiana DOTD',
+  '511.alaska.gov': 'Alaska DOT&PF',
+}
+
+/** The CARS networks (Castle Rock): state code and who runs it. */
+export const CARS_STATES: Record<string, string> = { mn: 'Minnesota DOT', co: 'Colorado DOT (COtrip)', ia: 'Iowa DOT', in: 'Indiana DOT', ks: 'Kansas DOT', ne: 'Nebraska DOT', ma: 'MassDOT', sd: 'South Dakota DOT' }
+
+export const CAMERA_COVERAGE = 'London (TfL), California (Caltrans), Georgia, Florida, Pennsylvania, Nevada, Arizona, Idaho, Louisiana, Alaska, Minnesota, Colorado, Iowa, Indiana, Kansas, Nebraska, Massachusetts, South Dakota, Oregon, Washington State (WSDOT), Delaware (DelDOT, live video), Ontario, Alberta, British Columbia (DriveBC), Calgary, Toronto, Spain (DGT), Finland (Fintraffic), Norway (Statens vegvesen), New South Wales, Queensland, New Zealand (NZTA), Hong Kong (Transport Department), Singapore (LTA)'
 
 /** A compass word from a camera feed ("N", "SW", "NB", "Northbound") as degrees; undefined when it is not one. */
 export const compassDegrees = (v: unknown): number | undefined => {
   if (typeof v !== 'string') return undefined
   const w = v.trim().toUpperCase().replace(/BOUND$|B$/, '')
-  const map: Record<string, number> = { N: 0, NORTH: 0, NE: 45, E: 90, EAST: 90, SE: 135, S: 180, SOUTH: 180, SW: 225, W: 270, WEST: 270, NW: 315 }
+  const map: Record<string, number> = { N: 0, NORTH: 0, NE: 45, NORTHEAST: 45, E: 90, EAST: 90, SE: 135, SOUTHEAST: 135, S: 180, SOUTH: 180, SW: 225, SOUTHWEST: 225, W: 270, WEST: 270, NW: 315, NORTHWEST: 315 }
   return map[w]
 }
 
@@ -488,7 +505,7 @@ const fromMercator = (x: number, y: number) => ({ lon: (x / 6378137) * (180 / Ma
 /** Each agency's own format into one list. Unknown or broken entries are skipped. */
 const httpsVideo = (v: unknown, kind: 'hls' | 'clip') => (typeof v === 'string' && /^https:\/\/[^\s]+\.(m3u8|mp4)$/.test(v) ? { url: v, kind } : undefined)
 
-export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; finland?: unknown; nz?: unknown; hongKong?: string; singapore?: unknown; driveBc?: unknown; calgary?: unknown; nsw?: unknown; wsdot?: unknown; toronto?: string; deldot?: unknown; norway?: unknown }): Camera[] => {
+export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; finland?: unknown; nz?: unknown; hongKong?: string; singapore?: unknown; driveBc?: unknown; calgary?: unknown; nsw?: unknown; wsdot?: unknown; toronto?: string; deldot?: unknown; norway?: unknown; ibi?: { host: string; data: unknown[] }[]; cars?: { state: string; list: unknown }[]; dgt?: string; oregon?: unknown; qld?: unknown }): Camera[] => {
   const out: Camera[] = []
   const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN)
   const push = (c: Camera) => {
@@ -577,6 +594,52 @@ export const parseCameraSources = (raw: { tfl?: unknown; caltrans?: unknown[]; f
     const hls = String((c.urls as Record<string, unknown> | undefined)?.m3u8s ?? '')
     if (c.enabled === false || !hls.startsWith('https://video.deldot.gov')) continue
     push({ id: `de:${String(c.id)}`, name: String(c.title ?? 'Delaware camera'), lat: num(c.lat), lon: num(c.lon), country: 'United States', source: 'Delaware DOT', image: '', video: httpsVideo(hls, 'hls') })
+  }
+  // The IBI 511 networks: one record per camera site, a still per site (their streams need a login).
+  for (const { host, data } of raw.ibi ?? []) {
+    if (!IBI_HOSTS[host]) continue
+    for (const r of data as Record<string, unknown>[]) {
+      const wkt = String((r.latLng as { geography?: { wellKnownText?: string } } | undefined)?.geography?.wellKnownText ?? '')
+      const m = /POINT \(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/.exec(wkt)
+      const img = (r.images as { imageUrl?: string; disabled?: boolean; blocked?: boolean }[] | undefined)?.find(i => !i.disabled && !i.blocked && typeof i.imageUrl === 'string' && /^\/map\/Cctv\/\d+$/.test(i.imageUrl))
+      if (!m || !img || r.visible === false) continue
+      push({ id: `ibi:${host}:${String(r.id)}`, name: String(r.location ?? r.roadway ?? 'Road camera'), lat: Number(m[2]), lon: Number(m[1]), country: String(r.country ?? (host.endsWith('.ca') ? 'Canada' : 'United States')), source: IBI_HOSTS[host]!, image: `https://${host}${img.imageUrl}`, heading: compassDegrees(r.direction) })
+    }
+  }
+  // The CARS networks: a preview still on public.carsprogram.org.
+  for (const { state, list } of raw.cars ?? []) {
+    if (!CARS_STATES[state]) continue
+    for (const c of Array.isArray(list) ? (list as Record<string, unknown>[]) : []) {
+      const loc = (c.location as { latitude?: number; longitude?: number } | undefined) ?? {}
+      const view = (c.views as { videoPreviewUrl?: string }[] | undefined)?.find(v => typeof v.videoPreviewUrl === 'string' && v.videoPreviewUrl.startsWith('https://public.carsprogram.org/'))
+      if (!view || c.public === false) continue
+      push({ id: `cars:${state}:${String(c.id)}`, name: String(c.name ?? 'Road camera'), lat: num(loc.latitude), lon: num(loc.longitude), country: 'United States', source: CARS_STATES[state]!, image: view.videoPreviewUrl! })
+    }
+  }
+  // Spain (DGT, DATEX II): every camera device with its still.
+  for (const block of (raw.dgt ?? '').split('<ns2:device ').slice(1)) {
+    if (!/<ns2:typeOfDevice>camera<\/ns2:typeOfDevice>/.test(block)) continue
+    const lat = num(/<loc:latitude>([^<]+)<\/loc:latitude>/.exec(block)?.[1])
+    const lon = num(/<loc:longitude>([^<]+)<\/loc:longitude>/.exec(block)?.[1])
+    const url = /<fse:deviceUrl>(https:\/\/etraffic\.dgt\.es\/[^<]+\.jpg)<\/fse:deviceUrl>/.exec(block)?.[1]
+    const id = /^[^>]*\bid="(\d+)"/.exec(block)?.[1]
+    const road = /<loc:roadName>([^<]*)<\/loc:roadName>/.exec(block)?.[1] ?? ''
+    const towards = /<loc:roadDestination>([^<]*)<\/loc:roadDestination>/.exec(block)?.[1] ?? ''
+    if (!url || !id) continue
+    push({ id: `es:${id}`, name: [road, towards ? `towards ${towards}` : ''].filter(Boolean).join(' · ') || 'Spain road camera', lat, lon, country: 'Spain', source: 'DGT (Dirección General de Tráfico)', image: url })
+  }
+  // Oregon (TripCheck): Esri JSON, a still by file name.
+  for (const f of ((raw.oregon as { features?: { attributes?: Record<string, unknown> }[] })?.features ?? [])) {
+    const a = f.attributes ?? {}
+    const file = String(a.filename ?? '')
+    if (!/^[\w .()-]+\.jpg$/i.test(file)) continue
+    push({ id: `or:${String(a.cameraId)}`, name: String(a.title ?? a.route ?? 'Oregon camera'), lat: num(a.latitude), lon: num(a.longitude), country: 'United States', source: 'Oregon DOT (TripCheck)', image: `https://tripcheck.com/RoadCams/cams/${encodeURIComponent(file)}` })
+  }
+  // Queensland (QLDTraffic, CC BY 4.0).
+  for (const f of ((raw.qld as { features?: { geometry?: { coordinates?: number[] }; properties?: Record<string, unknown> }[] })?.features ?? [])) {
+    const p = f.properties ?? {}
+    const c = f.geometry?.coordinates ?? []
+    push({ id: `qld:${String(p.id)}`, name: String(p.description ?? 'Queensland camera'), lat: num(c[1]), lon: num(c[0]), country: 'Australia', source: 'Queensland TMR (QLDTraffic)', image: String(p.image_url ?? ''), heading: compassDegrees(p.direction) })
   }
   // Norway: still frames for all, HLS where the record says so.
   for (const f of ((raw.norway as { features?: Record<string, unknown>[] })?.features ?? [])) {
@@ -795,7 +858,7 @@ export interface WorldBridge {
   /** The newest global rain frame (NASA IMERG, 30-minute) as a GIBS time; null: use yesterday's daily. */
   rain(): Promise<string | null>
   /** Keys for the 3D view (browser-side by nature): Google photorealistic tiles, Cesium ion. */
-  map3dKeys(): Promise<{ google: string | null; ion: string | null }>
+  map3dKeys(): Promise<{ google: string | null; ion: string | null; tomtom: string | null }>
   /** The ISS, stations and the brightest satellites. */
   /** Orbit elements: space stations and the brightest; 'all' adds navigation, weather and geostationary groups (each tagged _group). */
   satellites(which?: 'all'): Promise<SatelliteElements[]>

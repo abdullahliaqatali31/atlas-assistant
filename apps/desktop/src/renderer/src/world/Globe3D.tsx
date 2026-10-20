@@ -123,6 +123,7 @@ export default function Globe3D({
   display,
   displayButton,
   intel,
+  traffic,
 }: {
   start: { lat: number; lon: number; zoom: number }
   onClose: () => void
@@ -139,6 +140,8 @@ export default function Globe3D({
   displayButton?: ReactNode
   /** Conflict events (the Intelligence panel), as points. */
   intel?: IntelEvent[] | undefined
+  /** Live traffic tiles (TomTom, the owner's key), when the Traffic chip is on. */
+  traffic?: string | null
 }) {
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -194,7 +197,7 @@ export default function Globe3D({
     const cleanups: (() => void)[] = []
     let viewer: Cesium.CesiumWidget | null = null
     void (async () => {
-      const keys = await window.world.map3dKeys().catch(() => ({ google: null, ion: null }))
+      const keys = await window.world.map3dKeys().catch(() => ({ google: null, ion: null, tomtom: null }))
       if (disposed || !box.current) return
       if (keys.ion) Cesium.Ion.defaultAccessToken = keys.ion
       viewer = new Cesium.CesiumWidget(box.current, { baseLayer: false, creditContainer: credits.current ?? undefined, msaaSamples: 2, requestRenderMode: true, maximumRenderTimeChange: Infinity, showRenderLoopErrors: false })
@@ -779,6 +782,21 @@ export default function Globe3D({
     setRadioPick(null)
     setNewsPick(null)
   }, [selectedId])
+
+  // Live traffic: TomTom's flow tiles draped over the ground.
+  const trafficLayer = useRef<ReturnType<typeof Cesium.ImageryLayer.fromProviderAsync> | null>(null)
+  useEffect(() => {
+    if (!widget || widget.isDestroyed()) return
+    if (trafficLayer.current) {
+      widget.imageryLayers.remove(trafficLayer.current, true)
+      trafficLayer.current = null
+    }
+    if (traffic) {
+      trafficLayer.current = Cesium.ImageryLayer.fromProviderAsync(Promise.resolve(new Cesium.UrlTemplateImageryProvider({ url: `https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=${encodeURIComponent(traffic)}`, minimumLevel: 3, maximumLevel: 18, credit: 'Traffic © TomTom' })), {})
+      widget.imageryLayers.add(trafficLayer.current)
+    }
+    widget.scene.requestRender()
+  }, [widget, traffic])
 
   // Conflict events from the Intelligence panel.
   useEffect(() => {

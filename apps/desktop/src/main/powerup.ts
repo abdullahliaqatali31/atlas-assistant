@@ -125,6 +125,10 @@ export class PowerUp {
         const s = await fetchStatus('https://api.cesium.com/v1/me', { headers: { Authorization: `Bearer ${key}` } })
         return s === 200 ? { ok: true, message: 'Works.' } : { ok: false, message: bad(s) }
       }
+      case 'tomtom': {
+        const s = await fetchStatus(`https://api.tomtom.com/traffic/map/4/tile/flow/relative0/1/0/0.png?key=${encodeURIComponent(key)}`, {})
+        return s === 200 ? { ok: true, message: 'Works · live traffic on.' } : { ok: false, message: bad(s) }
+      }
       case 'google-maps': {
         const s = await fetchStatus(`https://tile.googleapis.com/v1/3dtiles/root.json?key=${encodeURIComponent(key)}`, {})
         return s === 200 ? { ok: true, message: 'Works · photorealistic 3D tiles on.' } : { ok: false, message: s === 403 ? 'Google refused it: enable the Map Tiles API for this key and project.' : bad(s) }

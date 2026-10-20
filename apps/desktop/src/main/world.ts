@@ -92,6 +92,7 @@ export class WorldService {
     },
   ) {
     this.intel = new IntelFeed({ cacheDir: deps.cacheDir, log: deps.log })
+    this.cams.useCache(deps.cacheDir)
   }
   private readonly intel: IntelFeed
 
@@ -531,7 +532,7 @@ export class WorldService {
     // Only the owner's own window, and only while unlocked, gets the 3D keys.
     handle(WLD.map3dKeys, owner(() => {
       const store = osCredentialStore()
-      return { google: store.get('GOOGLE_MAPS_API_KEY') ?? null, ion: store.get('CESIUM_ION_TOKEN') ?? null }
+      return { google: store.get('GOOGLE_MAPS_API_KEY') ?? null, ion: store.get('CESIUM_ION_TOKEN') ?? null, tomtom: store.get('TOMTOM_API_KEY') ?? null }
     }))
     handle(WLD.ships, raw => {
       const b = raw as { south?: unknown; west?: unknown; north?: unknown; east?: unknown } | null

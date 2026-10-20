@@ -4,19 +4,22 @@
  * and one panel at a time, docked on the right so the item card keeps the
  * left. Each panel reads main's keyless feeds; the map shows what it can.
  */
-import { Briefcase, Globe2, Search, Shield, Star, X } from 'lucide-react'
+import { Briefcase, Globe2, Search, Shield, Star, Video, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { CATEGORY_COLOR, CATEGORY_LABEL, INTEL_CATEGORIES, type AlertRegion, type IntelCategory, type IntelEvent } from '../../../shared/intel.ts'
 import { GROUP_LABEL, MARKET_GROUPS, sparkPath, type MarketGroup, type Quote } from '../../../shared/markets.ts'
-import type { CountryCard } from '../../../shared/world.ts'
+import { kmBetween, type Camera, type CountryCard, type WorldSnapshot } from '../../../shared/world.ts'
+import type { Selected } from './Inspector.tsx'
+import { cameraFeatures } from './geo.ts'
 import { VIP_CATEGORIES, VIP_LABEL, type RichPerson, type VipCategory, type VipFlying } from '../../../shared/vip.ts'
 import { MAP3D_EVENT } from './mapops.ts'
 
-export type DockId = 'intel' | 'markets' | 'vip' | 'geo'
+export type DockId = 'intel' | 'cams' | 'markets' | 'vip' | 'geo'
 
 export const DOCK: { id: DockId; label: string; icon: typeof Shield; key: string; color: string }[] = [
   { id: 'intel', label: 'Intelligence', icon: Shield, key: 'i', color: '#f59e0b' },
+  { id: 'cams', label: 'Cameras', icon: Video, key: 'j', color: '#38bdf8' },
   { id: 'markets', label: 'Markets', icon: Briefcase, key: 'k', color: '#eab308' },
   { id: 'vip', label: 'VIP people', icon: Star, key: 'v', color: '#facc15' },
   { id: 'geo', label: 'Geography', icon: Globe2, key: 'z', color: '#22c55e' },
@@ -35,6 +38,10 @@ export interface DockContext {
   onIntel: (events: IntelEvent[], alerts: AlertRegion[]) => void
   /** The events loaded so far (for Geography's activity), if the Intelligence panel has run. */
   intelEvents: IntelEvent[] | null
+  /** Open an item's card (as a click on the map would). */
+  select: (s: Selected) => void
+  /** The live world: earthquakes and natural events, for "where something is happening". */
+  world: WorldSnapshot
 }
 
 export function DockButtons({ open, onOpen, badge }: { open: DockId | null; onOpen: (id: DockId | null) => void; badge?: Partial<Record<DockId, string>> }) {
@@ -270,7 +277,7 @@ export function DockPanel({ which, onClose, ctx, children }: { which: DockId; on
           <X className="size-4" aria-hidden />
         </button>
       </header>
-      {which === 'intel' ? <IntelPanel ctx={ctx} /> : which === 'markets' ? <MarketsPanel /> : which === 'geo' ? <GeoPanel ctx={ctx} /> : which === 'vip' ? <VipPanel ctx={ctx} /> : children}
+      {which === 'intel' ? <IntelPanel ctx={ctx} /> : which === 'markets' ? <MarketsPanel /> : which === 'geo' ? <GeoPanel ctx={ctx} /> : which === 'vip' ? <VipPanel ctx={ctx} /> : which === 'cams' ? <CamerasPanel ctx={ctx} /> : children}
     </section>
   )
 }
@@ -617,6 +624,130 @@ function VipPanel({ ctx }: { ctx: DockContext }) {
           <p className="text-[10px] text-muted">Net worth in US dollars as Wikidata records it (dates vary); photos Wikimedia Commons.</p>
         </>
       )}
+    </div>
+  )
+}
+
+const PLACES: { name: string; lat: number; lon: number }[] = [
+  { name: 'London', lat: 51.507, lon: -0.128 },
+  { name: 'Seattle', lat: 47.606, lon: -122.332 },
+  { name: 'Atlanta', lat: 33.749, lon: -84.388 },
+  { name: 'Madrid', lat: 40.417, lon: -3.704 },
+  { name: 'Toronto', lat: 43.653, lon: -79.383 },
+  { name: 'Sydney', lat: -33.869, lon: 151.209 },
+  { name: 'Hong Kong', lat: 22.319, lon: 114.169 },
+  { name: 'Helsinki', lat: 60.17, lon: 24.938 },
+]
+
+/** Public cameras: search them, jump to a city, and find the cameras near what is happening. */
+function CamerasPanel({ ctx }: { ctx: DockContext }) {
+  const [cams, setCams] = useState<Camera[] | null>(null)
+  const [query, setQuery] = useState('')
+  const [km, setKm] = useState(100)
+  useEffect(() => {
+    void window.world.cameras().then(setCams, () => setCams([]))
+  }, [])
+  const open = (c: Camera) => {
+    const f = cameraFeatures([c]).features[0]
+    ctx.flyTo(c.lat, c.lon, 13)
+    if (f) ctx.select({ kind: 'cameras', lngLat: [c.lon, c.lat], props: f.properties as Record<string, string | number> })
+  }
+  const q = query.trim().toLowerCase()
+  const found = q.length >= 2 ? (cams ?? []).filter(c => `${c.name} ${c.country} ${c.source}`.toLowerCase().includes(q)).slice(0, 60) : []
+  const live = (cams ?? []).filter(c => c.video).length
+  const countries = new Set((cams ?? []).map(c => c.country)).size
+  // Earthquakes, natural events and the strongest conflict events, each with the cameras around it.
+  const happening = useMemo(() => {
+    if (!cams?.length) return []
+    const spots: { title: string; kind: string; lat: number; lon: number }[] = [
+      ...ctx.world.quakes.slice(0, 40).map(q => ({ title: q.place || `M${q.mag}`, kind: `Earthquake · M${q.mag.toFixed(1)}`, lat: q.lat, lon: q.lon })),
+      ...ctx.world.events.slice(0, 60).map(e => ({ title: e.title, kind: e.category, lat: e.lat, lon: e.lon })),
+      ...(ctx.intelEvents ?? []).filter(e => e.severity >= 4 && e.category !== 'protest' && e.category !== 'other').slice(0, 20).map(e => ({ title: e.title, kind: `${CATEGORY_LABEL[e.category]} · S${e.severity}`, lat: e.lat, lon: e.lon })),
+    ]
+    return spots
+      .map(s => {
+        const near = cams.filter(c => Math.abs(c.lat - s.lat) < km / 80 && kmBetween(s, c) <= km)
+        return { ...s, n: near.length, live: near.filter(c => c.video).length }
+      })
+      .filter(s => s.n > 0)
+      // Earthquakes and natural events first (they are what cameras show best), then the most covered.
+      .sort((a, b) => Number(/^Earthquake|Wildfire|Volcano|Storm|Flood/i.test(b.kind)) - Number(/^Earthquake|Wildfire|Volcano|Storm|Flood/i.test(a.kind)) || b.n - a.n)
+      .slice(0, 25)
+    // ctx.world and ctx.intelEvents change as feeds update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cams, km, ctx.world, ctx.intelEvents])
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2 p-2.5">
+      <label className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5">
+        <Search className="size-3.5 text-muted" aria-hidden />
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Camera, road, city or country" className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted" />
+      </label>
+      <div className="grid grid-cols-3 gap-1.5">
+        {[
+          [cams ? cams.length.toLocaleString() : '…', 'cameras'],
+          [cams ? live.toLocaleString() : '…', 'live video'],
+          [cams ? String(countries) : '…', 'countries'],
+        ].map(([v, l]) => (
+          <div key={l} className="rounded-lg border border-border px-2 py-1.5">
+            <p className="font-mono text-base">{v}</p>
+            <p className="text-[10px] text-muted">{l}</p>
+          </div>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {q.length >= 2 ? (
+          <ul className="space-y-0.5">
+            {found.map(c => (
+              <li key={c.id}>
+                <button type="button" onClick={() => open(c)} className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-surface">
+                  <Video className={`size-3.5 shrink-0 ${c.video ? 'text-red-400' : 'text-teal-300'}`} aria-hidden />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs">{c.name}</span>
+                    <span className="block truncate text-[10px] text-muted">
+                      {c.country} · {c.source}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+            {!found.length && <li className="px-1 py-2 text-xs text-muted">No camera by that name.</li>}
+          </ul>
+        ) : (
+          <>
+            <p className="hud-label px-1 pb-1">Search any place</p>
+            <div className="flex flex-wrap gap-1 pb-2 text-[11px]">
+              {PLACES.map(p => (
+                <button key={p.name} type="button" onClick={() => ctx.flyTo(p.lat, p.lon, 11)} className="rounded-full border border-border px-2 py-0.5 text-muted hover:border-accent hover:text-accent">
+                  {p.name}
+                </button>
+              ))}
+            </div>
+            <p className="hud-label px-1">Where something is happening</p>
+            <label className="flex items-center gap-2 px-1 py-1.5 text-[11px]">
+              <span className="text-muted">Within</span>
+              <input type="range" min={10} max={300} step={10} value={km} onChange={e => setKm(Number(e.target.value))} className="flex-1 accent-[var(--color-accent,#22d3ee)]" />
+              <span className="w-14 text-right font-mono">{km} km</span>
+            </label>
+            <ul className="space-y-0.5">
+              {happening.map(h => (
+                <li key={h.title + h.lat}>
+                  <button type="button" onClick={() => ctx.flyTo(h.lat, h.lon, 9)} className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-surface">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs">{h.title}</span>
+                      <span className="block truncate text-[10px] text-muted">
+                        {h.kind} · {h.n} camera{h.n === 1 ? '' : 's'}
+                      </span>
+                    </span>
+                    {h.live > 0 && <span className="shrink-0 font-mono text-[10px] text-red-300">{h.live} live</span>}
+                  </button>
+                </li>
+              ))}
+              {cams && !happening.length && <li className="px-1 py-2 text-xs text-muted">No public camera near today’s events within {km} km.</li>}
+            </ul>
+          </>
+        )}
+      </div>
+      <p className="text-[10px] text-muted">Official open feeds only (road agencies and cities); Windy webcams with your key appear on the map.</p>
     </div>
   )
 }
