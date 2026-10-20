@@ -6,14 +6,14 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 import { ArrowLeft, Box, CarFront, Globe2, Layers, Map as MapIcon, ScanEye } from 'lucide-react'
-import maplibregl, { type FilterSpecification, type GeoJSONSource, type Map as MapLibre, type RasterTileSource, type StyleSpecification } from 'maplibre-gl'
+import maplibregl, { type FilterSpecification, type GeoJSONSource, type LayerSpecification, type Map as MapLibre, type RasterTileSource, type StyleSpecification } from 'maplibre-gl'
 import * as satellite from 'satellite.js'
 import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { MAX_PINS, type MapOp, type Pin, type Story } from '../../../shared/map.ts'
 import type { NewsResult } from '../../../shared/news.ts'
 import { CAMERA_COVERAGE, kmBetween, type FireSpot, type Camera, type Flight, type FlightRoute, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
-import { cameraFeatures, cleanError, deadReckon, fireFeatures, flightFeatures, launchFeatures, radioFeatures, rainTiles, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
+import { cameraFeatures, createGlide, cleanError, deadReckon, fireFeatures, flightFeatures, launchFeatures, radioFeatures, rainTiles, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
 import { nearbyItems, type NearbyItem } from './hover.ts'
 import { HoverCard } from './HoverCard.tsx'
 import { TrafficLayer2D, TrafficPill, type TrafficStatus } from './TrafficLayer2D.tsx'
@@ -96,6 +96,27 @@ const viewOf = (m: MapLibre): View => {
 
 const ICONS: Record<string, () => ImageData> = { plane: planeIcon, ship: shipIcon }
 
+/** Sources whose points move every second or two (planes, ships, satellites). */
+const MOVING = new Set(['flights', 'ships', 'satellites'])
+/**
+ * Moving points tile at low zoom only and keep a small buffer: each update
+ * (every second for planes) cuts far fewer tiles, and points need no detail
+ * beyond that.
+ */
+const MOVING_SOURCE = { maxzoom: 9, buffer: 32, tolerance: 1 } as const
+
+/**
+ * Icons and labels that may overlap anyway skip collision placement too: with
+ * thousands of planes the placement maths, not the drawing, made panning stutter.
+ */
+const fastSymbols = (spec: LayerSpecification): LayerSpecification => {
+  if (spec.type !== 'symbol') return spec
+  const layout = { ...(spec.layout ?? {}) } as Record<string, unknown>
+  if (layout['icon-allow-overlap'] === true && layout['icon-ignore-placement'] === undefined) layout['icon-ignore-placement'] = true
+  if (layout['text-allow-overlap'] === true && layout['text-ignore-placement'] === undefined) layout['text-ignore-placement'] = true
+  return { ...spec, layout } as LayerSpecification
+}
+
 export function MapView({
   world,
   selected,
@@ -134,6 +155,8 @@ export function MapView({
   const satsRef = useRef<{ name: string; rec: satellite.SatRec }[]>([])
   /** The last flights and when they came, for gliding between polls. */
   const glide = useRef<{ list: Flight[]; at: number } | null>(null)
+  /** Planes glide to each new fix instead of jumping (one smoother for the 2D map). */
+  const smooth = useMemo(() => createGlide(), [])
   /** Where aircraft and ships have been since the map opened. */
   const trails = useRef(new Trails())
   const [open, setOpen] = useState<'layers' | 'style' | 'display' | null>(null)
@@ -217,7 +240,7 @@ export function MapView({
 
   useEffect(() => {
     if (!box.current) return
-    const m = new maplibregl.Map({ container: box.current, style: BASE_URL.dark, center: [70, 28], zoom: 2.2, attributionControl: false, pixelRatio: isLite() ? 1 : window.devicePixelRatio })
+    const m = new maplibregl.Map({ container: box.current, style: BASE_URL.dark, center: [70, 28], zoom: 2.2, attributionControl: false, pixelRatio: isLite() ? 1 : Math.min(window.devicePixelRatio, 1.5), fadeDuration: 0, maxTileCacheZoomLevels: 3 })
     map.current = m
     // Dev runs only: a handle for checking the map from the debugger.
     if (location.protocol === 'http:') (window as unknown as { __map2d?: unknown }).__map2d = m
@@ -235,9 +258,9 @@ export function MapView({
       for (const l of LAYERS)
         for (const id of [l.source, ...(l.extraSources ?? [])])
           if (!m.getSource(id))
-            m.addSource(id, l.raster ? { type: 'raster', tiles: [rainTiles(null)], tileSize: 256, maxzoom: l.raster.maxzoom, attribution: l.raster.attribution } : { type: 'geojson', data: initial[id] ?? empty, ...(id === l.source ? l.sourceOptions : {}) })
+            m.addSource(id, l.raster ? { type: 'raster', tiles: [rainTiles(null)], tileSize: 256, maxzoom: l.raster.maxzoom, attribution: l.raster.attribution } : { type: 'geojson', data: initial[id] ?? empty, ...(MOVING.has(id) ? MOVING_SOURCE : {}), ...(id === l.source ? l.sourceOptions : {}) })
       for (const id of ['selected', 'trail', 'route']) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: empty })
-      for (const l of LAYERS) for (const spec of l.draw) if (!m.getLayer(spec.id)) m.addLayer(spec)
+      for (const l of LAYERS) for (const spec of l.draw) if (!m.getLayer(spec.id)) m.addLayer(fastSymbols(spec))
       for (const spec of ROUTE_LAYERS) if (!m.getLayer(spec.id)) m.addLayer(spec)
       if (!m.getLayer(TRAIL_LAYER.id)) m.addLayer(TRAIL_LAYER)
       if (!m.getLayer(SELECTED_LAYER.id)) m.addLayer(SELECTED_LAYER)
@@ -959,7 +982,8 @@ export function MapView({
         const show = (flights: Flight[]) => {
           trails.current.add(flights.map(f => ({ id: `f:${f.hex}`, lon: f.lon, lat: f.lat })))
           glide.current = { list: flights, at: Date.now() }
-          put('flights', flightFeatures(flights.map(f => deadReckon(f, f.seen))))
+          smooth.keep(new Set(flights.map(f => f.hex)))
+          put('flights', flightFeatures(flights.map(f => smooth.place(f, Date.now(), f.seen))))
           setCounts(x => ({ ...x, flights: flights.length }))
         }
         try {
@@ -983,15 +1007,30 @@ export function MapView({
       if (!stopped && mine === seq) timer = setTimeout(() => void load(), again)
     }
     void load()
-    // Between polls, planes glide on along their track (not in Lite mode, not for a crowded sky).
-    const glider = isLite()
-      ? null
-      : setInterval(() => {
-          const g = glide.current
-          if (!g || stopped || idle() || g.list.length > 6000) return
-          const dt = (Date.now() - g.at) / 1000
-          put('flights', flightFeatures(g.list.map(f => deadReckon(f, f.seen + dt))))
-        }, 1000)
+    // Between polls, planes glide on along their track, and a new fix never makes them jump (createGlide).
+    // Zoomed in, only the planes in view are moved, often (smooth); zoomed out, the whole sky now and then.
+    let tick = 0
+    const lite = isLite()
+    const glider = setInterval(
+      () => {
+        tick++
+        const g = glide.current
+        if (!g || stopped || idle()) return
+        const close = m.getZoom() >= 5
+        if (!close && (tick % (lite ? 30 : 10) || g.list.length > 6000)) return
+        const now = Date.now()
+        const dt = (now - g.at) / 1000
+        let list = g.list
+        if (close) {
+          const b = m.getBounds()
+          const padLat = (b.getNorth() - b.getSouth()) * 0.3
+          const padLon = (b.getEast() - b.getWest()) * 0.3
+          list = list.filter(f => f.lat > b.getSouth() - padLat && f.lat < b.getNorth() + padLat && f.lon > b.getWest() - padLon && f.lon < b.getEast() + padLon)
+        }
+        put('flights', flightFeatures(list.map(f => smooth.place(f, now, f.seen + dt))))
+      },
+      lite ? 200 : 100,
+    )
     let debounce: ReturnType<typeof setTimeout> | null = null
     const onMove = () => {
       if (debounce) clearTimeout(debounce)
@@ -1128,10 +1167,31 @@ export function MapView({
     if (!m || !ready || !layers.satellites) return
     let stopped = false
     let sats: { name: string; rec: satellite.SatRec }[] = []
+    // The whole sky every 2 s; zoomed in, the satellites near the view 4 times a second (they cross ~15 km in 2 s).
+    let all: FC | null = null
+    let near: { name: string; rec: satellite.SatRec }[] = []
     const draw = () => {
       if (stopped || idle() || !sats.length) return
-      put('satellites', satelliteFeatures(sats, new Date()))
+      all = satelliteFeatures(sats, new Date())
+      put('satellites', all)
+      near = []
+      if (m.getZoom() < 4) return
+      const b = m.getBounds()
+      const padLat = (b.getNorth() - b.getSouth()) * 0.5 + 2
+      const padLon = (b.getEast() - b.getWest()) * 0.5 + 2
+      const ids = new Set(all.features.filter(f => {
+        const [lon = 0, lat = 0] = (f.geometry as { coordinates: number[] }).coordinates
+        return lat > b.getSouth() - padLat && lat < b.getNorth() + padLat && lon > b.getWest() - padLon && lon < b.getEast() + padLon
+      }).map(f => String(f.properties?.norad)))
+      near = sats.filter(s => ids.has(String(s.rec.satnum).trim())).slice(0, 300)
     }
+    const drawNear = () => {
+      if (stopped || idle() || !all || !near.length || m.getZoom() < 4) return
+      const fresh = new Map(satelliteFeatures(near, new Date()).features.map(f => [String(f.properties?.id), f]))
+      all = { ...all, features: all.features.map(f => fresh.get(String(f.properties?.id)) ?? f) }
+      put('satellites', all)
+    }
+    const fast = setInterval(drawNear, 250)
     void window.world.satellites().then(list => {
       sats = list.flatMap(s => {
         try {
@@ -1148,6 +1208,7 @@ export function MapView({
     return () => {
       stopped = true
       clearInterval(timer)
+      clearInterval(fast)
     }
   }, [ready, layers.satellites])
 

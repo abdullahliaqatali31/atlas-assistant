@@ -819,3 +819,37 @@ input[type='radio']:disabled {
     animation: none;
   }
 }
+
+/* The corner mini globe: its rim sweep and centre pulse run on the compositor (transform and opacity only). */
+.mini-globe-sweep {
+  background: conic-gradient(from 0deg, transparent 0 78%, color-mix(in srgb, var(--accent) 85%, transparent) 88%, transparent 90%);
+  -webkit-mask: radial-gradient(circle, transparent calc(50% - 3px), #000 calc(50% - 2px));
+  mask: radial-gradient(circle, transparent calc(50% - 3px), #000 calc(50% - 2px));
+  animation: mini-globe-spin 5.2s linear infinite;
+  will-change: transform;
+}
+.mini-globe-pulse {
+  animation: mini-globe-pulse 1.6s ease-out infinite;
+  will-change: transform, opacity;
+}
+@keyframes mini-globe-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes mini-globe-pulse {
+  from {
+    transform: scale(0.25);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mini-globe-sweep,
+  .mini-globe-pulse {
+    animation: none;
+  }
+}

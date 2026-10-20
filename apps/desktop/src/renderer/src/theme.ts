@@ -60,8 +60,15 @@ export const applyAppearance = (a: Appearance) => {
   root.dataset.theme = theme
   if (a.accent === 'theme') delete root.dataset.accent
   else root.dataset.accent = a.accent
-  root.dataset.lite = String(a.lite === 'on' || (a.lite === 'auto' && machineWantsLite()))
+  const lite = a.lite === 'on' || (a.lite === 'auto' && machineWantsLite())
+  root.dataset.lite = String(lite)
   root.style.colorScheme = theme === 'daylight' ? 'light' : 'dark'
+  // Lite: a solid window in the theme's own base colour (no desktop blending behind every frame).
+  const toHex = (c: string) => {
+    const m = /^#([0-9a-f]{6})$/i.exec(c) ?? /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(c)
+    return m ? (m.length === 2 ? `#${m[1]}` : `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}`) : '#070c18'
+  }
+  void window.ui?.setSolid?.(lite, toHex(getComputedStyle(root).getPropertyValue('--solid').trim())).catch(() => undefined)
 }
 
 /** The owner's appearance, applied now and whenever Windows' light or dark setting changes. */

@@ -20,6 +20,7 @@ import { Onboarding } from './Onboarding.tsx'
 import { Markdown } from './ui/Markdown.tsx'
 import { ASK_EVENT, MIC_EVENT, publishLive, STOP_EVENT } from './shell/live.ts'
 import { nameOf } from './ui/assistantName.ts'
+import { setLiveLevel } from './ui/liveLevel.ts'
 
 interface Line {
   id: string
@@ -541,7 +542,9 @@ export function Companion({
   })()
   const state = listening ? 'Listening' : transcribing ? 'Transcribing' : speaking ? 'Speaking' : replyId ? 'Thinking' : PHASE_TEXT[status.phase]
   const presence: Presence['state'] = live.active ? (live.phase === 'speaking' ? 'speaking' : live.phase === 'listening' ? 'listening' : 'thinking') : listening ? 'listening' : speaking ? 'speaking' : replyId || transcribing ? 'thinking' : 'idle'
-  useEffect(() => onPresence?.({ state: presence, level: listening ? level : 0 }), [onPresence, presence, level, listening])
+  // The app hears about state changes only; the level goes to the orbs directly (liveLevel), many times a second.
+  useEffect(() => onPresence?.({ state: presence, level: 0 }), [onPresence, presence])
+  useEffect(() => setLiveLevel(listening ? level : live.active ? live.level : 0), [listening, level, live.active, live.level])
 
   // The desktop widget mirrors this: what Atlas is doing and its newest words. Sent on each change (not on a
   // timer: a minimised window's timers slow to once a minute), the mic level at most about four times a second.

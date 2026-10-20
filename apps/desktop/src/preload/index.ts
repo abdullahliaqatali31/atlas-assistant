@@ -262,6 +262,7 @@ const ui: UiBridge = {
   onCommand: cb => subscribe<PageCommand>(UC.command, cb),
   set: change => ipcRenderer.invoke(UC.set, change),
   state: () => ipcRenderer.invoke(UC.state),
+  setSolid: (solid, color) => ipcRenderer.invoke(UC.solid, solid, color),
 }
 contextBridge.exposeInMainWorld('ui', ui)
 

@@ -229,6 +229,19 @@ export function App() {
   const panesRef = useRef<HTMLDivElement>(null);
   /** The stage-and-panel area: the side panel docks to its edges or floats inside it. */
   const areaRef = useRef<HTMLDivElement>(null);
+  // Every page loads in the background once the app is idle, so opening one never blinks a loader.
+  useEffect(() => {
+    const pages = [() => import("./World.tsx"), () => import("./News.tsx"), () => import("./ProjectsHome.tsx"), () => import("./Files.tsx"), () => import("./Apps.tsx"), () => import("./Learning.tsx"), () => import("./Controls.tsx"), () => import("./Personality.tsx"), () => import("./habits/Habits.tsx")];
+    let i = 0;
+    let handle = 0;
+    const next = () => {
+      const load = pages[i++];
+      if (!load) return;
+      void load().catch(() => undefined).finally(() => (handle = window.setTimeout(() => requestIdleCallback(next, { timeout: 4000 }), 300)));
+    };
+    handle = window.setTimeout(() => requestIdleCallback(next, { timeout: 4000 }), 6000);
+    return () => clearTimeout(handle);
+  }, []);
   // The assistant's own name, everywhere on screen: renaming it re-renders the app (and the taskbar title).
   const assistantName = useAssistantName();
   useEffect(() => {

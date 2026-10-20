@@ -105,28 +105,32 @@ export function Orb({ state, level = 0, size = 220 }: { state: OrbState; level?:
       // Outer segmented ring (4 arcs) rotating
       ctx.lineWidth = size * 0.022
       ctx.strokeStyle = c(0.85)
+      // A canvas shadow is one of the dearest things to draw: skipped in Lite mode.
+      const lite = document.documentElement.dataset.lite === 'true'
       ctx.shadowColor = c(0.9)
-      ctx.shadowBlur = 12 * glow
+      ctx.shadowBlur = lite ? 0 : 12 * glow
+      ctx.beginPath()
       for (let i = 0; i < 4; i++) {
         const start = angle + (i * Math.PI) / 2 + 0.22
-        ctx.beginPath()
+        ctx.moveTo(cx + Math.cos(start) * R, cy + Math.sin(start) * R)
         ctx.arc(cx, cy, R, start, start + Math.PI / 2 - 0.44)
-        ctx.stroke()
       }
+      ctx.stroke()
 
       // Counter-rotating tick ring
       ctx.shadowBlur = 0
       ctx.lineWidth = 1.5
       ctx.strokeStyle = c(0.45)
+      // All 60 ticks in one stroke.
+      ctx.beginPath()
       for (let i = 0; i < 60; i++) {
         const a = -angle * 0.6 + (i / 60) * Math.PI * 2
         const inner = R * 0.8
         const outer = R * (i % 5 === 0 ? 0.87 : 0.84)
-        ctx.beginPath()
         ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner)
         ctx.lineTo(cx + Math.cos(a) * outer, cy + Math.sin(a) * outer)
-        ctx.stroke()
       }
+      ctx.stroke()
 
       // Warm accent arc (attention marker)
       const [wr, wg, wb] = palette.warm
@@ -160,17 +164,23 @@ export function Orb({ state, level = 0, size = 220 }: { state: OrbState; level?:
         ctx.stroke()
       }
 
-      // Orbiting particles
-      for (const p of particles) {
-        p.a += p.s * dt * (look.spin + 0.1)
-        const rr = R * p.r
-        const x = cx + Math.cos(p.a) * rr
-        const y = cy + Math.sin(p.a) * rr * 0.96
-        ctx.fillStyle = c(0.25 + 0.5 * p.z * glow)
+      // Orbiting particles, in three depth bands (three fills, not thirty-six).
+      for (let band = 0; band < 3; band++) {
         ctx.beginPath()
-        ctx.arc(x, y, 0.8 + p.z * 1.4, 0, Math.PI * 2)
+        for (const p of particles) {
+          if (Math.min(2, Math.floor(p.z * 3)) !== band) continue
+          if (band === 0) p.a += p.s * dt * (look.spin + 0.1)
+          const rr = R * p.r
+          const x = cx + Math.cos(p.a) * rr
+          const y = cy + Math.sin(p.a) * rr * 0.96
+          const pr = 0.8 + p.z * 1.4
+          ctx.moveTo(x + pr, y)
+          ctx.arc(x, y, pr, 0, Math.PI * 2)
+        }
+        ctx.fillStyle = c(0.25 + 0.5 * ((band + 0.5) / 3) * glow)
         ctx.fill()
       }
+      for (const p of particles) if (Math.min(2, Math.floor(p.z * 3)) !== 0) p.a += p.s * dt * (look.spin + 0.1)
 
       // Core
       const pulse = 1 + 0.06 * Math.sin(now / (stateRef.current === 'thinking' ? 180 : 700)) + wave * 0.12
@@ -204,11 +214,19 @@ export function Orb({ state, level = 0, size = 220 }: { state: OrbState; level?:
       last = performance.now()
       raf = requestAnimationFrame(draw)
     }
-    const onVisibility = () => (document.hidden ? stop() : start())
+    // Off screen (a closed panel, a page not shown) or a hidden window: no drawing at all.
+    let inView = true
+    const onVisibility = () => (document.hidden || !inView ? stop() : start())
     document.addEventListener('visibilitychange', onVisibility)
+    const io = new IntersectionObserver(([e]) => {
+      inView = !!e?.isIntersecting
+      onVisibility()
+    })
+    io.observe(canvas)
     start()
     return () => {
       stop()
+      io.disconnect()
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [size, reduced, redrawKey])

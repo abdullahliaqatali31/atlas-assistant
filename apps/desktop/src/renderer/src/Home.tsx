@@ -33,6 +33,7 @@ import { useNews } from './News.tsx'
 import { Orb, type OrbState } from './ui/Orb.tsx'
 import { RemoteImg } from './world/RemoteImg.tsx'
 import { nameOf, possessive } from './ui/assistantName.ts'
+import { LiveOrb } from './ui/LiveOrb.tsx'
 
 export type HomeTarget = 'today' | 'projects' | 'world' | 'chat' | 'news' | 'learning'
 
@@ -194,7 +195,7 @@ function Face({ orbState, presence, line, ready }: { orbState: OrbState; presenc
   return (
     <section className="glass rise-in flex shrink-0 flex-col items-center rounded-2xl px-3 pb-3 pt-2 text-center">
       <span className="hud-label self-start">{nameOf()}</span>
-      <Orb state={orbState} level={presence.level} size={112} />
+      <LiveOrb state={orbState} size={112} />
       <p className={`text-sm ${orbState === 'paused' ? 'text-danger' : orbState === 'listening' ? 'text-warm' : 'text-accent'}`}>{STATE_LABEL[orbState]}</p>
       <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted">{!ready ? 'Connect a provider in Settings to begin.' : line.length ? line.join(' · ') : 'All quiet. Nothing needs you right now.'}</p>
     </section>

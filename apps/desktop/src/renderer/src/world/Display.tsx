@@ -91,9 +91,16 @@ export function HudChip({ map, mode, counts }: { map: HudSource | MapLibre | nul
       setBlink(b => !b)
     }, 1000)
     let raf = 0
+    let lastMove = 0
+    // Ten readouts a second while the view moves: numbers need no more, and the map keeps its frames.
     const onMove = () => {
-      cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(() => tick(n => n + 1))
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        if (performance.now() - lastMove < 100) return
+        lastMove = performance.now()
+        tick(n => n + 1)
+      })
     }
     map?.on('move', onMove)
     return () => {

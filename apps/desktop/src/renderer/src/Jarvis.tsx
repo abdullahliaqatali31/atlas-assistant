@@ -5,6 +5,7 @@ import type { ActivityEntry, ControlState } from '../../shared/control.ts'
 import type { RuntimeStatus, TaskView } from '../../shared/ipc.ts'
 import { BrandIcon } from './ui/BrandIcon.tsx'
 import { Orb, type OrbState } from './ui/Orb.tsx'
+import { LiveOrb } from './ui/LiveOrb.tsx'
 
 /**
  * The assistant's own canvas, as cards: what it is doing right now, what
@@ -64,7 +65,7 @@ export function PresenceCard({ status, controls, presence, ownerName, size = 200
         <span className="hud-label">Presence</span>
         <span className="font-mono text-xs text-muted">{date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
       </div>
-      <Orb state={orbState} level={presence.level} size={size} />
+      <LiveOrb state={orbState} size={size} />
       <p className="font-mono text-3xl font-light tracking-wider tabular-nums">
         {date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
         <span className="text-base text-muted">:{String(date.getSeconds()).padStart(2, '0')}</span>

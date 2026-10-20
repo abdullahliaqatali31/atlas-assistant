@@ -272,3 +272,41 @@ export const radioFeatures = (list: RadioStation[]): FC => ({
 /** NASA IMERG rain tiles: the newest 30-minute frame when known, else yesterday's daily total. */
 export const rainTiles = (time: string | null, now = Date.now()) =>
   `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/IMERG_Precipitation_Rate${time ? '_30min' : ''}/default/${time ?? new Date(now - 86_400_000).toISOString().slice(0, 10)}/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png`
+
+/**
+ * Planes glide instead of jumping. Between polls each plane is dead-reckoned
+ * from its last fix; when a new fix arrives it usually lands a little away
+ * from where the plane was being shown. Rather than snapping there, the gap
+ * fades out over a couple of seconds (as God's Eye View does for its tracked
+ * plane). A gap too big to be real movement (bad data, a new plane with the
+ * same id) snaps at once.
+ */
+export const createGlide = (fadeMs = 2500, snapKm = 25) => {
+  const shown = new Map<string, { lat: number; lon: number }>()
+  const fix = new Map<string, { key: string; dLat: number; dLon: number; at: number }>()
+  const place = (raw: Flight, now: number, seconds: number): Flight => {
+    const target = deadReckon(raw, seconds)
+    const key = `${raw.lat},${raw.lon},${raw.seen}`
+    const prev = shown.get(raw.hex)
+    let o = fix.get(raw.hex)
+    if (!o || o.key !== key) {
+      // A new fix: start from where the plane is shown now, if that is close enough.
+      let dLat = prev ? prev.lat - target.lat : 0
+      let dLon = prev ? prev.lon - target.lon : 0
+      if (dLon > 180) dLon -= 360
+      if (dLon < -180) dLon += 360
+      if (Math.hypot(dLat * 111, dLon * 111 * Math.cos((target.lat * Math.PI) / 180)) > snapKm) dLat = dLon = 0
+      o = { key, dLat, dLon, at: now }
+      fix.set(raw.hex, o)
+    }
+    const k = Math.exp(-((now - o.at) / fadeMs) * 3)
+    const out = k < 0.01 ? target : { ...target, lat: target.lat + o.dLat * k, lon: ((target.lon + o.dLon * k + 540) % 360) - 180 }
+    shown.set(raw.hex, { lat: out.lat, lon: out.lon })
+    return out
+  }
+  /** Forget planes no longer in the list. */
+  const keep = (hexes: Set<string>) => {
+    for (const h of shown.keys()) if (!hexes.has(h)) (shown.delete(h), fix.delete(h))
+  }
+  return { place, keep }
+}

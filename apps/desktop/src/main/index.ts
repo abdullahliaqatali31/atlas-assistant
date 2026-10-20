@@ -70,7 +70,7 @@ import { isProtectedPath } from '../shared/sysmap.ts'
 import type { GlassFile } from '../shared/glass.ts'
 import { describeEntry, searchMap } from '../shared/sysmap.ts'
 import { LIVE_VOICES, type LiveVoiceName } from '../shared/livevoice.ts'
-import type { VoiceChange } from '../shared/ui.ts'
+import { UC, type VoiceChange } from '../shared/ui.ts'
 import { PRS, WIDGET_WHEN, type PresenceCommand, type WidgetWhen } from '../shared/presence.ts'
 
 // Privileged scheme for the local speech model must be declared before 'ready'.
@@ -277,6 +277,31 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
   },
   log,
 })
+
+/** Solid (Lite) or acrylic window, as the page last asked; kept so the next window opens right. */
+const WINDOW_LOOK_FILE = join(app.getPath('userData'), 'window-look.json')
+let windowLook: { solid: boolean; color: string } = (() => {
+  try {
+    const raw = JSON.parse(readFileSync(WINDOW_LOOK_FILE, 'utf8')) as { solid?: unknown; color?: unknown }
+    return { solid: raw.solid === true, color: typeof raw.color === 'string' && /^#[0-9a-f]{6}$/i.test(raw.color) ? raw.color : '#070c18' }
+  } catch {
+    return { solid: false, color: '#070c18' }
+  }
+})()
+const setWindowLook = (solid: boolean, color: string) => {
+  const next = { solid, color: /^#[0-9a-f]{6}$/i.test(color) ? color : windowLook.color }
+  if (next.solid === windowLook.solid && next.color === windowLook.color) return
+  windowLook = next
+  try {
+    writeFileSync(WINDOW_LOOK_FILE, JSON.stringify(windowLook))
+  } catch {
+    // Applies now; next start uses acrylic again.
+  }
+  if (win && !win.isDestroyed() && process.platform === 'win32') {
+    win.setBackgroundMaterial(solid ? 'none' : 'acrylic')
+    win.setBackgroundColor(solid ? windowLook.color : '#00000000')
+  }
+}
 
 /** The assistant's own name (Settings › Personality); "Atlas" until the owner gives one. */
 let assistantName = 'Atlas'
@@ -523,7 +548,8 @@ const createWindow = ({ inactive = false } = {}) => {
     icon: appIcon(),
     // Windows 11 acrylic behind the glass UI; a transparent base avoids a flash of solid colour.
     // Older Windows ignores the material and the page's own tinted background shows instead.
-    ...(process.platform === 'win32' ? { backgroundMaterial: 'acrylic' as const, backgroundColor: '#00000000' } : { backgroundColor: '#0b1020' }),
+    // In Lite mode the window is solid: a see-through window makes Windows blend the desktop into every frame.
+    ...(process.platform === 'win32' && !windowLook.solid ? { backgroundMaterial: 'acrylic' as const, backgroundColor: '#00000000' } : { backgroundColor: windowLook.color }),
     // No native title bar: the page draws its own (drag region + logo); Windows keeps
     // its real minimize/maximize/close buttons, drawn transparently over the page.
     titleBarStyle: 'hidden',
@@ -759,6 +785,10 @@ handle(CH.interrupt, () => {
   supervisor.interrupt()
 })
 handle(SCT.list, () => shortcutsView())
+handle(UC.solid, (solid, color) => {
+  if (typeof solid !== 'boolean') throw new Error('Solid or not.')
+  setWindowLook(solid, typeof color === 'string' ? color.trim() : '')
+})
 handle(CH.setMode, arg => {
   if (!isMode(arg)) throw new Error('Unknown mode.')
   supervisor.setMode(arg)

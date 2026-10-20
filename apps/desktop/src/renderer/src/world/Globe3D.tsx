@@ -34,7 +34,7 @@ import { Points3D } from './points3d.ts'
 import { newsFeatures } from './newsmap.ts'
 import type { FC } from './geo.ts'
 import { CelestialRing } from './CelestialRing.tsx'
-import { cameraFeatures, deadReckon, fireFeatures, flightFeatures, flightLabel, planeIcon, radioFeatures, satelliteFeatures, shipFeatures, shipIcon } from './geo.ts'
+import { cameraFeatures, createGlide, deadReckon, fireFeatures, flightFeatures, flightLabel, planeIcon, radioFeatures, satelliteFeatures, shipFeatures, shipIcon } from './geo.ts'
 import { DisplayFx, HudChip, TacticalHud, type HudSource } from './Display.tsx'
 import { HoverOverlay } from './HoverCard.tsx'
 import { hoverInfo } from './hover.ts'
@@ -252,6 +252,15 @@ export default function Globe3D({
       // Cesium stops drawing after an error: say so in Atlas's own words.
       viewer.scene.renderError.addEventListener((_scene: unknown, e: unknown) => setError(`The 3D view stopped drawing (${e instanceof Error ? e.message.slice(0, 80) : 'error'}). Go back to 2D and open 3D again.`))
       viewerRef.current = viewer
+      {
+        // Smooth turning: keep more tiles (turning back reuses them instead of asking again), and on a
+        // modest GPU (Lite) ask for slightly coarser ground, far fewer tiles to request and draw.
+        const lite = document.documentElement.dataset.lite === 'true'
+        const globe = viewer.scene.globe
+        globe.tileCacheSize = 400
+        globe.maximumScreenSpaceError = lite ? 3 : 2
+        if (lite) viewer.scene.msaaSamples = 1
+      }
       // The loader follows the ground's tiles until the first view is in.
       {
         // Where the camera looks, for the mini globe in the corner widget.
@@ -375,6 +384,8 @@ export default function Globe3D({
         Cesium.Cartesian3.fromDegrees(f.lon, f.lat, altM(f), Cesium.Ellipsoid.WGS84, scratch)
         m.model.modelMatrix = Transforms.headingPitchRollToFixedFrame(scratch, hpr, Cesium.Ellipsoid.WGS84, undefined, m.model.modelMatrix)
       }
+      /** Planes glide to each new fix instead of jumping when a poll lands (shared by the slow and fast passes). */
+      const glide = createGlide()
       const slowPass = () => {
         if (!viewer || viewer.isDestroyed()) return
         const cam = viewer.camera.positionCartographic
@@ -409,7 +420,7 @@ export default function Globe3D({
             if (b) b.show = false
             continue
           }
-          const f = deadReckon(raw, raw.seen + dt)
+          const f = glide.place(raw, Date.now(), raw.seen + dt)
           Cesium.Cartesian3.fromDegrees(f.lon, f.lat, altM(f), Cesium.Ellipsoid.WGS84, scratch)
           if (!b) {
             b = bills.add({ position: scratch, image: planeImg, width: 22, height: 22, color: colorFor(colorOf(f)), alignedAxis: Cesium.Cartesian3.UNIT_Z, scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 3e6, 0.35), id: { kind: 'flight', hex: f.hex } })
@@ -420,6 +431,7 @@ export default function Globe3D({
           if (near) nearList.push({ f, km: kmBetween({ lat: camLat, lon: camLon }, f), b })
         }
         for (const [hex, b] of byHex) if (!seen.has(hex)) (bills.remove(b), byHex.delete(hex))
+        glide.keep(seen)
         nearList.sort((a, b) => a.km - b.km)
         live = nearList.slice(0, MAX_LIVE).map(n => ({ hex: n.f.hex, b: n.b }))
         if (followed && !live.some(l => l.hex === followed)) {
@@ -473,7 +485,7 @@ export default function Globe3D({
         for (const l of live) {
           const raw = data.get(l.hex)
           if (!raw) continue
-          const f = deadReckon(raw, raw.seen + dt)
+          const f = glide.place(raw, Date.now(), raw.seen + dt)
           Cesium.Cartesian3.fromDegrees(f.lon, f.lat, altM(f), Cesium.Ellipsoid.WGS84, scratch)
           l.b.position = scratch
           placeModel(l.hex, f)

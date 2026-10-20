@@ -16,6 +16,8 @@ export type BrainMood = 'idle' | 'listening' | 'thinking' | 'speaking' | 'offlin
 
 const ACTIVE_MS = 12_000
 /** Seconds an impulse takes to cross one synapse. */
+/** Brightness bands the dust is drawn in. */
+const DUST_BANDS = 8
 const HOP = 0.055
 
 /** A repeatable random number from a seed (for lightning that flickers, not crawls). */
@@ -148,7 +150,7 @@ export function Brain(props: BrainProps) {
     let h = 0
     let dpr = 1
     const resize = () => {
-      dpr = Math.min(1.75, devicePixelRatio || 1)
+      dpr = Math.min(1.25, devicePixelRatio || 1)
       w = box.clientWidth
       h = box.clientHeight
       el.width = Math.max(1, Math.round(w * dpr))
@@ -195,6 +197,9 @@ export function Brain(props: BrainProps) {
       if (fires.length > 1200) fires.splice(0, fires.length - 1200)
     }
     let px = new Float32Array(0)
+    /** Dust specks per brightness band (x, y, size triples), reused every frame. */
+    const dustBands: number[][] = Array.from({ length: DUST_BANDS }, () => [])
+    const foldPaths: Path2D[] = []
 
     const project = (p: P3, S: number, cx: number, cy: number) => {
       const cy1 = Math.cos(cam.yaw)
@@ -241,6 +246,8 @@ export function Brain(props: BrainProps) {
 
       // The cortex: dust, the mesh between it, and folds.
       if (px.length !== s.dust.length * 3) px = new Float32Array(s.dust.length * 3)
+      // Dust in a few brightness bands, one fill each: a handful of draw calls instead of one per speck.
+      for (const band of dustBands) band.length = 0
       for (let i = 0; i < s.dust.length; i++) {
         const d = s.dust[i]!
         const q = project(d, S, cx, cy)
@@ -248,9 +255,16 @@ export function Brain(props: BrainProps) {
         px[i * 3 + 1] = q.y
         px[i * 3 + 2] = q.z
         const tw = 0.6 + 0.4 * Math.sin(t * (0.6 + d.s) + d.s * 40)
-        ctx.fillStyle = `rgba(125,211,252,${(0.18 + 0.42 * depthA(q.z) * tw * dim).toFixed(3)})`
-        const sz = 1 + q.k * 0.8
-        ctx.fillRect(q.x, q.y, sz, sz)
+        const a = 0.18 + 0.42 * depthA(q.z) * tw * dim
+        dustBands[Math.min(DUST_BANDS - 1, Math.floor((a / 0.6) * DUST_BANDS))]!.push(q.x, q.y, 1 + q.k * 0.8)
+      }
+      for (let b = 0; b < DUST_BANDS; b++) {
+        const pts = dustBands[b]!
+        if (!pts.length) continue
+        ctx.fillStyle = `rgba(125,211,252,${(((b + 0.5) / DUST_BANDS) * 0.6).toFixed(3)})`
+        ctx.beginPath()
+        for (let k = 0; k < pts.length; k += 3) ctx.rect(pts[k]!, pts[k + 1]!, pts[k + 2]!, pts[k + 2]!)
+        ctx.fill()
       }
       // Synapses in three depth bands, one path each.
       ctx.lineWidth = 0.6
@@ -313,18 +327,25 @@ export function Brain(props: BrainProps) {
         }
       }
       fires.length = kept
+      // Folds in three depth bands, one stroke each.
       ctx.lineWidth = 1.3
+      for (let b = 0; b < 3; b++) foldPaths[b] = new Path2D()
       for (const line of s.folds) {
-        ctx.beginPath()
         let front = 0
-        line.forEach((pt, i) => {
+        const pts: number[] = []
+        for (const pt of line) {
           const q = project(pt, S, cx, cy)
           front += q.z
-          if (i) ctx.lineTo(q.x, q.y)
-          else ctx.moveTo(q.x, q.y)
-        })
-        ctx.strokeStyle = `rgba(125,211,252,${(0.16 + 0.24 * depthA(front / line.length) * dim).toFixed(3)})`
-        ctx.stroke()
+          pts.push(q.x, q.y)
+        }
+        const a = depthA(front / line.length)
+        const path = foldPaths[a < 0.4 ? 0 : a < 0.75 ? 1 : 2]!
+        path.moveTo(pts[0]!, pts[1]!)
+        for (let k = 2; k < pts.length; k += 2) path.lineTo(pts[k]!, pts[k + 1]!)
+      }
+      for (let b = 0; b < 3; b++) {
+        ctx.strokeStyle = `rgba(125,211,252,${(0.16 + 0.24 * [0.3, 0.6, 0.9][b]! * dim).toFixed(3)})`
+        ctx.stroke(foldPaths[b]!)
       }
 
       const active = (id: string) => {

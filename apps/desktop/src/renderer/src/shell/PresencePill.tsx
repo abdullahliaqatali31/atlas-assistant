@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { Orb } from '../ui/Orb.tsx'
 import type { Presence } from '../Jarvis.tsx'
 import { STOP_EVENT, useLive } from './live.ts'
+import { LiveOrb } from '../ui/LiveOrb.tsx'
 
 const LABEL: Record<string, string> = { listening: 'Listening…', thinking: 'Thinking…', speaking: 'Speaking' }
 const KEY = 'presence.pill'
@@ -83,7 +84,7 @@ export function PresencePill({ presence, onOpen }: { presence: Presence; onOpen:
       className={`rise-in absolute z-40 flex max-w-[min(340px,calc(100%-24px))] cursor-grab touch-none select-none items-center gap-2 rounded-full border border-border bg-solid/95 py-1 pl-1 pr-1.5 shadow-2xl ${dragAt ? 'cursor-grabbing' : 'transition-[top,left,right] duration-200'}`}
       style={style}
     >
-      <Orb state={presence.state} level={presence.level} size={40} />
+      <LiveOrb state={presence.state} size={40} />
       <div className="min-w-0 flex-1">
         <p className={`text-[11px] font-medium ${presence.state === 'listening' ? 'text-warm' : 'text-accent'}`} role="status">
           {LABEL[presence.state]}

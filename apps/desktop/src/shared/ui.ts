@@ -111,6 +111,8 @@ export const UC = {
   command: 'ui:command',
   set: 'ui:set',
   state: 'ui:state',
+  /** The page says whether the window should be solid (Lite) or see-through acrylic, and its base colour. */
+  solid: 'ui:solid',
 } as const
 
 export interface UiBridge {
@@ -120,6 +122,8 @@ export interface UiBridge {
   /** The owner's own buttons (compact, pin) go through the same path as Atlas's. */
   set(change: UiChange): Promise<UiState>
   state(): Promise<UiState>
+  /** Solid window (Lite: no desktop blending behind every frame) or acrylic; color is the page's base. */
+  setSolid(solid: boolean, color: string): Promise<void>
 }
 
 export const isView = (v: unknown): v is View => (VIEWS as readonly unknown[]).includes(v)
