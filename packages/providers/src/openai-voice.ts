@@ -37,7 +37,7 @@ export class OpenAiVoice implements VoiceProvider {
     const res = await fetch(`${BASE}/audio/speech`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: this.models.tts, voice: this.voice, input: text, response_format: 'mp3', instructions: 'Speak naturally and warmly, at a relaxed conversational pace.' }),
+      body: JSON.stringify({ model: this.models.tts, voice: this.voice, input: text, response_format: 'mp3', instructions: 'Speak naturally and warmly at a relaxed conversational pace, with a clear, well-projected voice and crisp consonants.' }),
       signal: opts.signal,
     })
     if (!res.ok || !res.body) throw new Error(`OpenAI speech failed: ${res.status} ${await res.text()}`)

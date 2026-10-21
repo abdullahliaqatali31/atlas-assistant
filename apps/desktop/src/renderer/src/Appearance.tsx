@@ -5,6 +5,7 @@ import type { WidgetWhen } from '../../shared/presence.ts'
 
 import { ACCENTS, THEME_LABEL, THEMES, useAppearance, type Accent, type LiteChoice, type ThemeName } from './theme.ts'
 import { nameOf } from './ui/assistantName.ts'
+import { SoundSettings } from './voice/SoundSettings.tsx'
 
 const SWATCH: Record<Exclude<Accent, 'theme'>, string> = { cyan: '#22d3ee', blue: '#60a5fa', violet: '#a78bfa', emerald: '#34d399', amber: '#fbbf24', rose: '#fb7185' }
 const PREVIEW: Record<Exclude<ThemeName, 'system'>, { bg: string; card: string; accent: string }> = {
@@ -93,6 +94,8 @@ export function AppearanceSettings() {
         </div>
         <p className="text-[11px] text-muted">Now: {document.documentElement.dataset.lite === 'true' ? 'Lite (light on the machine)' : 'Full effects'}</p>
       </section>
+
+      <SoundSettings />
 
       <section className="space-y-2">
         <h3 className="flex items-center gap-2 text-sm font-medium">

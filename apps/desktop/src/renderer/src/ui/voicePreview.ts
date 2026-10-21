@@ -3,6 +3,7 @@
  * owner's own key; it plays here (one at a time). Errors come back as text.
  */
 import type { VoicePreviewProvider } from '../../../shared/powerup.ts'
+import { playThroughChain } from '../voice/output.ts'
 
 let playing: HTMLAudioElement | null = null
 
@@ -14,7 +15,12 @@ export const previewVoice = async (provider: VoicePreviewProvider, voice: string
     const url = URL.createObjectURL(new Blob([audio as BlobPart], { type: 'audio/mpeg' }))
     const el = new Audio(url)
     playing = el
-    el.onended = () => URL.revokeObjectURL(url)
+    // Heard as replies will be: same loudness, same clarity, same speakers.
+    const unplug = playThroughChain(el)
+    el.onended = () => {
+      unplug()
+      URL.revokeObjectURL(url)
+    }
     await el.play()
     return null
   } catch (e) {

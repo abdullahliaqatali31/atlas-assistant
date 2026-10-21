@@ -8,6 +8,7 @@
 import { DoubleClapDetector, WhistleDetector } from '../../../shared/sound-triggers.ts'
 import { matchWake, type Sensitivity, type WakeMatch } from '../../../shared/wake.ts'
 import type { AsrRequest, AsrResponse } from './asr.worker.ts'
+import { outputSettings } from '../voice/output.ts'
 
 const RATE = 16_000
 const FRAME = 1024 // 64 ms
@@ -90,7 +91,7 @@ export class WakeListener {
     // The speech model loads only when the name trigger is on; claps and whistles need none.
     if (this.opts.settings().name) await ensureWorker()
     this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audio: { ...(outputSettings().inputId ? { deviceId: { exact: outputSettings().inputId } } : {}), channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     })
     this.ctx = new AudioContext({ sampleRate: RATE })
     // Chromium may create it suspended; without this no audio (and no level) arrives.

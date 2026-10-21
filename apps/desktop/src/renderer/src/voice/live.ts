@@ -9,6 +9,8 @@
  * response's usage is priced; the call ends itself at the owner's cap.
  */
 import { LIVE_MODELS, usageCost, type LiveSession, type RealtimeUsage } from '../../../shared/livevoice.ts'
+import { NoiseFloor } from './mic.ts'
+import { outputSettings, streamThroughChain } from './output.ts'
 
 export type LivePhase = 'connecting' | 'listening' | 'thinking' | 'speaking'
 
@@ -68,6 +70,11 @@ export class LiveCall {
   private handled = new Set<string>()
   private ended = false
   private endAfterSpeech = false
+  /** The reply's sound goes through the shared chain (loud, clear, the chosen speakers). */
+  private unplug: (() => void) | null = null
+  /** Barge-in: the owner talking over a reply cuts it, judged here (room noise never does). */
+  private bargeFloor = new NoiseFloor()
+  private loudSince: number | null = null
 
   constructor(
     private readonly session: LiveSession,
@@ -91,7 +98,8 @@ export class LiveCall {
   async start() {
     this.cb.onPhase('connecting')
     if (this.session.expiresAt && this.session.expiresAt * 1000 < Date.now()) throw new Error('The live session expired before it started; try again.')
-    this.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+    const inputId = outputSettings().inputId
+    this.mic = await navigator.mediaDevices.getUserMedia({ audio: { ...(inputId ? { deviceId: { exact: inputId } } : {}), channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
     const pc = new RTCPeerConnection()
     this.pc = pc
     this.ctx = new AudioContext()
@@ -105,6 +113,10 @@ export class LiveCall {
       const stream = e.streams[0]
       if (!stream || !this.audio || !this.ctx) return
       this.audio.srcObject = stream
+      // The element only keeps the remote stream flowing; the sound itself plays through the chain.
+      this.audio.muted = true
+      this.unplug?.()
+      this.unplug = streamThroughChain(stream)
       this.outA = this.ctx.createAnalyser()
       this.outA.fftSize = 512
       this.ctx.createMediaStreamSource(stream).connect(this.outA)
@@ -127,9 +139,25 @@ export class LiveCall {
     const res = await fetch(CALLS, { method: 'POST', body: offer.sdp ?? '', cache: 'no-store', headers: { Authorization: `Bearer ${this.session.token}`, 'Content-Type': 'application/sdp' } })
     if (!res.ok) throw new Error(res.status === 401 ? 'The live session was refused; try again.' : `Live voice could not connect (${res.status}).`)
     await pc.setRemoteDescription({ type: 'answer', sdp: await res.text() })
+    const micBuf = new Uint8Array(new ArrayBuffer(512))
     this.levelTimer = setInterval(() => {
       const a = this.phase === 'speaking' ? this.outA : this.phase === 'listening' ? this.micA : null
       this.cb.onLevel(a ? rms(a, buf) : 0)
+      // While it speaks: the owner's voice well above the room and the leftover echo, for 350 ms, cuts the reply.
+      if (this.phase === 'speaking' && this.micA) {
+        const level = rms(this.micA, micBuf)
+        const bar = Math.max(0.16, this.bargeFloor.value * 5)
+        const loud = level > bar
+        this.bargeFloor.update(level, loud)
+        const now = performance.now()
+        if (loud) {
+          this.loudSince ??= now
+          if (now - this.loudSince >= 350) {
+            this.loudSince = null
+            this.cancel()
+          }
+        } else this.loudSince = null
+      } else this.loudSince = null
     }, 60)
     this.set('listening')
   }
@@ -247,6 +275,8 @@ export class LiveCall {
     } catch {
       // Already closed.
     }
+    this.unplug?.()
+    this.unplug = null
     if (this.audio) this.audio.srcObject = null
     void this.ctx?.close().catch(() => undefined)
     this.cb.onEnd(reason)

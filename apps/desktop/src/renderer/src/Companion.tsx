@@ -21,6 +21,7 @@ import { Markdown } from './ui/Markdown.tsx'
 import { ASK_EVENT, MIC_EVENT, publishLive, STOP_EVENT } from './shell/live.ts'
 import { nameOf } from './ui/assistantName.ts'
 import { setLiveLevel } from './ui/liveLevel.ts'
+import { closeMic } from './voice/mic.ts'
 
 interface Line {
   id: string
@@ -86,6 +87,8 @@ export function Companion({
   const [level, setLevel] = useState(0)
   const replyRef = useRef<string | null>(null)
   const recordingRef = useRef<Recording | null>(null)
+  /** The "microphone is quiet" hint is given once a session. */
+  const quietToldRef = useRef(false)
   const playerRef = useRef<SentencePlayer | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   /** Short replies Atlas offered after its last answer. */
@@ -188,6 +191,8 @@ export function Companion({
     const offSilence = window.assistant.onSilence(() => {
       recordingRef.current?.stop(false)
       stopSpeech()
+      // Locked or asleep: the microphone closes now, not after its usual short linger.
+      closeMic()
     })
     // Listening now: main flushes anything it held while this window was loading.
     void window.assistant.ready()
@@ -298,6 +303,12 @@ export function Companion({
     try {
       recordingRef.current = await record({
         onLevel: setLevel,
+        // Heard, but faintly: say once how to fix it (closer, or the microphone level / choice in Settings › Sound).
+        onQuiet: () => {
+          if (quietToldRef.current) return
+          quietToldRef.current = true
+          setError('Your microphone sounds quiet. Come a little closer, or pick another microphone or raise its level in Settings › Appearance › Sound.')
+        },
         // In a conversation it waits up to 30 s for the owner to speak; then the conversation ends.
         noSpeechMs: inConversation ? IDLE_MS : undefined,
         onEnd: async (result, reason) => {
