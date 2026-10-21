@@ -586,14 +586,6 @@ export function App() {
   ];
   const bottom: RailItem[] = [
     {
-      id: "compact",
-      label: "Compact",
-      icon: <Minimize2 />,
-      active: false,
-      onClick: () => void setWindow({ size: "compact" }),
-      peek: peek("compact"),
-    },
-    {
       id: "shortcuts",
       label: "Shortcuts",
       icon: <Keyboard />,
@@ -648,22 +640,6 @@ export function App() {
       hint: "/",
       icon: <Sparkles />,
       run: () => focusAsk(),
-    },
-    {
-      id: "compact",
-      group: "Do",
-      label: "Compact mode",
-      icon: <Minimize2 />,
-      keywords: "small window mini",
-      run: () => void setWindow({ size: "compact" }),
-    },
-    {
-      id: "ontop",
-      group: "Do",
-      label: onTop ? "Stop keeping on top" : "Keep on top of other windows",
-      icon: <Pin />,
-      keywords: "pin always",
-      run: () => void setWindow({ pinned: !onTop }),
     },
     {
       id: "refresh-world",
@@ -864,6 +840,8 @@ export function App() {
     >
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 min-w-0 flex-1">
+          {/* The sidebar, on the left as on any web app; the pages in the top bar are not repeated in it. */}
+          {!compact && !phone && <Rail items={items} bottom={bottom} />}
           {/* Stage and drawer: a floating drawer covers the stage's edge, never the rail. */}
           <div ref={areaRef} className="relative flex min-h-0 min-w-0 flex-1">
             {/* Moving the panel: the edges it would dock to light up. */}
@@ -1175,12 +1153,9 @@ export function App() {
             </aside>
           </div>
 
-          {!compact && !phone && (
-            <Rail top={top} items={items} bottom={bottom} />
-          )}
         </div>
         {!compact && phone && (
-          <Rail top={top} items={items} bottom={bottom} horizontal />
+          <Rail items={items} bottom={bottom} horizontal />
         )}
       </div>
       {board && <ShortcutBoard onClose={() => setBoard(false)} />}

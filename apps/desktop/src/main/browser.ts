@@ -297,10 +297,12 @@ export class BrowserService {
   private async picture(id: unknown, width: unknown): Promise<TabPicture | null> {
     if (typeof id !== 'string' || !this.tabs.tabs.some(t => t.id === id)) return null
     this.touch()
-    const page = await this.pageFor(id).catch(() => null)
+    const page = await this.pageFor(id).catch((e: unknown) => this.trouble(e))
     if (!page) return null
+    // Headless Chrome draws only the tab in front: bring this one forward first.
+    await page.bringToFront().catch(() => undefined)
     const w = typeof width === 'number' && Number.isFinite(width) ? Math.max(320, Math.min(1600, Math.round(width))) : 1024
-    const shot = await page.screenshot({ type: 'jpeg', quality: w < VIEWPORT.width ? 65 : 75, scale: 'css', timeout: 5_000 }).catch(() => null)
+    const shot = await page.screenshot({ type: 'jpeg', quality: w < VIEWPORT.width ? 65 : 75, scale: 'css', timeout: 12_000 }).catch((e: unknown) => this.trouble(e))
     if (!shot) return null
     const loading = await page.evaluate('document.readyState !== "complete"').catch(() => false)
     const hist = (await page.evaluate('history.length').catch(() => 1)) as number
@@ -312,11 +314,21 @@ export class BrowserService {
     }
   }
 
+  private lastTrouble = ''
+  /** Says why a picture failed (once per distinct reason), then gives up quietly. */
+  private trouble(e: unknown): null {
+    const why = e instanceof Error ? e.message.split('\n')[0]! : String(e)
+    if (why !== this.lastTrouble) this.deps.log('warn', `Atlas's browser: ${why}`)
+    this.lastTrouble = why
+    return null
+  }
+
   private async remote(id: unknown, raw: unknown) {
     const input = parseRemoteInput(raw)
     if (!input || typeof id !== 'string') return
     this.touch()
     const page = await this.pageFor(id)
+    await page.bringToFront().catch(() => undefined)
     const at = (fx: number, fy: number) => ({ x: Math.round(VIEWPORT.width * fx), y: Math.round(VIEWPORT.height * fy) })
     if (input.kind === 'click') {
       const p = at(input.x, input.y)

@@ -46,9 +46,14 @@ const restart = () => {
 
 // Old chunks stay on disk, so a gateway still running can finish what it was loading.
 const watcher = await build({ configFile: resolve(root, 'vite.gateway.config.ts'), mode: 'development', logLevel: 'warn', build: { watch: {}, emptyOutDir: false } })
+// A build that failed keeps the gateway that is running (no restart onto old files).
+let failed = false
 watcher.on('event', e => {
-  if (e.code === 'END') restart()
-  else if (e.code === 'ERROR') console.error('[dev] build failed:', e.error?.message)
+  if (e.code === 'START') failed = false
+  else if (e.code === 'ERROR') {
+    failed = true
+    console.error('[dev] build failed:', e.error?.message)
+  } else if (e.code === 'END' && !failed) restart()
 })
 
 const quit = async () => {
