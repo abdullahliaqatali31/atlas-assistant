@@ -354,6 +354,8 @@ export class WebAccess {
     // Each code and ticket works once.
     if (byTicket) this.tickets = this.tickets.filter(t => t !== ticket)
     else this.code = null
+    // A browser already paired keeps its entry (opening Atlas again must not add it twice).
+    if (this.device(req)) return this.send(res, 200, '{"ok":true}', 'application/json')
     const token = randomBytes(32).toString('base64url')
     this.stored.devices.push({ id: randomUUID(), name: deviceName(req.headers['user-agent']), hash: hash(token), created: now, lastSeen: now })
     this.save()

@@ -59,6 +59,7 @@ import { PcActions } from '../main/system/actions.ts'
 import { app, dialog, powerMonitor, shell } from '../main/host/index.ts'
 import { Tray } from '../main/host/tray.ts'
 import { TimerService } from '../main/timers.ts'
+import { TelegramChannel } from '../main/telegram.ts'
 
 const isDev = !app.isPackaged
 /** Development: the page comes from the Vite dev server, and the repo root's .env feeds setup (like `pnpm chat`). */
@@ -174,16 +175,21 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
     // The assistant is speaking up on its own: tell the owner if no page is open to hear it.
     if (e.type === 'initiative' && !web.hasClients) notifyItem(e.item)
     replyToRenderer(e)
+    telegram.onReply(e)
   },
   onLater: (later, item) => {
     publish({ later })
-    if (item) notifyItem(item)
+    if (item) {
+      notifyItem(item)
+      telegram.notice(item.kind === 'reminder' ? 'Reminder' : assistantName, item.title)
+    }
   },
   away: () => sessionWatch?.away ?? (identity.locked ? 'lock' : undefined),
   onApproval: request => {
     publish({ approvals: [...status.approvals, request] })
     // An approval needs the owner's eyes: say so, and open Atlas if no browser shows it.
     notify(`${assistantName} needs your approval`, `${request.tool}: ${request.reason}`)
+    telegram.approval(request)
     if (!web.hasClients) void openUi().catch(() => undefined)
   },
   onApprovalClosed: id => publish({ approvals: status.approvals.filter(a => a.id !== id) }),
@@ -513,12 +519,45 @@ const timers = new TimerService({
   ring: (label, detail) => {
     tray.alarm()
     tray.balloon(`⏰ ${label}`, detail)
+    telegram.notice(`⏰ ${label}`, detail)
   },
   quiet: () => tray.quiet(),
   notice: (title, text) => tray.balloon(title, text),
   log: (level, message) => log(level, message),
 })
 timers.register()
+
+/** The owner's own Telegram bot: messages and voice notes in, replies, approvals and notices out. */
+const telegram: TelegramChannel = new TelegramChannel({
+  file: join(userData, 'telegram.json'),
+  secrets: osCredentialStore(),
+  handle,
+  toRenderer,
+  requireOwner: () => requireOwner(),
+  send: text => {
+    const t = parseMessage(text)
+    if (t === null) throw new Error('That message is too long.')
+    if (status.phase !== 'ready') throw new Error(`${assistantName} is not ready yet; try again in a minute.`)
+    return supervisor.send(t)
+  },
+  sendVoice: (audio, mime) => {
+    const v = parseVoice(audio, mime)
+    if (!v) throw new Error('That voice note is too long.')
+    if (status.phase !== 'ready') throw new Error(`${assistantName} is not ready yet; try again in a minute.`)
+    if (!status.speech.available) throw new Error('No voice provider is set up on the PC; write instead.')
+    return supervisor.sendVoice(v.audio, v.mime)
+  },
+  stop: () => {
+    audioGate.interrupt(supervisor.currentReply)
+    supervisor.stopReply()
+  },
+  answerApproval: (id, approved) => {
+    if (status.approvals.some(a => a.id === id)) supervisor.answerApproval(id, approved)
+  },
+  pageOpen: () => web.hasClients,
+  log: (level, message) => log(level, message),
+})
+telegram.register()
 /** The live world at the owner's places, for the World page. */
 const world = new WorldService({ handle, toRenderer, toRuntime: msg => supervisor.world(msg), requireOwner: () => requireOwner(), log: (level, message) => log(level, message), cacheDir: join(userData, 'world-cache') })
 world.register()
@@ -923,6 +962,7 @@ const quit = async () => {
   pcSystem.stop()
   sysmap.stop()
   timers.stop()
+  telegram.stop()
   tray.stop()
   await atlasBrowser.close()
   await web.stop()
@@ -998,6 +1038,7 @@ const start = async () => {
   pcSystem.start()
   pcSystem.setActive(false)
   timers.start()
+  void telegram.start()
   sysmap.start()
   // Started by Windows at login set to start quietly: stay in the tray. Otherwise the page opens.
   if (!startedHidden() && !process.argv.includes('--no-open')) setTimeout(() => void openUi().catch(() => undefined), 800)

@@ -28,6 +28,7 @@ import { HB, type HabitsBridge, type HabitsView } from './habits.ts'
 import { SCT, type ShortcutsView } from './shortcuts.ts'
 import { WA, type WebAccessBridge, type WebAccessView } from './web.ts'
 import { TM, type TimersBridge, type TimersView } from './timers.ts'
+import { TG, type TelegramBridge, type TelegramView } from './telegram.ts'
 
 /** How a bridge reaches main: a call with an answer, a one-way message, and events. */
 export interface Transport {
@@ -364,6 +365,17 @@ export const buildBridges = (t: Transport) => {
     onChanged: cb => t.on<TimersView>(TM.changed, cb),
   }
 
+  /** Settings › Telegram: the bot token, pairing, and which notices go to the phone. */
+  const telegram: TelegramBridge = {
+    state: () => t.invoke(TG.state),
+    setToken: token => t.invoke(TG.setToken, token),
+    removeToken: () => t.invoke(TG.removeToken),
+    newCode: () => t.invoke(TG.newCode),
+    unpair: () => t.invoke(TG.unpair),
+    setNotify: n => t.invoke(TG.setNotify, n),
+    onChanged: cb => t.on<TelegramView>(TG.changed, cb),
+  }
+
   return {
     assistant: bridge,
     controls,
@@ -389,6 +401,7 @@ export const buildBridges = (t: Transport) => {
     habits,
     webAccess,
     timers,
+    telegram,
     /** The shortcut board: which global shortcuts Windows gave Atlas. */
     shortcuts: { list: (): Promise<ShortcutsView> => t.invoke(SCT.list) },
   }

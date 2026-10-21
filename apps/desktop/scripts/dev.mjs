@@ -12,6 +12,7 @@ const pageUrl = `http://127.0.0.1:${page.config.server.port}`
 console.log(`[dev] page from ${pageUrl}`)
 
 let child = null
+let started = false
 /** Asks the gateway to quit (Windows has no gentle signals: a message over its IPC channel), then waits. */
 const stopChild = () =>
   new Promise(r => {
@@ -24,7 +25,10 @@ const stopChild = () =>
   })
 
 const start = () => {
-  child = spawn(process.execPath, ['--enable-source-maps', '--disable-warning=ExperimentalWarning', resolve(root, 'out/gateway/index.js'), ...process.argv.slice(2)], {
+  // Only the first start opens the browser; restarts after a rebuild reconnect the page already open.
+  const args = started ? [...process.argv.slice(2), '--no-open'] : process.argv.slice(2)
+  started = true
+  child = spawn(process.execPath, ['--enable-source-maps', '--disable-warning=ExperimentalWarning', resolve(root, 'out/gateway/index.js'), ...args], {
     stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
     env: { ...process.env, ATLAS_DEV: '1', ATLAS_RENDERER_URL: pageUrl, ATLAS_ROOT: root },
   })

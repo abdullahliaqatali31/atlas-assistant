@@ -16,6 +16,7 @@ import { PWC } from '../shared/powerup.ts'
 import { HB } from '../shared/habits.ts'
 import { IC } from '../shared/identity.ts'
 import { BRT } from '../shared/browser.ts'
+import { TG } from '../shared/telegram.ts'
 
 export const OWNER_ONLY: ReadonlySet<string> = new Set([
   // Provider, key and server address: a swap would send conversations elsewhere.
@@ -86,6 +87,13 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   // Seeing and driving Atlas's browser (the owner's signed-in sites) from the web interface.
   BRT.picture,
   BRT.input,
+  // Telegram: who can reach Atlas from a phone.
+  TG.state,
+  TG.setToken,
+  TG.removeToken,
+  TG.newCode,
+  TG.unpair,
+  TG.setNotify,
   // Full control: Atlas acting without asking.
   CC.setFullControl,
   PCC.rebuild,

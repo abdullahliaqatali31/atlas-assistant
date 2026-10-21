@@ -7,6 +7,7 @@ import { Select } from './ui/Select.tsx'
 import { WakeListener } from './wake/listener.ts'
 import { nameOf } from './ui/assistantName.ts'
 import { WebAccessCard } from './web/WebAccessCard.tsx'
+import { TelegramCard } from './web/TelegramCard.tsx'
 
 const cleanError = (err: unknown) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.'
@@ -33,6 +34,7 @@ export function SecuritySettings({ assistantName }: { assistantName: string }) {
       <CodeCard />
       <WakeCard assistantName={assistantName} />
       <WebAccessCard />
+      <TelegramCard />
       <BackupCard />
     </div>
   )
