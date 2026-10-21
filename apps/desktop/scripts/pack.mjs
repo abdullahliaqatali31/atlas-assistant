@@ -41,7 +41,7 @@ writeFileSync(
       license: pkg.license,
       bin: { atlas: 'bin/atlas.mjs' },
       engines: { node: '>=22.13' },
-      dependencies: { '@napi-rs/keyring': exact('@napi-rs/keyring'), 'playwright-core': exact('playwright-core'), 'sherpa-onnx-node': exact('sherpa-onnx-node') },
+      dependencies: { '@napi-rs/keyring': exact('@napi-rs/keyring'), 'playwright-core': exact('playwright-core'), 'sherpa-onnx-node': exact('sherpa-onnx-node'), '@huggingface/transformers': exact('@huggingface/transformers') },
     },
     null,
     2,

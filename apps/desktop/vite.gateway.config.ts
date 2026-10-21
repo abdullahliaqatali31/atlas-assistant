@@ -17,8 +17,8 @@ export default defineConfig({
     rollupOptions: {
       input: { index: resolve('src/gateway/index.ts'), runtime: resolve('src/runtime/host.ts') },
       output: { format: 'es', entryFileNames: '[name].js' },
-      external: ['@napi-rs/keyring', 'sherpa-onnx-node', 'playwright-core'],
+      external: ['@napi-rs/keyring', 'sherpa-onnx-node', 'playwright-core', '@huggingface/transformers'],
     },
   },
-  ssr: { noExternal: true, external: ['@napi-rs/keyring', 'sherpa-onnx-node', 'playwright-core'] },
+  ssr: { noExternal: true, external: ['@napi-rs/keyring', 'sherpa-onnx-node', 'playwright-core', '@huggingface/transformers'] },
 })

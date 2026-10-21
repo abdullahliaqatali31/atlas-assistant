@@ -56,6 +56,8 @@ import { HABITS_RULES, HostHabits } from './habits.ts'
 import { suggestReplies } from './suggest.ts'
 import { VISION_RULES, visionTool } from './vision.ts'
 import { speakerNote, type SpeakerResult } from '../shared/speaker.ts'
+import { MemoryMirror } from './memory-md.ts'
+import { SemanticMemory, semanticSettingsFile } from './semantic.ts'
 import { HostSkillsMd, SKILLMD_RULES } from './skillmd.ts'
 import { SkillLibrary } from '../main/skill-library.ts'
 import { HostControls } from './controls.ts'
@@ -164,6 +166,10 @@ let finder: DailyFinder | null = null
 let suggester: LlmProvider | null = null
 /** The chat model for screen_look, made on first use. */
 let vision: LlmProvider | null = null
+/** Memory as Markdown (MEMORY.md and daily notes), kept in step with the database both ways. */
+let mirror: MemoryMirror | null = null
+/** Recall by meaning (a local model, when the owner turns it on). */
+let semantic: SemanticMemory | null = null
 /** The SKILL.md library (its tools and the list in context); made once the data folder is known. */
 let skillsMd: HostSkillsMd | null = null
 /** What the owner said last (typed or heard), for the quick replies. */
@@ -272,7 +278,21 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   world.start()
   const watch = world
   const improvements = new Improvements({ memory, clock: systemClock, writeBrief: (project, file, text) => code.writeBrief(project, file, text) })
+  const memStore = memory
+  semantic = new SemanticMemory(memStore, {
+    cacheDir: join(config.dataDir, 'models'),
+    settingsFile: semanticSettingsFile(config.dataDir),
+    log: (level, message) => log(level, message),
+    changed: () => learning?.memoryChanged(),
+    busy: () => current !== null,
+  })
+  mirror = new MemoryMirror(memStore, join(config.dataDir, 'memory-files'), { owner: () => ownerName, now: () => systemClock.now(), log: (level, message) => log(level, message) })
+  // Both ways every few seconds: the owner's edits in, new memories out.
+  setInterval(() => mirror?.sync(), 5_000).unref()
+  mirror.sync()
   learning = new HostLearning({
+    memoryView: () => ({ file: mirror?.file ?? '', folder: join(config.dataDir, 'memory-files'), semantic: semantic?.view() ?? { on: false, state: 'off', progress: 0, indexed: 0, total: 0, error: null } }),
+    setSemantic: on => semantic?.setOn(on),
     improvements,
     projects: () => code.projectNames(),
     memory,
@@ -301,7 +321,10 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   const offset = config.owner.utcOffsetMin
   pushUsage = () => post({ type: 'usage', summary: usageSummary(usageMemory, systemClock.now(), offset) })
   chatConfig = { llm: config.llm, env: merged }
+  const blended = (query: string, limit: number) => semantic?.recall(query, limit) ?? Promise.resolve(memStore.recall(query, limit))
   assistant = new Assistant({
+    // Keywords and meaning together, when the owner turned recall by meaning on.
+    recall: blended,
     // Every reply is metered (tokens and cost per day and model).
     llm: meterLlm(llm, { purpose: 'chat', memory, clock: systemClock, utcOffsetMin: offset, onRecord: () => schedulePush() }),
     // Short, simple messages go to a cheaper quick model (when it differs from the main one).
@@ -331,7 +354,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   // Answers to its own questions (project status, learning suggestions) go through these.
   // The model chip's pick may have arrived before the assistant existed.
   applyChatModel()
-  void controls.attach(assistant, [...localTools(memory, systemClock), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...system.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now()), notifications.tool(), ...skillsMd.tools(), visionTool({ llm: () => (vision ??= meterLlm(createLlm(config.llm), { purpose: 'chat', memory: memory!, clock: systemClock, utcOffsetMin: config.owner.utcOffsetMin, onRecord: () => schedulePush() })) }), habits.tool(), findTool()], config.mcpConfigPath)
+  void controls.attach(assistant, [...localTools(memory, systemClock, (q, n) => semantic?.recall(q, n) ?? Promise.resolve(memory!.recall(q, n))), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...system.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now()), notifications.tool(), ...skillsMd.tools(), visionTool({ llm: () => (vision ??= meterLlm(createLlm(config.llm), { purpose: 'chat', memory: memory!, clock: systemClock, utcOffsetMin: config.owner.utcOffsetMin, onRecord: () => schedulePush() })) }), habits.tool(), findTool()], config.mcpConfigPath)
   const agendaMemory = memory
   const wrapUpMinute = parseClock(merged.ASSISTANT_WRAP_UP) ?? 18 * 60
   initiative = new InitiativeService(

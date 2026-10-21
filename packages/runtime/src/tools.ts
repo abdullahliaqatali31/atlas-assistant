@@ -6,7 +6,7 @@
 import { resolve } from 'node:path'
 
 import type { McpHost } from '@assistant/mcp'
-import type { MemoryStore, TaskStatus } from '@assistant/memory'
+import type { MemoryRecord, MemoryStore, TaskStatus } from '@assistant/memory'
 import type { ActionClass, Rule } from '@assistant/policy'
 import type { ToolSpec } from '@assistant/providers'
 import type { Clock } from '@assistant/shared'
@@ -63,7 +63,7 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '')
 const fmtTask = (t: { title: string; status: TaskStatus; dueAt: number | null }, i: number) =>
   `${i + 1}. ${t.title} [${t.status}]${t.dueAt ? ` due ${new Date(t.dueAt).toISOString().slice(0, 16)}Z` : ''}`
 
-export const localTools = (memory: MemoryStore, clock: Clock): RuntimeTool[] => [
+export const localTools = (memory: MemoryStore, clock: Clock, recall?: (query: string, limit: number) => Promise<MemoryRecord[]>): RuntimeTool[] => [
   {
     name: 'tasks_list',
     description: 'List the owner\'s open tasks, numbered, with status and due time.',
@@ -151,7 +151,7 @@ export const localTools = (memory: MemoryStore, clock: Clock): RuntimeTool[] => 
     actionClass: 'observe',
     isUntrusted: false,
     run: async input => {
-      const hits = memory.recall(str(input.query), 8)
+      const hits = recall ? await recall(str(input.query), 8) : memory.recall(str(input.query), 8)
       return hits.length ? hits.map(m => `- [${m.id.slice(0, 8)}] ${m.statement} (${m.kind})`).join('\n') : 'Nothing found.'
     },
   },

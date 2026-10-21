@@ -49,6 +49,9 @@ export class HostLearning {
       improvements?: Improvements | undefined
       /** Followed coding projects, for choosing where briefs go. */
       projects?: () => string[]
+      /** Memory as files, and recall by meaning (its switch). */
+      memoryView?: () => LearningView['memory']
+      setSemantic?: (on: boolean) => void
       log: (level: 'info' | 'warn', message: string) => void
     },
   ) {
@@ -97,7 +100,13 @@ export class HostLearning {
       improvements: this.deps.improvements?.list() ?? [],
       improvementProject: this.deps.improvements?.project ?? null,
       projects: this.deps.projects?.() ?? [],
+      memory: this.deps.memoryView?.() ?? { file: '', folder: '', semantic: { on: false, state: 'off', progress: 0, indexed: 0, total: 0, error: null } },
     }
+  }
+
+  /** The memory files or the meaning model changed. */
+  memoryChanged() {
+    this.publish()
   }
 
   private publish() {
@@ -209,6 +218,9 @@ export class HostLearning {
         case 'improvement-project':
           if (req.op.name !== null && !(this.deps.projects?.() ?? []).includes(req.op.name)) throw new Error('Choose one of your followed coding projects.')
           this.deps.improvements?.setProject(req.op.name)
+          return ok()
+        case 'semantic':
+          this.deps.setSemantic?.(req.op.on)
           return ok()
       }
     } catch (error) {

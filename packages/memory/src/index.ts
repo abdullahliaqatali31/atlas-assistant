@@ -126,6 +126,9 @@ const MIGRATIONS: string[] = [
      last_at INTEGER NOT NULL, PRIMARY KEY (a, b));
    ALTER TABLE memory ADD COLUMN uses INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE memory ADD COLUMN last_used INTEGER;`,
+  // Recall by meaning: one vector per memory from a local embedding model (named, so a new model re-indexes).
+  `CREATE TABLE memory_vec (
+     memory_id TEXT PRIMARY KEY, model TEXT NOT NULL, vec BLOB NOT NULL);`,
 ]
 
 /** A conversation (session): a run of messages without a long pause. */
@@ -568,7 +571,10 @@ export class MemoryStore {
       return row ? [row.statement] : []
     })
     // Oldest first: each older version points at its replacement.
-    for (const c of [...chain].reverse()) this.db.prepare('DELETE FROM memory WHERE id = ?').run(c)
+    for (const c of [...chain].reverse()) {
+      this.db.prepare('DELETE FROM memory WHERE id = ?').run(c)
+      this.db.prepare('DELETE FROM memory_vec WHERE memory_id = ?').run(c)
+    }
     for (const s of statements) this.db.prepare(`DELETE FROM proposal WHERE status = 'pending' AND title = ?`).run(s)
     return chain.size
   }
@@ -596,6 +602,59 @@ export class MemoryStore {
       )
       .all(terms, this.clock.now(), limit)
     return rows.map(toMemory)
+  }
+
+  // ── vectors (recall by meaning) ──────────────────────────
+
+  setVector(id: Id, model: string, vec: Float32Array) {
+    this.db.prepare('INSERT INTO memory_vec (memory_id, model, vec) VALUES (?, ?, ?) ON CONFLICT(memory_id) DO UPDATE SET model = excluded.model, vec = excluded.vec').run(id, model, new Uint8Array(vec.buffer, vec.byteOffset, vec.byteLength))
+  }
+
+  /** Current memories without a vector from this model yet (oldest first), to index a few at a time. */
+  unindexed(model: string, limit = 32): { id: Id; statement: string }[] {
+    return this.db
+      .prepare(
+        `SELECT m.id, m.statement FROM memory m LEFT JOIN memory_vec v ON v.memory_id = m.id AND v.model = ?
+         WHERE m.superseded_by IS NULL AND v.memory_id IS NULL ORDER BY m.created_at LIMIT ?`,
+      )
+      .all(model, limit) as { id: Id; statement: string }[]
+  }
+
+  /** Every current memory's vector from this model. */
+  vectors(model: string): { id: Id; vec: Float32Array }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT v.memory_id AS id, v.vec AS vec FROM memory_vec v JOIN memory m ON m.id = v.memory_id
+         WHERE v.model = ? AND m.superseded_by IS NULL AND (m.valid_until IS NULL OR m.valid_until > ?)`,
+      )
+      .all(model, this.clock.now()) as { id: Id; vec: Uint8Array }[]
+    return rows.map(r => ({ id: r.id, vec: new Float32Array(Uint8Array.from(r.vec).buffer) }))
+  }
+
+  /** Memories by id, in the order asked (missing ones skipped). */
+  memoriesByIds(ids: readonly Id[]): MemoryRecord[] {
+    const get = this.db.prepare('SELECT * FROM memory WHERE id = ? AND superseded_by IS NULL')
+    return ids.flatMap(id => {
+      const r = get.get(id)
+      return r ? [toMemory(r)] : []
+    })
+  }
+
+  /** How often and how lately each memory was used, and its strongest neighbours (the brain's links). */
+  memoryUse(id: Id): { uses: number; lastUsed: number | null; createdAt: number } | null {
+    const r = this.db.prepare('SELECT uses, last_used, created_at FROM memory WHERE id = ?').get(id) as { uses: number; last_used: number | null; created_at: number } | undefined
+    return r ? { uses: r.uses, lastUsed: r.last_used, createdAt: r.created_at } : null
+  }
+
+  neighbours(id: Id, limit = 3): { id: Id; weight: number }[] {
+    return this.db
+      .prepare('SELECT CASE WHEN a = ? THEN b ELSE a END AS id, weight FROM memory_link WHERE a = ? OR b = ? ORDER BY weight DESC LIMIT ?')
+      .all(id, id, id, limit) as { id: Id; weight: number }[]
+  }
+
+  /** Every current memory, oldest first (the Markdown mirror). */
+  allMemories(): MemoryRecord[] {
+    return this.db.prepare('SELECT * FROM memory WHERE superseded_by IS NULL ORDER BY created_at').all().map(toMemory)
   }
 
   recent(limit = 10): MemoryRecord[] {

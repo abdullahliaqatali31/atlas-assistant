@@ -8,6 +8,7 @@ import { Select } from './ui/Select.tsx'
 const APP_ONLY = '__app__'
 import { Skills } from './Skills.tsx'
 import { SkillLibrary } from './SkillLibrary.tsx'
+import { MemoryFiles } from './MemoryFiles.tsx'
 
 const cleanError = (err: unknown) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.'
@@ -89,6 +90,7 @@ export function Learning({ onTalk }: { /** Teach and Run now continue in the con
           </p>
         </details>
 
+        <MemoryFiles view={view} run={run} />
         <Skills skills={view.skills} run={run} onTalk={onTalk} />
         <SkillLibrary />
 

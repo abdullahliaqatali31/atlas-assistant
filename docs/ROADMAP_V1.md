@@ -29,7 +29,7 @@ practice. Each phase ships on its own, gated by `pnpm check`. Order of work: 1 (
   or deletes (voices can be cloned): those still need the owner's yes.
 - Wake word checked against the owner's voice, so a TV does not wake it.
 
-## Phase 3 — Memory, readable and smarter
+## Phase 3 — Memory, readable and smarter (done, except the flush before compaction and the size cap)
 
 - SQLite stays the source of truth. A Markdown mirror the owner can read and
   edit: `MEMORY.md` (short, always in context), `USER.md`, `memory/YYYY-MM-DD.md`

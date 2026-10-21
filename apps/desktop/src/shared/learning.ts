@@ -72,6 +72,8 @@ export interface LearningView {
   improvementProject: string | null
   /** Followed coding projects the owner can choose from. */
   projects: string[]
+  /** Memory as files, and recall by meaning. */
+  memory: { file: string; folder: string; semantic: { on: boolean; state: 'off' | 'loading' | 'indexing' | 'ready' | 'error'; progress: number; indexed: number; total: number; error: string | null } }
 }
 
 export const LC = {
@@ -88,6 +90,8 @@ export const LC = {
   improvementDone: 'learning:improvement-done',
   improvementRemove: 'learning:improvement-remove',
   improvementProject: 'learning:improvement-project',
+  semantic: 'learning:semantic',
+  openMemory: 'learning:open-memory',
   changed: 'learning:changed',
 } as const
 
@@ -111,6 +115,10 @@ export interface LearningBridge {
   improvementRemove(id: string): Promise<LearningView>
   /** Where briefs are saved: a followed coding project's name, or null for the app only. */
   improvementProject(name: string | null): Promise<LearningView>
+  /** Recall by meaning on or off (the first time downloads the 118 MB model). */
+  semantic(on: boolean): Promise<LearningView>
+  /** Opens MEMORY.md (or the memory folder) in Windows. */
+  openMemory(what: 'file' | 'folder'): Promise<void>
   onChanged(cb: (v: LearningView) => void): () => void
 }
 
@@ -128,6 +136,7 @@ export type LearningOp =
   | { kind: 'improvement-done'; id: string }
   | { kind: 'improvement-remove'; id: string }
   | { kind: 'improvement-project'; name: string | null }
+  | { kind: 'semantic'; on: boolean }
 
 export const isLearningId = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f-]{8,64}$/i.test(v)
 

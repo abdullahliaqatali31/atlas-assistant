@@ -191,6 +191,8 @@ export const buildBridges = (t: Transport) => {
     improvementDone: id => t.invoke(LC.improvementDone, id),
     improvementRemove: id => t.invoke(LC.improvementRemove, id),
     improvementProject: name => t.invoke(LC.improvementProject, name),
+    semantic: on => t.invoke(LC.semantic, on),
+    openMemory: what => t.invoke(LC.openMemory, what),
     onChanged: cb => t.on<LearningView>(LC.changed, cb),
   }
 

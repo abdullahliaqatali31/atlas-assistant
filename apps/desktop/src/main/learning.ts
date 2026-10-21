@@ -3,6 +3,7 @@
  * runtime host, which owns the database; pushes from the host go straight
  * to the window.
  */
+import { shell } from './host/index.ts'
 import { randomUUID } from 'node:crypto'
 
 import { isLearningId, LC, type LearningHostEvent, type LearningHostRequest, type LearningOp, type LearningView } from '../shared/learning.ts'
@@ -67,6 +68,18 @@ export const registerLearningIpc = (deps: LearningIpcDeps) => {
   deps.handle(LC.runNow, () => ask({ kind: 'run' }, 120_000))
   deps.handle(LC.improvementDone, v => ask({ kind: 'improvement-done', id: id(v) }))
   deps.handle(LC.improvementRemove, v => ask({ kind: 'improvement-remove', id: id(v) }))
+  deps.handle(LC.semantic, on => {
+    if (typeof on !== 'boolean') throw new Error('On or off.')
+    // The first time downloads the model: allow for it.
+    return ask({ kind: 'semantic', on }, 60_000)
+  })
+  deps.handle(LC.openMemory, async what => {
+    const v = await ask({ kind: 'get' })
+    const target = what === 'folder' ? v.memory.folder : v.memory.file
+    if (!target) throw new Error('The memory files are not ready yet.')
+    const err = await shell.openPath(target)
+    if (err) throw new Error(err)
+  })
   deps.handle(LC.improvementProject, v => {
     if (v !== null && (typeof v !== 'string' || !v.trim() || v.length > 200)) throw new Error('Choose a project.')
     return ask({ kind: 'improvement-project', name: v })

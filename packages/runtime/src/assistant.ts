@@ -4,7 +4,7 @@
  * and hands initiative events to the attention policy before any model call.
  */
 import { decide, type InitiativeDecision, type InitiativePrefs } from '@assistant/initiative'
-import type { MemoryStore, Task } from '@assistant/memory'
+import type { MemoryRecord, MemoryStore, Task } from '@assistant/memory'
 import { evaluate, type Decision, type Rule } from '@assistant/policy'
 import type { ChatTurn, ContentPart, LlmProvider } from '@assistant/providers'
 import { DAY, newId, type Clock, type ConversationMode, type InitiativeEvent } from '@assistant/shared'
@@ -75,6 +75,8 @@ export interface AssistantDeps {
    * by a memory tool. For the brain view (they light up); also counted as uses.
    */
   onRecall?: (ids: string[], why: 'context' | 'search' | 'saved') => void
+  /** Recall by keywords and meaning together (falls back to keyword search when absent). */
+  recall?: (query: string, limit: number) => Promise<MemoryRecord[]>
   /** The learning service: sees owner messages (style feedback) and adds approved lessons and routines to the context. */
   learning?: { observeOwner(text: string): unknown; contextLines(): string[] }
   /** Sources read right before the daily briefing (connected calendar and email, window activity). */
@@ -224,7 +226,8 @@ export class Assistant {
     this.deps.learning?.observeOwner(text)
     const c = this.chatChoice
     const route = c.llm || c.mode === 'main' || !this.deps.quickLlm ? 'main' : c.mode === 'quick' ? 'quick' : this.deps.routing !== 'main' ? routeMessage(text) : 'main'
-    yield* this.turn(text, this.contextPacket(text), signal, false, route)
+    const recalled = this.deps.recall ? await this.deps.recall(text, 6).catch(() => undefined) : undefined
+    yield* this.turn(text, this.contextPacket(text, [], recalled), signal, false, route)
   }
 
   /** An event that might warrant speaking up; yields nothing when the attention policy stays silent. */
@@ -476,13 +479,13 @@ export class Assistant {
   }
 
   /** Small, evidence-backed packet: never the whole database. */
-  contextPacket(query: string, evidence: readonly EvidenceBlock[] = []): string {
+  contextPacket(query: string, evidence: readonly EvidenceBlock[] = [], recalledFirst?: MemoryRecord[]): string {
     const { memory, clock, owner } = this.deps
     const fmt = (t: Task) => `- ${t.title} [${t.status}${t.dueAt ? `, due ${new Date(t.dueAt).toISOString().slice(0, 16)}Z` : ''}] (source: task list)`
     const overdue = memory.overdue()
     const overdueIds = new Set(overdue.map(t => t.id))
     const open = memory.openTasks().filter(t => !overdueIds.has(t.id)).slice(0, 10)
-    const recalled = query ? memory.recall(query, 6) : memory.recent(6)
+    const recalled = recalledFirst ?? (query ? memory.recall(query, 6) : memory.recent(6))
     // Only a real recall counts (the "recent" fallback for greetings is not the brain thinking of something).
     if (query && recalled.length) {
       const ids = recalled.map(m => m.id)

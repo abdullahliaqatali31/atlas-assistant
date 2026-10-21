@@ -19,6 +19,7 @@ import { BRT } from '../shared/browser.ts'
 import { TG } from '../shared/telegram.ts'
 import { SK } from '../shared/skillmd.ts'
 import { SPK } from '../shared/speaker.ts'
+import { LC } from '../shared/learning.ts'
 
 export const OWNER_ONLY: ReadonlySet<string> = new Set([
   // Provider, key and server address: a swap would send conversations elsewhere.
@@ -92,6 +93,9 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   // Seeing and driving Atlas's browser (the owner's signed-in sites) from the web interface.
   BRT.picture,
   BRT.input,
+  // What Atlas remembers: recall by meaning, and the memory file.
+  LC.semantic,
+  LC.openMemory,
   // Voice ID: enrolling, forgetting and its switches.
   SPK.download,
   SPK.enrol,
