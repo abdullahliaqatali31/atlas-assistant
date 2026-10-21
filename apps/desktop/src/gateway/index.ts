@@ -49,7 +49,7 @@ import { WakeService } from '../main/wake.ts'
 import { registerDataIpc } from '../main/data.ts'
 import { registerPersonalityIpc } from '../main/personality.ts'
 import { watchSession } from '../main/session.ts'
-import { providerFor, readSetup, runtimeEnv, saveSetup, saveSpeakReplies, setupSummary as readSetupSummary, saveLiveVoice } from '../main/settings.ts'
+import { providerFor, readSetup, runtimeEnv, saveQuietHours, saveSetup, saveSpeakReplies, setupSummary as readSetupSummary, saveLiveVoice } from '../main/settings.ts'
 import { RuntimeSupervisor } from '../main/supervisor.ts'
 import { SystemService } from '../main/system/service.ts'
 import { PowerUp } from '../main/powerup.ts'
@@ -58,6 +58,7 @@ import { SystemMapService } from '../main/system/sysmap.ts'
 import { PcActions } from '../main/system/actions.ts'
 import { app, dialog, powerMonitor, shell } from '../main/host/index.ts'
 import { Tray } from '../main/host/tray.ts'
+import { TimerService } from '../main/timers.ts'
 
 const isDev = !app.isPackaged
 /** Development: the page comes from the Vite dev server, and the repo root's .env feeds setup (like `pnpm chat`). */
@@ -500,8 +501,24 @@ const ui: UiService = new UiService({
   browser: (op): Promise<string> => atlasBrowser.handle(op),
   worldData: (op): Promise<string> => world.worldData(op),
   voice: (change): Promise<string> => voiceChange(change),
+  timers: op => timers.handle(op),
 })
 ui.register()
+/** Timers and alarms: they ring here (tray sound and notice) and in the page, whatever the mode. */
+const timers = new TimerService({
+  file: join(userData, 'timers.json'),
+  now: () => Date.now(),
+  handle,
+  toRenderer,
+  ring: (label, detail) => {
+    tray.alarm()
+    tray.balloon(`⏰ ${label}`, detail)
+  },
+  quiet: () => tray.quiet(),
+  notice: (title, text) => tray.balloon(title, text),
+  log: (level, message) => log(level, message),
+})
+timers.register()
 /** The live world at the owner's places, for the World page. */
 const world = new WorldService({ handle, toRenderer, toRuntime: msg => supervisor.world(msg), requireOwner: () => requireOwner(), log: (level, message) => log(level, message), cacheDir: join(userData, 'world-cache') })
 world.register()
@@ -710,6 +727,26 @@ handle(PCC.removeExcluded, path => {
   return pcState()
 })
 registerStartupIpc(handle)
+/** Restarts the runtime once the reply in progress is over (settings it reads at start). */
+const restartWhenIdle = (tries = 0) =>
+  setTimeout(() => {
+    if (supervisor.currentReply && tries < 60) return restartWhenIdle(tries + 1)
+    void supervisor.restart().then(() => publish({ setup: setupSummary() }))
+  }, 2_000)
+const QUIET = /^([01]?\d|2[0-3]):[0-5]\d-([01]?\d|2[0-3]):[0-5]\d$/
+handle(CH.quietHours, () => {
+  const v = runtimeEnv(devEnvFile).ASSISTANT_QUIET_HOURS?.replace(/\s/g, '')
+  return v && QUIET.test(v) ? v : null
+})
+handle(CH.setQuietHours, range => {
+  requireOwner()
+  const v = typeof range === 'string' ? range.replace(/\s/g, '') : null
+  if (v !== null && !QUIET.test(v)) throw new Error('Give a range like 22:00-07:00.')
+  if (v && v.split('-')[0] === v.split('-')[1]) throw new Error('Start and end must differ.')
+  saveQuietHours(v ?? 'off')
+  restartWhenIdle()
+  return v
+})
 handle(CH.usage, () => {
   requireOwner()
   return usage
@@ -885,6 +922,7 @@ const quit = async () => {
   world.ships.stop()
   pcSystem.stop()
   sysmap.stop()
+  timers.stop()
   tray.stop()
   await atlasBrowser.close()
   await web.stop()
@@ -959,6 +997,7 @@ const start = async () => {
   supervisor.start()
   pcSystem.start()
   pcSystem.setActive(false)
+  timers.start()
   sysmap.start()
   // Started by Windows at login set to start quietly: stay in the tray. Otherwise the page opens.
   if (!startedHidden() && !process.argv.includes('--no-open')) setTimeout(() => void openUi().catch(() => undefined), 800)

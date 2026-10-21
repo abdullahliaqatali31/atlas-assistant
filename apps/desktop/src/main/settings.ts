@@ -26,6 +26,8 @@ interface Stored {
   openaiVoice?: string
   /** Speak replies aloud when a voice provider is configured. */
   speakReplies: boolean
+  /** "22:00-07:00", "off" for never, '' for what the environment says. */
+  quietHours: string
   /** Empty: follow the environment (Claude by default). */
   llmProvider: LlmProviderId | ''
   llmModel: string
@@ -39,7 +41,7 @@ interface Stored {
   liveVoice: LiveVoiceSettings
 }
 
-const DEFAULTS: Stored = { ownerName: '', voiceId: '', voiceProvider: '', azureRegion: '', azureVoice: '', speakReplies: true, llmProvider: '', llmModel: '', llmBaseUrl: '', llmBackgroundModel: '', llmQuickModel: '', llmRouting: 'auto', liveVoice: DEFAULT_LIVE_VOICE }
+const DEFAULTS: Stored = { ownerName: '', voiceId: '', voiceProvider: '', azureRegion: '', azureVoice: '', speakReplies: true, quietHours: '', llmProvider: '', llmModel: '', llmBaseUrl: '', llmBackgroundModel: '', llmQuickModel: '', llmRouting: 'auto', liveVoice: DEFAULT_LIVE_VOICE }
 const DEFAULT_AZURE_VOICE = 'ur-PK-UzmaNeural'
 const AZURE_VOICE = /^[a-z]{2,3}-[A-Z]{2,4}-[A-Za-z0-9]+Neural$/
 const file = () => join(app.getPath('userData'), 'setup.json')
@@ -92,6 +94,7 @@ export const saveSetup = (input: SetupInput, provider: VoiceProviderChoice) => {
 }
 
 export const saveSpeakReplies = (speakReplies: boolean) => write({ ...readSetup(), speakReplies })
+export const saveQuietHours = (quietHours: string) => write({ ...readSetup(), quietHours })
 export const saveLiveVoice = (liveVoice: LiveVoiceSettings) => write({ ...readSetup(), liveVoice })
 
 const RUNTIME_VARS = /^(ASSISTANT_|ELEVENLABS_|AZURE_SPEECH_|OPENAI_TTS_)|^(ANTHROPIC|OPENAI|GEMINI|OPENROUTER|GROQ|DEEPSEEK|MISTRAL|XAI|LLM)_API_KEY$/
@@ -134,6 +137,8 @@ export const runtimeEnv = (devEnvFile: string | null): Record<string, string> =>
   if (s.azureRegion) env.AZURE_SPEECH_REGION = s.azureRegion
   if (s.azureVoice) env.AZURE_SPEECH_VOICE = s.azureVoice
   if (s.openaiVoice) env.OPENAI_TTS_VOICE = s.openaiVoice
+  if (s.quietHours === 'off') delete env.ASSISTANT_QUIET_HOURS
+  else if (s.quietHours) env.ASSISTANT_QUIET_HOURS = s.quietHours
   env.ASSISTANT_DATA_DIR ??= join(app.getPath('userData'), 'data')
   env.ASSISTANT_MCP_CONFIG ??= join(app.getPath('userData'), 'mcp.servers.json')
   return env

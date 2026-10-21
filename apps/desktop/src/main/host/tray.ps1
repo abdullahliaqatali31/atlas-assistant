@@ -1,7 +1,7 @@
 # Atlas's tray icon, global shortcuts and session watch (host/tray.ts), instead of a browser engine.
 # In (stdin, one per line, fields split by tabs):
 #   menu <tooltip> | item <id> <label> <flags: c checked, d disabled, s separator> | endmenu
-#   balloon <title> <text> | hotkey <id> <modifiers> <virtual key> | exit
+#   balloon <title> <text> | hotkey <id> <modifiers> <virtual key> | sound <wav path> (loops) | sound-stop | exit
 # Out (stdout): ready | click <id> | hotkey <id> | hotkey-ok <id> | hotkey-fail <id> | balloon-click
 #   | session lock | session unlock | session resume | session idle <seconds>
 # Locked = Windows' sign-in screen (LogonUI) is up; a resume is a jump in time (the PC slept).
@@ -28,6 +28,7 @@ public class AtlasTray : NativeWindow {
   readonly System.Collections.Generic.Dictionary<int, string> hotkeys = new System.Collections.Generic.Dictionary<int, string>();
   ContextMenuStrip pending;
   int nextHotkey = 1;
+  System.Media.SoundPlayer player;
   bool locked = false;
   DateTime lastLook = DateTime.Now;
   int looks = 0;
@@ -104,7 +105,14 @@ public class AtlasTray : NativeWindow {
         if (RegisterHotKey(Handle, n, uint.Parse(f[2]) | 0x4000, uint.Parse(f[3]))) { hotkeys[n] = f[1]; Say("hotkey-ok\t" + f[1]); }
         else Say("hotkey-fail\t" + f[1]);
         break;
+      case "sound":
+        try { if (player != null) player.Stop(); player = new System.Media.SoundPlayer(f[1]); player.PlayLooping(); } catch { System.Media.SystemSounds.Exclamation.Play(); }
+        break;
+      case "sound-stop":
+        if (player != null) { player.Stop(); player.Dispose(); player = null; }
+        break;
       case "exit":
+        if (player != null) player.Stop();
         foreach (var k in hotkeys.Keys) UnregisterHotKey(Handle, k);
         icon.Visible = false;
         icon.Dispose();

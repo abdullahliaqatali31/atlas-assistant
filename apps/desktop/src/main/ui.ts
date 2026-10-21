@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { MC, type MapOp } from '../shared/map.ts'
 import { describeUi, layoutFor, parseUiChange, UC, isView, type PageCommand, type PageUi, type UiChange, type UiOp, type UiState, type VoiceChange, type WorldDataOp } from '../shared/ui.ts'
 import type { SystemOp } from '../shared/system.ts'
+import type { TimerOp } from '../shared/timers.ts'
 import { isSurface, type BrowserMode, type BrowserOp } from '../shared/browser.ts'
 
 /** How long a map op may wait for the World page, and how often it is sent again meanwhile. */
@@ -52,6 +53,8 @@ export class UiService {
       voice?: (change: VoiceChange) => Promise<string>
       /** World data (markets, conflict events) read without switching the owner's page. */
       worldData?: (op: WorldDataOp) => Promise<string>
+      /** Timers and alarms. */
+      timers?: (op: TimerOp) => string
     },
   ) {}
 
@@ -122,6 +125,10 @@ export class UiService {
   /** The model's ui tools. */
   async handleOp(op: UiOp): Promise<string> {
     if (op.kind === 'state') return describeUi(this.state())
+    if (op.kind === 'timer') {
+      if (!this.deps.timers) throw new Error('Timers are not available.')
+      return this.deps.timers(op.op)
+    }
     if (op.kind === 'map') return this.mapOp(op.op)
     if (op.kind === 'system') {
       if (!this.deps.system) throw new Error('PC control is not available.')

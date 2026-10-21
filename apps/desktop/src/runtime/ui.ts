@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import type { Rule } from '@assistant/policy'
 import type { RuntimeTool } from '@assistant/runtime'
 
-import { GLASS_VIEWS, MAX_GLASS_PINS, parseGlassShow } from '../shared/glass.ts'
+import { timerOpFromTool } from '../shared/timers.ts'
 import { CATEGORIES } from '../shared/news.ts'
 import { GLOBE3D_ACTIONS, GLOBE3D_LAYERS, MAP_LAYERS, MAP_STYLES, mapOpFromTool, MAX_PINS, MAX_STORY_ITEMS } from '../shared/map.ts'
 import { describeUi, VIEWS, WINDOW_SIZES, type UiChange, type UiOp, type UiState } from '../shared/ui.ts'
@@ -21,11 +21,11 @@ const REQUEST_TIMEOUT_MS = 30_000
 /** The World map tools only change the view, so they are observe-class and run without asking, even after reading news. */
 export const MAP_TOOLS = ['map_view', 'map_layers', 'map_visible', 'map_find', 'map_focus', 'map_pins', 'map_back', 'map_story', 'map_tour', 'map_3d', 'map_traffic', 'map_panel', 'map_display'] as const
 
-/** The glass panel only shows things on the owner's own screen: no asking, even after reading the web. */
-export const GLASS_TOOLS = ['glass_show', 'glass_close'] as const
+/** Timers the owner asks for: setting, listing and cancelling them needs no asking. */
+export const TIMER_TOOLS = ['timer_set', 'timers_list', 'timer_cancel'] as const
 
 export const UI_RULES: Rule[] = [
-  ...GLASS_TOOLS.map((tool): Rule => ({ id: `default-${tool}`, tool, actionClass: 'observe', effect: 'allow' })),
+  ...TIMER_TOOLS.map((tool): Rule => ({ id: `default-${tool}`, tool, actionClass: tool === 'timers_list' ? 'observe' : 'modify', effect: 'allow' })),
   { id: 'default-ui_state', tool: 'ui_state', actionClass: 'observe', effect: 'allow' },
   { id: 'default-ui_control', tool: 'ui_control', actionClass: 'modify', effect: 'allow' },
   ...MAP_TOOLS.map((tool): Rule => ({ id: `default-${tool}`, tool, actionClass: 'observe', effect: 'allow' })),
@@ -102,75 +102,47 @@ export class HostUi {
     return missing.length ? `${result} Not placed (unknown places): ${missing.join(', ')}.` : result
   }
 
-  /** glass_show: a place name becomes coordinates here, for the map and each pin. */
-  private async glassShow(input: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
-    const lookup = async (place: string) => {
-      if (!this.deps.geocode) throw new Error('Place lookup is not available; give lat and lon.')
-      const found = await this.deps.geocode(place)
-      if (!found) throw new Error(`Could not find a place called "${place}".`)
-      return found
+  /** Timers and alarms, kept by the gateway (they ring even in quiet or focus mode). */
+  private timerTools(): RuntimeTool[] {
+    const run = (name: (typeof TIMER_TOOLS)[number]) => (input: Record<string, unknown>, signal?: AbortSignal) => {
+      const op = timerOpFromTool(name, input)
+      return typeof op === 'string' ? Promise.reject(new Error(op)) : this.request({ kind: 'timer', op }, signal)
     }
-    let o = { ...input }
-    if (o.view === 'map') {
-      const place = typeof o.place === 'string' ? o.place.trim().slice(0, 80) : ''
-      if (place && (typeof o.lat !== 'number' || typeof o.lon !== 'number')) {
-        const f = await lookup(place)
-        o = { ...o, lat: f.lat, lon: f.lon, title: typeof o.title === 'string' && o.title ? o.title : [f.name, f.country].filter(Boolean).join(', ') }
-      }
-      if (Array.isArray(o.pins)) {
-        const pins = []
-        for (const raw of o.pins.slice(0, MAX_GLASS_PINS)) {
-          const pin = { ...(raw as Record<string, unknown>) }
-          if ((typeof pin.lat !== 'number' || typeof pin.lon !== 'number') && typeof pin.place === 'string') {
-            const f = await lookup(pin.place).catch(() => null)
-            if (!f) continue
-            Object.assign(pin, { lat: f.lat, lon: f.lon, label: typeof pin.label === 'string' && pin.label ? pin.label : f.name })
-          }
-          pins.push(pin)
-        }
-        o.pins = pins
-      }
-    }
-    const op = parseGlassShow(o)
-    if (typeof op === 'string') throw new Error(op)
-    return this.request({ kind: 'glass', op }, signal)
-  }
-
-  private glassTools(): RuntimeTool[] {
     return [
       {
-        name: 'glass_show',
+        name: 'timer_set',
         description:
-          'Show something on the glass panel: a floating see-through panel beside your desktop widget, over whatever the owner is doing, without opening your main window. Use it when the owner asks to be shown something ("aaj ki news dikhao", "is ki detail dikhao", "Karachi ka map dikhao"). view news: the latest headlines with pictures (optionally a category or query); the result lists them numbered. view story: one story in full with its picture: n is its number from the list on the panel, or query a few words of its title. view map: a map of place (a name) or lat/lon, zoom 1-16, optional pins [{place or lat/lon, label}]. view note: a short text you write (title, text). One view at a time; a new one replaces the old.',
+          'Set a timer or an alarm when the owner asks ("10 minute ka timer lagao", "subah 6:30 baje uthana", "har weekday 9 baje standup yaad dilana", "har ghante paani"). in_minutes for a timer, or at as a local clock time (06:30) or a full date and time; repeat daily or weekdays, or every_minutes for an interval. label says what it is for. It rings with a sound and a card even in quiet or focus mode. For things to do (not a ring at a time) use task_add.',
         inputSchema: {
           type: 'object',
           properties: {
-            view: { type: 'string', enum: [...GLASS_VIEWS] },
-            category: { type: 'string', enum: [...CATEGORIES] },
-            query: { type: 'string' },
-            n: { type: 'integer', minimum: 1 },
-            place: { type: 'string' },
-            lat: { type: 'number' },
-            lon: { type: 'number' },
-            zoom: { type: 'number' },
-            pins: { type: 'array', items: { type: 'object', properties: { place: { type: 'string' }, lat: { type: 'number' }, lon: { type: 'number' }, label: { type: 'string' } } } },
-            title: { type: 'string' },
-            text: { type: 'string' },
+            label: { type: 'string', description: 'What it is for, short: "Tea", "Standup", "Wake up".' },
+            in_minutes: { type: 'number', description: 'Minutes from now (0.5 = 30 seconds).' },
+            at: { type: 'string', description: 'Local clock time 06:30, or ISO 8601 date and time.' },
+            repeat: { type: 'string', enum: ['daily', 'weekdays'] },
+            every_minutes: { type: 'number', description: 'Ring every N minutes (an interval).' },
           },
-          required: ['view'],
           additionalProperties: false,
         },
-        actionClass: 'observe',
-        isUntrusted: true,
-        run: (input, signal) => this.glassShow(input, signal),
+        actionClass: 'modify',
+        isUntrusted: false,
+        run: run('timer_set'),
       },
       {
-        name: 'glass_close',
-        description: 'Put the glass panel away when the owner is done with it ("side pe karo", "band karo", "hata do", "ok theek hai"); the widget goes back to its small self.',
+        name: 'timers_list',
+        description: 'The timers and alarms that are set, soonest first, numbered for timer_cancel.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         actionClass: 'observe',
         isUntrusted: false,
-        run: (_i, signal) => this.request({ kind: 'glass', op: { kind: 'close' } }, signal),
+        run: run('timers_list'),
+      },
+      {
+        name: 'timer_cancel',
+        description: 'Cancel a timer or alarm by its number from timers_list, or all of them.',
+        inputSchema: { type: 'object', properties: { number: { type: 'integer' }, all: { type: 'boolean' } }, additionalProperties: false },
+        actionClass: 'modify',
+        isUntrusted: false,
+        run: run('timer_cancel'),
       },
     ]
   }
@@ -421,7 +393,7 @@ export class HostUi {
   }
 
   contextLines(): string[] {
-    return this.snapshot ? [`Your own window (the Atlas app): ${describeUi(this.snapshot)} You can change it with ui_control (pages, a second pane side by side, size), use your own browser with browser and browser_act, drive the World map with the map_* tools, and show news, a story, a map or a note on the glass panel beside your desktop widget with glass_show (glass_close puts it away).`] : []
+    return this.snapshot ? [`Your own screen (Atlas open in the owner's browser): ${describeUi(this.snapshot)} You can change it with ui_control (pages, a second pane side by side), use your own browser with browser and browser_act, drive the World map with the map_* tools, and set timers and alarms with timer_set.`] : []
   }
 
   onResult(requestId: string, result?: string, error?: string) {
@@ -458,7 +430,7 @@ export class HostUi {
   tools(): RuntimeTool[] {
     return [
       ...this.mapTools(),
-      ...this.glassTools(),
+      ...this.timerTools(),
       ...this.browserTools(),
       ...this.worldTools(),
       {

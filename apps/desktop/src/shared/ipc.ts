@@ -262,6 +262,8 @@ export const CH = {
   setStartup: 'assistant:set-startup',
   usageChanged: 'assistant:usage-changed',
   setBudget: 'assistant:set-budget',
+  quietHours: 'assistant:quiet-hours',
+  setQuietHours: 'assistant:set-quiet-hours',
   setPrice: 'assistant:set-price',
   reply: 'assistant:reply',
   action: 'assistant:action',
@@ -308,6 +310,9 @@ export interface AssistantBridge {
   usage(): Promise<UsageView | null>
   onUsage(cb: (u: UsageView) => void): () => void
   setBudget(usd: number): Promise<void>
+  /** When Atlas keeps its own initiatives to itself (timers still ring): "22:00-07:00", or null for never. */
+  quietHours(): Promise<string | null>
+  setQuietHours(range: string | null): Promise<string | null>
   /** Start with Windows (installed app only), in the tray. */
   startup(): Promise<StartupView>
   setStartup(on: boolean, show?: boolean): Promise<StartupView>

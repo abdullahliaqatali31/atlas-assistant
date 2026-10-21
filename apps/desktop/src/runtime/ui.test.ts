@@ -73,28 +73,24 @@ describe('map tools', () => {
   })
 })
 
-describe('glass panel tools', () => {
-  it('shows news, a story by number, a map of a named place, and puts it away', async () => {
-    const { posted, tool } = setup(async name => (name === 'Karachi' ? { name: 'Karachi', country: 'Pakistan', lat: 24.86, lon: 67.0 } : name === 'Lahore' ? { name: 'Lahore', country: 'Pakistan', lat: 31.55, lon: 74.34 } : null))
-    await tool('glass_show').run({ view: 'news', category: 'pakistan' })
-    await tool('glass_show').run({ view: 'story', n: 2 })
-    await tool('glass_show').run({ view: 'map', place: 'Karachi', pins: [{ place: 'Lahore' }, { place: 'Atlantis' }] })
-    await tool('glass_close').run({})
-    expect(posted[0]).toEqual({ kind: 'glass', op: { kind: 'news', category: 'pakistan', query: '' } })
-    expect(posted[1]).toEqual({ kind: 'glass', op: { kind: 'story', n: 2, query: '' } })
-    expect(posted[2]).toMatchObject({ kind: 'glass', op: { kind: 'map', title: 'Karachi, Pakistan', lat: 24.86, lon: 67.0, zoom: 9, pins: [{ lat: 31.55, lon: 74.34, label: 'Lahore' }] } })
-    expect(posted[3]).toEqual({ kind: 'glass', op: { kind: 'close' } })
+describe('timer tools', () => {
+  it('sends timers to the gateway and refuses half-asked ones before bothering it', async () => {
+    const { posted, tool } = setup()
+    await tool('timer_set').run({ label: 'Tea', in_minutes: 10 })
+    await tool('timer_set').run({ label: 'Standup', at: '09:00', repeat: 'weekdays' })
+    await tool('timers_list').run({})
+    await tool('timer_cancel').run({ number: 1 })
+    expect(posted).toEqual([
+      { kind: 'timer', op: { kind: 'set', label: 'Tea', inMinutes: 10, at: undefined, repeat: null } },
+      { kind: 'timer', op: { kind: 'set', label: 'Standup', inMinutes: undefined, at: '09:00', repeat: 'weekdays' } },
+      { kind: 'timer', op: { kind: 'list' } },
+      { kind: 'timer', op: { kind: 'cancel', n: 1 } },
+    ])
+    await expect(tool('timer_set').run({ label: 'x' })).rejects.toThrow(/Say when/)
+    expect(posted).toHaveLength(4)
   })
 
-  it('refuses half-asked views before bothering the window', async () => {
-    const { posted, tool } = setup(async () => null)
-    await expect(tool('glass_show').run({ view: 'story' })).rejects.toThrow(/which story/)
-    await expect(tool('glass_show').run({ view: 'map', place: 'Atlantis' })).rejects.toThrow(/Could not find/)
-    await expect(tool('glass_show').run({ view: 'poster' })).rejects.toThrow(/view must be/)
-    expect(posted).toEqual([])
-  })
-
-  it('runs without asking, even after reading the web: it only shows things on the owner’s screen', () => {
-    for (const name of ['glass_show', 'glass_close']) expect(evaluate({ tool: name, actionClass: 'observe', fromUntrustedSource: true }, UI_RULES, 0).effect).toBe('allow')
+  it('runs without asking: the owner asked for the timer', () => {
+    for (const name of ['timer_set', 'timers_list', 'timer_cancel']) expect(evaluate({ tool: name, actionClass: name === 'timers_list' ? 'observe' : 'modify', fromUntrustedSource: false }, UI_RULES, 0).effect).toBe('allow')
   })
 })

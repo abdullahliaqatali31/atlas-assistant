@@ -27,6 +27,7 @@ import { BRT, type BrowserTabsBridge, type BrowserTabsState } from './browser.ts
 import { HB, type HabitsBridge, type HabitsView } from './habits.ts'
 import { SCT, type ShortcutsView } from './shortcuts.ts'
 import { WA, type WebAccessBridge, type WebAccessView } from './web.ts'
+import { TM, type TimersBridge, type TimersView } from './timers.ts'
 
 /** How a bridge reaches main: a call with an answer, a one-way message, and events. */
 export interface Transport {
@@ -60,6 +61,8 @@ export const buildBridges = (t: Transport) => {
     usage: () => t.invoke(CH.usage),
     onUsage: cb => t.on<UsageView>(CH.usageChanged, cb),
     setBudget: usd => t.invoke(CH.setBudget, usd),
+    quietHours: () => t.invoke(CH.quietHours),
+    setQuietHours: range => t.invoke(CH.setQuietHours, range),
     startup: () => t.invoke(CH.startup),
     setStartup: (on, show) => t.invoke(CH.setStartup, on, show),
     setPrice: (model, price) => t.invoke(CH.setPrice, model, price),
@@ -352,6 +355,15 @@ export const buildBridges = (t: Transport) => {
     onChanged: cb => t.on<WebAccessView>(WA.changed, cb),
   }
 
+  /** Timers and alarms: the ringing card's Stop and Snooze, and the list. */
+  const timers: TimersBridge = {
+    state: () => t.invoke(TM.state),
+    stop: () => t.invoke(TM.stop),
+    snooze: minutes => t.invoke(TM.snooze, minutes),
+    cancel: id => t.invoke(TM.cancel, id),
+    onChanged: cb => t.on<TimersView>(TM.changed, cb),
+  }
+
   return {
     assistant: bridge,
     controls,
@@ -376,6 +388,7 @@ export const buildBridges = (t: Transport) => {
     atlasTabs,
     habits,
     webAccess,
+    timers,
     /** The shortcut board: which global shortcuts Windows gave Atlas. */
     shortcuts: { list: (): Promise<ShortcutsView> => t.invoke(SCT.list) },
   }

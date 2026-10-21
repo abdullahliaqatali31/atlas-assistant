@@ -22,6 +22,7 @@ import type { BrowserTabsBridge } from '../../shared/browser.ts'
 import type { HabitsBridge } from '../../shared/habits.ts'
 import type { ShortcutsView } from '../../shared/shortcuts.ts'
 import type { WebAccessBridge } from '../../shared/web.ts'
+import type { TimersBridge } from '../../shared/timers.ts'
 
 declare global {
   interface Window {
@@ -48,6 +49,7 @@ declare global {
     atlasTabs: BrowserTabsBridge
     habits: HabitsBridge
     webAccess: WebAccessBridge
+    timers: TimersBridge
     shortcuts: { list(): Promise<ShortcutsView> }
   }
 }

@@ -109,6 +109,15 @@ export class Tray {
     this.write(['balloon', title, text])
   }
 
+  /** Windows' alarm sound, looping until quiet() (a timer ringing). */
+  alarm(wav = `${process.env.WINDIR ?? 'C:\\Windows'}\\Media\\Alarm01.wav`) {
+    this.write(['sound', wav])
+  }
+
+  quiet() {
+    this.write(['sound-stop'])
+  }
+
   /** Registers a global shortcut; true when the accelerator is valid (whether Windows granted it shows in isRegistered). */
   register(accelerator: string, fn: () => void, id = accelerator): boolean {
     const hk = toHotkey(accelerator)

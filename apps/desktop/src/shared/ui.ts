@@ -5,6 +5,7 @@
  */
 import { isSurface, SURFACE_LABEL, type BrowserMode, type BrowserOp, type Surface } from './browser.ts'
 import type { GlassOp } from './glass.ts'
+import type { TimerOp } from './timers.ts'
 
 /** Atlas's own voice: the Live voice and the spoken (ChatGPT) voice by name, Live voice on or off, replies spoken or not; state only reads. */
 export interface VoiceChange {
@@ -88,7 +89,7 @@ export interface UiChange {
 }
 
 /** The model's window tools; map ops drive the World map (shared/map.ts). */
-export type UiOp = { kind: 'state' } | { kind: 'set'; change: UiChange } | { kind: 'map'; op: MapOp } | { kind: 'glass'; op: GlassOp } | { kind: 'system'; op: SystemOp } | { kind: 'browser'; op: BrowserOp } | { kind: 'world'; op: WorldDataOp } | { kind: 'voice'; change: VoiceChange }
+export type UiOp = { kind: 'timer'; op: TimerOp } | { kind: 'state' } | { kind: 'set'; change: UiChange } | { kind: 'map'; op: MapOp } | { kind: 'glass'; op: GlassOp } | { kind: 'system'; op: SystemOp } | { kind: 'browser'; op: BrowserOp } | { kind: 'world'; op: WorldDataOp } | { kind: 'voice'; change: VoiceChange }
 
 /** Page-side commands main sends (view, chat, compact). */
 export interface PageCommand {

@@ -8,6 +8,7 @@ import type { PersonalityView } from '../../shared/personality.ts'
 import { AppearanceSettings } from './Appearance.tsx'
 import { SecuritySettings } from './Security.tsx'
 import { PowerUpPage } from './PowerUp.tsx'
+import { nameOf } from './ui/assistantName.ts'
 
 const cleanError = (err: unknown, fallback: string) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : fallback
@@ -102,6 +103,8 @@ export function PersonalitySettings({ onRunIntro }: { onRunIntro: () => void }) 
           How the assistant talks to you. This changes tone only: honesty, safety rules, approvals and your limits stay the same.
         </p>
       </header>
+
+      <QuietHours />
 
       <TextField id="nick" label="What it calls you" value={form.ownerNickname} placeholder="Your name, or e.g. Boss" onChange={v => set('ownerNickname', v)} />
       <TextField id="aname" label="Assistant’s name" value={form.assistantName} placeholder="No name" onChange={v => set('assistantName', v)} />
@@ -244,5 +247,48 @@ function Choice<T extends string>({ label, value, options, onChange }: { label: 
         ))}
       </ToggleGroup.Root>
     </div>
+  )
+}
+
+/** When the assistant keeps its own initiatives to itself; the owner's timers still ring. */
+function QuietHours() {
+  const [range, setRange] = useState<string | null | undefined>(undefined)
+  const [from, setFrom] = useState('22:00')
+  const [to, setTo] = useState('07:00')
+  const [note, setNote] = useState('')
+  useEffect(() => {
+    void window.assistant.quietHours().then(r => {
+      setRange(r)
+      if (r) {
+        const [a, b] = r.split('-')
+        setFrom(a!.padStart(5, '0'))
+        setTo(b!.padStart(5, '0'))
+      }
+    }, () => setRange(null))
+  }, [])
+  const save = (r: string | null) =>
+    void window.assistant.setQuietHours(r).then(
+      v => (setRange(v), setNote(v ? 'Saved; it applies in a few seconds.' : 'Quiet hours are off.')),
+      err => setNote(cleanError(err, 'Could not save.')),
+    )
+  if (range === undefined) return null
+  return (
+    <section className="tile space-y-2 p-3">
+      <label className="flex items-center gap-2 text-sm font-medium">
+        <input type="checkbox" checked={range !== null} onChange={e => save(e.target.checked ? `${from}-${to}` : null)} /> Quiet hours
+      </label>
+      <p className="text-xs text-muted">{nameOf()} does not speak up on its own then (briefings, check-ins, nudges wait or show silently). Your timers and alarms still ring.</p>
+      {range !== null && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <input type="time" value={from} onChange={e => setFrom(e.target.value)} className="field w-28" aria-label="From" />
+          <span className="text-muted">to</span>
+          <input type="time" value={to} onChange={e => setTo(e.target.value)} className="field w-28" aria-label="To" />
+          <button type="button" className="btn" disabled={`${from}-${to}` === range} onClick={() => save(`${from}-${to}`)}>
+            Save
+          </button>
+        </div>
+      )}
+      {note && <p className="text-xs text-muted">{note}</p>}
+    </section>
   )
 }

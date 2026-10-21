@@ -73,6 +73,7 @@ import { LockScreen } from "./LockScreen.tsx";
 import { Setup } from "./Setup.tsx";
 import { useCounts, type CountKey } from "./shell/counts.ts";
 import { STRIP_W, usePanelLayout } from "./shell/panelLayout.ts";
+import { TimerRing, TimersCard } from "./shell/Timers.tsx";
 import { ShortcutBoard } from "./shell/ShortcutBoard.tsx";
 import { Rail, type RailItem } from "./shell/Rail.tsx";
 import { useAlerts } from "./shell/alerts.ts";
@@ -743,6 +744,7 @@ export function App() {
         return (
           <div className="h-full space-y-3 overflow-y-auto p-3">
             <NowCard status={status} controls={controls} />
+            <TimersCard />
             <TodayCard status={status} />
             <ActivityCard controls={controls} presence={presence} />
           </div>
@@ -1158,6 +1160,7 @@ export function App() {
           <Rail items={items} bottom={bottom} horizontal />
         )}
       </div>
+      <TimerRing />
       {board && <ShortcutBoard onClose={() => setBoard(false)} />}
       <CommandPalette
         open={palette}
