@@ -2,9 +2,9 @@
 
 Built from three studies: an audit of this repo, the architectures of
 OpenClaw and Hermes Agent, and current on-device voice and hybrid-AI
-practice. Each phase ships on its own, gated by `pnpm check`, in this order.
+practice. Each phase ships on its own, gated by `pnpm check`. Order of work: 1 (done), 6 (web interface, moved up by the owner), 2, 3, 4, 5, 7.
 
-## Phase 1 — Voice you can hear, that hears you
+## Phase 1 — Voice you can hear, that hears you (done)
 
 - Playback chain for every spoken reply: make-up gain, 100 Hz high-pass,
   +2.5 dB presence shelf at 3 kHz, a gentle compressor, a limiter, a ceiling
@@ -58,7 +58,7 @@ practice. Each phase ships on its own, gated by `pnpm check`, in this order.
   tool, quiet hours in the UI, skills in the shared SKILL.md format (checked
   before install).
 
-## Phase 6 — Web interface
+## Phase 6 — Web interface (done)
 
 - A local server in Atlas (loopback by default, paired devices only) serves
   the same interface in any browser: home and brain, world maps, news,

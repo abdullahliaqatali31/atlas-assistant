@@ -22,6 +22,7 @@ import type { PowerUpBridge } from '../shared/powerup.ts'
 import type { BrowserTabsBridge } from '../shared/browser.ts'
 import type { HabitsBridge } from '../shared/habits.ts'
 import type { ShortcutsView } from '../shared/shortcuts.ts'
+import type { WebAccessBridge } from '../shared/web.ts'
 
 declare global {
   interface Window {
@@ -51,6 +52,7 @@ declare global {
     world: WorldBridge
     atlasTabs: BrowserTabsBridge
     habits: HabitsBridge
+    webAccess: WebAccessBridge
     shortcuts: { list(): Promise<ShortcutsView> }
   }
 }

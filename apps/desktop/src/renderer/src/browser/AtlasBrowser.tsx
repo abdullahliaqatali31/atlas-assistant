@@ -12,8 +12,9 @@
 import { ArrowLeft, ArrowRight, Columns2, Loader2, Maximize2, Minimize2, PictureInPicture2, Pin, Plus, RotateCw, Sparkles, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 
-import { AWAKE_TABS, BROWSER_PARTITION, EMPTY_TABS, orderTabs, toUrl, type BrowserMode, type BrowserTab, type BrowserTabsState, type TabAction } from '../../../shared/browser.ts'
+import { AWAKE_TABS, BROWSER_PARTITION, EMPTY_TABS, orderTabs, toUrl, type BrowserMode, type BrowserTab, type BrowserTabsState, type RemoteInput, type TabAction, type TabPicture } from '../../../shared/browser.ts'
 import { nameOf } from '../ui/assistantName.ts'
+import { isWeb } from '../web/transport.ts'
 
 /** The webview element's methods this page uses. */
 interface WebviewEl extends HTMLElement {
@@ -93,6 +94,102 @@ function TabPage({ tab, shown, onEl }: { tab: BrowserTab; shown: boolean; onEl: 
       partition={BROWSER_PARTITION}
       className={`absolute inset-0 flex bg-white ${shown ? '' : 'pointer-events-none invisible'}`}
     />
+  )
+}
+
+const KEYS: Record<string, Extract<RemoteInput, { kind: 'key' }>['key']> = {
+  Enter: 'Enter',
+  Backspace: 'Backspace',
+  Tab: 'Tab',
+  Escape: 'Escape',
+  Delete: 'Delete',
+  ArrowUp: 'Up',
+  ArrowDown: 'Down',
+  ArrowLeft: 'Left',
+  ArrowRight: 'Right',
+  PageUp: 'PageUp',
+  PageDown: 'PageDown',
+  Home: 'Home',
+  End: 'End',
+}
+
+/**
+ * In the web interface the page itself stays on the PC: this shows a live
+ * picture of the tab (a few times a second while it changes) and sends
+ * clicks, scrolling and typing back to it.
+ */
+function RemotePage({ tabId }: { tabId: string }) {
+  const [pic, setPic] = useState<TabPicture | null | undefined>(undefined)
+  const box = useRef<HTMLDivElement | null>(null)
+  const soon = useRef<() => void>(() => undefined)
+  useEffect(() => {
+    let alive = true
+    let timer = 0
+    const grab = async () => {
+      window.clearTimeout(timer)
+      if (!alive) return
+      if (document.visibilityState === 'visible') {
+        const width = Math.round((box.current?.clientWidth ?? 1024) * Math.min(2, devicePixelRatio))
+        const p = await window.atlasTabs.picture(tabId, width).catch(() => null)
+        if (!alive) return
+        setPic(p)
+      }
+      timer = window.setTimeout(() => void grab(), 900)
+    }
+    // After an input the page changes: look again shortly.
+    soon.current = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => void grab(), 180)
+    }
+    void grab()
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [tabId])
+
+  const send = (input: RemoteInput) => {
+    void window.atlasTabs.input(tabId, input).catch(() => undefined)
+    soon.current()
+  }
+  // The picture is fitted (centred across, from the top): find the point on the picture itself.
+  const where = (e: { clientX: number; clientY: number; currentTarget: HTMLImageElement }) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    const nw = e.currentTarget.naturalWidth || r.width
+    const nh = e.currentTarget.naturalHeight || r.height
+    const k = Math.min(r.width / nw, r.height / nh)
+    const left = r.left + (r.width - nw * k) / 2
+    const clamp = (v: number) => Math.min(1, Math.max(0, v))
+    return { x: clamp((e.clientX - left) / (nw * k)), y: clamp((e.clientY - r.top) / (nh * k)) }
+  }
+
+  if (pic === undefined) return <div className="absolute inset-0 grid place-items-center bg-slate-950 text-xs text-slate-400">Loading the page from your PC…</div>
+  if (pic === null)
+    return (
+      <div className="absolute inset-0 grid place-items-center bg-slate-950 p-6 text-center text-xs text-slate-400">
+        This tab is open in {nameOf()} on your PC, but its page is asleep or the window there is closed. Ask {nameOf()} to open a site, or open the browser on the PC.
+      </div>
+    )
+  return (
+    <div ref={box} className="absolute inset-0 overflow-hidden bg-slate-950">
+      <img
+        src={pic.url}
+        alt="The page, live from your PC"
+        tabIndex={0}
+        draggable={false}
+        className="h-full w-full cursor-pointer object-contain object-top outline-none"
+        onClick={e => send({ kind: 'click', ...where(e) })}
+        onWheel={e => send({ kind: 'wheel', ...where(e), dy: e.deltaY })}
+        onKeyDown={e => {
+          if (e.ctrlKey || e.metaKey || e.altKey) return
+          const key = KEYS[e.key]
+          if (key) send({ kind: 'key', key })
+          else if (e.key.length === 1) send({ kind: 'text', text: e.key })
+          else return
+          e.preventDefault()
+        }}
+      />
+    </div>
   )
 }
 
@@ -479,11 +576,11 @@ export function AtlasBrowser({ mode, driving, panes, onMode }: { mode: BrowserMo
         </button>
       </div>
       <div className="relative min-h-0 flex-1 bg-white">
-        {state.tabs
-          .filter(t => awake.includes(t.id))
-          .map(t => (
-            <TabPage key={t.id} tab={t} shown={t.id === state.active} onEl={onEl} />
-          ))}
+        {isWeb
+          ? state.active && <RemotePage key={state.active} tabId={state.active} />
+          : state.tabs
+              .filter(t => awake.includes(t.id))
+              .map(t => <TabPage key={t.id} tab={t} shown={t.id === state.active} onEl={onEl} />)}
       </div>
     </div>
   )

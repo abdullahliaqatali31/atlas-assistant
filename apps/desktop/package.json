@@ -27,6 +27,7 @@
     "mammoth": "1.12.3",
     "maplibre-gl": "5.24.0",
     "satellite.js": "7.1.0",
+    "sherpa-onnx-node": "1.13.8",
     "unpdf": "1.8.1"
   },
   "devDependencies": {

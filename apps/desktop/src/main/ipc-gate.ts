@@ -15,6 +15,7 @@ import { BR } from '../shared/brain.ts'
 import { PWC } from '../shared/powerup.ts'
 import { HB } from '../shared/habits.ts'
 import { IC } from '../shared/identity.ts'
+import { BRT } from '../shared/browser.ts'
 
 export const OWNER_ONLY: ReadonlySet<string> = new Set([
   // Provider, key and server address: a swap would send conversations elsewhere.
@@ -82,6 +83,9 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   HB.setProfile,
   HB.setWorkHours,
   HB.refresh,
+  // Seeing and driving Atlas's browser (the owner's signed-in sites) from the web interface.
+  BRT.picture,
+  BRT.input,
   // Full control: Atlas acting without asking.
   CC.setFullControl,
   PCC.rebuild,

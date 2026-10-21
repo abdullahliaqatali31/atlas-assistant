@@ -9,6 +9,7 @@ import ortMjs from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs?url'
 import ortWasm from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url'
 
 import { MODEL_ID, MODEL_SCHEME } from '../../../shared/wake.ts'
+import { SCHEME_PATH } from '../../../shared/wire.ts'
 
 export type AsrDevice = 'webgpu' | 'wasm'
 export type AsrRequest = { type: 'load'; device?: AsrDevice } | { type: 'transcribe'; id: number; audio: Float32Array }
@@ -17,7 +18,8 @@ export type AsrResponse = { type: 'ready'; device: AsrDevice } | { type: 'text';
 env.allowRemoteModels = false
 env.allowLocalModels = true
 env.useBrowserCache = false
-env.localModelPath = `${MODEL_SCHEME}://models/`
+// In a browser (the web interface) the same files come through Atlas's server.
+env.localModelPath = /Electron\//.test(navigator.userAgent) ? `${MODEL_SCHEME}://models/` : `${SCHEME_PATH}${MODEL_SCHEME}/models/`
 const wasm = env.backends.onnx.wasm
 if (wasm) {
   wasm.wasmPaths = { mjs: ortMjs, wasm: ortWasm }

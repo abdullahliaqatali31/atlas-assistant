@@ -35,7 +35,8 @@ import { UiService } from './ui.ts'
 import { WorldService } from './world.ts'
 import { IdentityGate } from './identity.ts'
 import { WindowsHello } from './system/hello.ts'
-import { gateIpc } from './ipc-gate.ts'
+import { gateIpc, OWNER_ONLY } from './ipc-gate.ts'
+import { WebAccess } from './web/server.ts'
 import { mainWebPreferences } from './window-prefs.ts'
 import { registerBackupIpc } from './backup.ts'
 import { CodeService } from './code/service.ts'
@@ -133,8 +134,15 @@ const log = (level: 'info' | 'warn' | 'error', message: string) => console[level
 
 // ── runtime ─────────────────────────────────────────────────
 
+/** The web interface (shared/web.ts); set up once the handlers exist. */
+let web: WebAccess | null = null
+/** Every handler by channel, so the web interface calls the very same code. */
+const webHandlers = new Map<string, (arg: unknown, arg2: unknown, arg3?: unknown, arg4?: unknown) => unknown>()
+
 const toRenderer = (channel: string, payload: unknown) => {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+  // Replies reach browsers through replyToRenderer, which knows who should speak them.
+  if (channel !== CH.reply) web?.broadcast(channel, payload)
 }
 
 /**
@@ -148,7 +156,12 @@ const MAX_HELD = 500
 // Audio of a reply the owner talked over or stopped never reaches the speakers.
 const audioGate = new AudioGate()
 const replyToRenderer = (e: ReplyEvent) => {
-  if (!win || win.isDestroyed() || !audioGate.allows(e)) return
+  if (!audioGate.allows(e)) return
+  const windowUp = win !== null && !win.isDestroyed()
+  web?.reply(e, windowUp)
+  if (!windowUp) return
+  // A reply asked for in a browser is spoken there, not on the PC as well.
+  if (e.type === 'audio' && web?.ownsReply(e.replyId)) return
   if (rendererReady) return toRenderer(CH.reply, e)
   if (heldReplies.length < MAX_HELD) heldReplies.push(e)
 }
@@ -570,7 +583,7 @@ const createWindow = ({ inactive = false } = {}) => {
     const inView = open && Boolean(win?.isFocused())
     presence.mainWindow(inView ? 'front' : open ? 'open' : 'away')
     // PC readings: frequent while Atlas is on screen, rare (nothing waiting in memory) while it is away.
-    pcSystem.setActive(open)
+    pcActive(open)
     // Coming to the front with something on the glass panel: the app takes it over, the widget goes compact.
     if (inView) handOffGlass()
   }
@@ -579,7 +592,7 @@ const createWindow = ({ inactive = false } = {}) => {
   win.on('closed', () => {
     win = null
     presence.mainWindow('away')
-    pcSystem.setActive(false)
+    pcActive(false)
     rendererReady = false
     heldReplies = []
   })
@@ -683,8 +696,32 @@ const fromOurWindow = (e: IpcMainInvokeEvent) => {
   return win !== null && e.sender === win.webContents && (isDev ? url.startsWith(process.env.ELECTRON_RENDERER_URL!) : url.startsWith('file://'))
 }
 
-const handle = <T>(channel: string, fn: (arg: unknown, arg2: unknown, arg3?: unknown, arg4?: unknown) => T | Promise<T>) =>
+const handle = <T>(channel: string, fn: (arg: unknown, arg2: unknown, arg3?: unknown, arg4?: unknown) => T | Promise<T>) => {
+  webHandlers.set(channel, fn)
   ipcMain.handle(channel, gateIpc(channel, fn, { fromOurWindow, requireOwner: () => requireOwner() }))
+}
+
+/** PC readings stay frequent while Atlas is on screen, in the window or in a browser. */
+const windowOnScreen = () => Boolean(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized())
+const pcActive = (windowOpen: boolean) => pcSystem.setActive(windowOpen || (web?.hasClients ?? false))
+web = new WebAccess({
+  handlers: webHandlers,
+  gate: channel => {
+    if (OWNER_ONLY.has(channel)) requireOwner()
+  },
+  requireOwner: () => requireOwner(),
+  file: join(app.getPath('userData'), 'web-access.json'),
+  rendererDir: join(import.meta.dirname, '../renderer'),
+  devUrl: isDev ? process.env.ELECTRON_RENDERER_URL! : null,
+  handle: (channel, fn) => handle(channel, fn),
+  toWindow: (channel, payload) => {
+    if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+  },
+  openExternal: url => void shell.openExternal(url),
+  onClients: () => pcActive(windowOnScreen()),
+  log: (level, message) => log(level, message),
+})
+web.register()
 
 handle(CH.status, () => status)
 const news = new NewsService({
@@ -1211,8 +1248,9 @@ if (!app.requestSingleInstanceLock()) {
     if (!startedHidden()) createWindow()
     else {
       presence.mainWindow('away')
-      pcSystem.setActive(false)
+      pcActive(false)
     }
+    void web?.start()
   })
   // Staying alive in the tray is the point: never quit when the last window closes.
   app.on('window-all-closed', () => {})
@@ -1228,6 +1266,7 @@ if (!app.requestSingleInstanceLock()) {
     glass.stop()
     pcSystem.stop()
     sysmap.stop()
+    void web?.stop()
     void supervisor.stop().finally(() => {
       tray?.destroy()
       app.quit()

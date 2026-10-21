@@ -244,7 +244,37 @@ export const BRT = {
   get: 'browser-tabs:get',
   act: 'browser-tabs:act',
   report: 'browser-tabs:report',
+  picture: 'browser-tabs:picture',
+  input: 'browser-tabs:input',
 } as const
+
+/** A picture of a tab's page, for the web interface (which cannot hold the page itself). */
+export interface TabPicture {
+  url: string
+  width: number
+  height: number
+}
+
+/** The owner's hands on a tab from a browser: positions are 0..1 of the picture. */
+export type RemoteInput =
+  | { kind: 'click'; x: number; y: number }
+  | { kind: 'wheel'; x: number; y: number; dy: number }
+  | { kind: 'key'; key: (typeof REMOTE_KEYS)[number] }
+  | { kind: 'text'; text: string }
+
+export const REMOTE_KEYS = ['Enter', 'Backspace', 'Tab', 'Escape', 'Delete', 'Up', 'Down', 'Left', 'Right', 'PageUp', 'PageDown', 'Home', 'End'] as const
+
+const unit = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1
+
+export const parseRemoteInput = (v: unknown): RemoteInput | null => {
+  if (!v || typeof v !== 'object') return null
+  const o = v as Record<string, unknown>
+  if (o.kind === 'click' && unit(o.x) && unit(o.y)) return { kind: 'click', x: o.x as number, y: o.y as number }
+  if (o.kind === 'wheel' && unit(o.x) && unit(o.y) && typeof o.dy === 'number' && Math.abs(o.dy) <= 5000) return { kind: 'wheel', x: o.x as number, y: o.y as number, dy: o.dy }
+  if (o.kind === 'key' && REMOTE_KEYS.includes(o.key as (typeof REMOTE_KEYS)[number])) return { kind: 'key', key: o.key as (typeof REMOTE_KEYS)[number] }
+  if (o.kind === 'text' && typeof o.text === 'string' && o.text.length > 0 && o.text.length <= 500) return { kind: 'text', text: o.text }
+  return null
+}
 
 /** The page's side of the tabs (window.atlasTabs). */
 export interface BrowserTabsBridge {
@@ -253,4 +283,7 @@ export interface BrowserTabsBridge {
   act(a: TabAction): Promise<void>
   /** A tab's page told its webContents id (on load), its address and title. */
   report(r: { id: string; wcId?: number | undefined; url?: string | undefined; title?: string | undefined }): void
+  /** A picture of the tab's page at about this width, or null when the page is not open on the PC. */
+  picture(id: string, width: number): Promise<TabPicture | null>
+  input(id: string, input: RemoteInput): Promise<void>
 }

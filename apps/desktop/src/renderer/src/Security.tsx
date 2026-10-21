@@ -6,6 +6,7 @@ import { learnAlias, SENSITIVITIES, type Sensitivity, type WakeMatch, type WakeV
 import { Select } from './ui/Select.tsx'
 import { WakeListener } from './wake/listener.ts'
 import { nameOf } from './ui/assistantName.ts'
+import { WebAccessCard } from './web/WebAccessCard.tsx'
 
 const cleanError = (err: unknown) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.'
@@ -31,6 +32,7 @@ export function SecuritySettings({ assistantName }: { assistantName: string }) {
     <div className="mx-auto max-w-xl space-y-4 p-6">
       <CodeCard />
       <WakeCard assistantName={assistantName} />
+      <WebAccessCard />
       <BackupCard />
     </div>
   )

@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-import { session, webContents, type BrowserWindow, type WebContents } from 'electron'
+import { screen, session, webContents, type BrowserWindow, type WebContents } from 'electron'
 
 import {
   BROWSER_HOME,
@@ -25,6 +25,7 @@ import {
   GROUP_COLORS,
   MAX_TABS,
   orderTabs,
+  parseRemoteInput,
   parseTabAction,
   toUrl,
   type BrowserMode,
@@ -33,6 +34,7 @@ import {
   type BrowserTabsState,
   type TabAction,
   type TabGroup,
+  type TabPicture,
   type TabsOp,
 } from '../shared/browser.ts'
 import type { PageCommand } from '../shared/ui.ts'
@@ -181,6 +183,47 @@ export class BrowserService {
       if (action) this.act(action)
     })
     this.deps.handle(BRT.report, r => this.report(r))
+    this.deps.handle(BRT.picture, (id, width) => this.picture(id, width))
+    this.deps.handle(BRT.input, (id, input) => this.remote(id, input))
+  }
+
+  /** The size of each tab's last picture, to place the web interface's clicks. */
+  private readonly pictured = new Map<string, { width: number; height: number }>()
+
+  private async picture(id: unknown, width: unknown): Promise<TabPicture | null> {
+    const wc = typeof id === 'string' ? this.pages.get(id) : undefined
+    if (!wc || wc.isDestroyed()) return null
+    const img = await wc.capturePage()
+    if (img.isEmpty()) return null
+    const size = img.getSize()
+    this.pictured.set(id as string, size)
+    const w = typeof width === 'number' && Number.isFinite(width) ? Math.max(320, Math.min(1600, Math.round(width))) : 1024
+    const small = size.width > w ? img.resize({ width: w, quality: 'good' }) : img
+    const s = small.getSize()
+    return { url: `data:image/jpeg;base64,${small.toJPEG(70).toString('base64')}`, width: s.width, height: s.height }
+  }
+
+  private remote(id: unknown, raw: unknown) {
+    const input = parseRemoteInput(raw)
+    const wc = typeof id === 'string' ? this.pages.get(id) : undefined
+    const size = typeof id === 'string' ? this.pictured.get(id) : undefined
+    if (!input || !wc || wc.isDestroyed()) return
+    // Captures are in device pixels; input events in Windows' scaled ones.
+    const zoom = screen.getPrimaryDisplay().scaleFactor || 1
+    const at = (fx: number, fy: number) => ({ x: Math.round(((size?.width ?? 0) * fx) / zoom), y: Math.round(((size?.height ?? 0) * fy) / zoom) })
+    if (input.kind === 'click') {
+      const p = at(input.x, input.y)
+      wc.focus()
+      wc.sendInputEvent({ type: 'mouseDown', ...p, button: 'left', clickCount: 1 })
+      wc.sendInputEvent({ type: 'mouseUp', ...p, button: 'left', clickCount: 1 })
+    } else if (input.kind === 'wheel') {
+      wc.sendInputEvent({ type: 'mouseWheel', ...at(input.x, input.y), deltaX: 0, deltaY: -input.dy })
+    } else if (input.kind === 'key') {
+      wc.sendInputEvent({ type: 'keyDown', keyCode: input.key })
+      wc.sendInputEvent({ type: 'keyUp', keyCode: input.key })
+    } else {
+      for (const ch of input.text) wc.sendInputEvent({ type: 'char', keyCode: ch })
+    }
   }
 
   /** The tab Atlas and the toolbar act on. */
