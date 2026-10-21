@@ -67,6 +67,7 @@ export interface SupervisorDeps {
   onDesktop?: (e: Extract<HostEvent, { type: 'desktop' }>) => void
   onUi?: (e: Extract<HostEvent, { type: 'ui' }>) => void
   onWorld?: (e: Extract<HostEvent, { type: 'world' | 'world-result' }>) => void
+  onSkillsChanged?: () => void
 }
 
 const STABLE_MS = 60_000
@@ -507,6 +508,9 @@ export class RuntimeSupervisor {
       case 'world':
       case 'world-result':
         this.deps.onWorld?.(e)
+        break
+      case 'skills-changed':
+        this.deps.onSkillsChanged?.()
         break
       case 'log':
         this.deps.log(e.level, e.message)

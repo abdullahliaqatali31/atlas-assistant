@@ -24,6 +24,7 @@ import type { ShortcutsView } from '../../shared/shortcuts.ts'
 import type { WebAccessBridge } from '../../shared/web.ts'
 import type { TimersBridge } from '../../shared/timers.ts'
 import type { TelegramBridge } from '../../shared/telegram.ts'
+import type { SkillsMdBridge } from '../../shared/skillmd.ts'
 
 declare global {
   interface Window {
@@ -52,6 +53,7 @@ declare global {
     webAccess: WebAccessBridge
     timers: TimersBridge
     telegram: TelegramBridge
+    skillsMd: SkillsMdBridge
     shortcuts: { list(): Promise<ShortcutsView> }
   }
 }

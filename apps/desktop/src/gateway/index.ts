@@ -60,6 +60,8 @@ import { app, dialog, powerMonitor, shell } from '../main/host/index.ts'
 import { Tray } from '../main/host/tray.ts'
 import { TimerService } from '../main/timers.ts'
 import { TelegramChannel } from '../main/telegram.ts'
+import { SkillLibrary } from '../main/skill-library.ts'
+import { SK } from '../shared/skillmd.ts'
 
 const isDev = !app.isPackaged
 /** Development: the page comes from the Vite dev server, and the repo root's .env feeds setup (like `pnpm chat`). */
@@ -208,6 +210,7 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
     toRenderer(CH.usageChanged, u)
   },
   onWorld: e => world.onHostEvent(e),
+  onSkillsChanged: () => toRenderer(SK.changed, skillLibrary().list()),
   onUi: e => {
     // The model's screen tools.
     void ui.handleOp(e.op).then(
@@ -526,6 +529,32 @@ const timers = new TimerService({
   log: (level, message) => log(level, message),
 })
 timers.register()
+
+/** Settings › Skills: the SKILL.md library (Atlas uses the same folder). */
+const skillLibrary = () => new SkillLibrary(join(runtimeEnv(devEnvFile).ASSISTANT_DATA_DIR!, 'skills'))
+handle(SK.list, () => skillLibrary().list())
+handle(SK.preview, async source => {
+  requireOwner()
+  if (typeof source !== 'string' || !source.trim() || source.length > 2000) throw new Error('Give a skill address or folder.')
+  const { notes: _n, text: _t, ...p } = await skillLibrary().preview(source)
+  return p
+})
+handle(SK.install, async source => {
+  requireOwner()
+  if (typeof source !== 'string' || !source.trim() || source.length > 2000) throw new Error('Give a skill address or folder.')
+  await skillLibrary().install(source)
+  const list = skillLibrary().list()
+  toRenderer(SK.changed, list)
+  return list
+})
+handle(SK.remove, slug => {
+  requireOwner()
+  if (typeof slug !== 'string') throw new Error('Which skill?')
+  skillLibrary().remove(slug)
+  const list = skillLibrary().list()
+  toRenderer(SK.changed, list)
+  return list
+})
 
 /** The owner's own Telegram bot: messages and voice notes in, replies, approvals and notices out. */
 const telegram: TelegramChannel = new TelegramChannel({

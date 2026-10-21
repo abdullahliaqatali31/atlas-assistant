@@ -7,6 +7,7 @@ import { Select } from './ui/Select.tsx'
 /** The project picker's value for "no project" (Radix Select takes no empty value). */
 const APP_ONLY = '__app__'
 import { Skills } from './Skills.tsx'
+import { SkillLibrary } from './SkillLibrary.tsx'
 
 const cleanError = (err: unknown) =>
   err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.'
@@ -89,6 +90,7 @@ export function Learning({ onTalk }: { /** Teach and Run now continue in the con
         </details>
 
         <Skills skills={view.skills} run={run} onTalk={onTalk} />
+        <SkillLibrary />
 
         <Section icon={<Sparkles className="size-3.5" />} title="Waiting for you" aside={view.pending.length ? String(view.pending.length) : undefined}>
           {view.pending.length === 0 && <Empty>No suggestions right now.</Empty>}

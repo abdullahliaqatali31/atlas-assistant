@@ -475,6 +475,8 @@ export type HostEvent =
   | { type: 'code-minutes'; minutes: Record<string, number> }
   /** A file tool asks main to list, search, read, move, organise, recycle or undo inside the chosen folders. */
   | { type: 'files'; requestId: string; op: FileOp }
+  /** Atlas installed, wrote or removed a SKILL.md skill. */
+  | { type: 'skills-changed' }
   /** The latest live-world snapshot, for the World page. */
   | { type: 'world'; snapshot: WorldSnapshot }
   /** Answer to a World page request. */

@@ -29,6 +29,7 @@ import { SCT, type ShortcutsView } from './shortcuts.ts'
 import { WA, type WebAccessBridge, type WebAccessView } from './web.ts'
 import { TM, type TimersBridge, type TimersView } from './timers.ts'
 import { TG, type TelegramBridge, type TelegramView } from './telegram.ts'
+import { SK, type SkillEntry, type SkillsMdBridge } from './skillmd.ts'
 
 /** How a bridge reaches main: a call with an answer, a one-way message, and events. */
 export interface Transport {
@@ -376,6 +377,15 @@ export const buildBridges = (t: Transport) => {
     onChanged: cb => t.on<TelegramView>(TG.changed, cb),
   }
 
+  /** Settings › Skills: SKILL.md skills, checked before installing. */
+  const skillsMd: SkillsMdBridge = {
+    list: () => t.invoke(SK.list),
+    preview: source => t.invoke(SK.preview, source),
+    install: source => t.invoke(SK.install, source),
+    remove: slug => t.invoke(SK.remove, slug),
+    onChanged: cb => t.on<SkillEntry[]>(SK.changed, cb),
+  }
+
   return {
     assistant: bridge,
     controls,
@@ -402,6 +412,7 @@ export const buildBridges = (t: Transport) => {
     webAccess,
     timers,
     telegram,
+    skillsMd,
     /** The shortcut board: which global shortcuts Windows gave Atlas. */
     shortcuts: { list: (): Promise<ShortcutsView> => t.invoke(SCT.list) },
   }
