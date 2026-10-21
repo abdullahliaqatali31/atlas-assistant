@@ -35,6 +35,8 @@ export const SECRET_NAMES = [
   'OPENSKY_CLIENT',
   // The owner's Telegram bot (Atlas from the phone).
   'TELEGRAM_BOT_TOKEN',
+  // Voice ID: the key the voice prints are encrypted with.
+  'SPEAKER_PROFILE_KEY',
 ] as const
 /** Remote MCP connectors keep their tokens under their own name: MCP_REMOTE_<NAME>. */
 export type RemoteConnectorSecret = `MCP_REMOTE_${string}`

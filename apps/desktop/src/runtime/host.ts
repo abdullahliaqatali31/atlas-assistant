@@ -55,6 +55,7 @@ import { HostNotifications, NOTIFICATION_RULES } from './notifications.ts'
 import { HABITS_RULES, HostHabits } from './habits.ts'
 import { suggestReplies } from './suggest.ts'
 import { VISION_RULES, visionTool } from './vision.ts'
+import { speakerNote, type SpeakerResult } from '../shared/speaker.ts'
 import { HostSkillsMd, SKILLMD_RULES } from './skillmd.ts'
 import { SkillLibrary } from '../main/skill-library.ts'
 import { HostControls } from './controls.ts'
@@ -461,7 +462,7 @@ const answerPending = (replyId: string, text: string): boolean => {
   return true
 }
 
-const sendVoice = async (replyId: string, audio: Uint8Array, mime: string) => {
+const sendVoice = async (replyId: string, audio: Uint8Array, mime: string, speaker?: SpeakerResult) => {
   if (!voice) return post({ type: 'done', replyId, stopped: false, error: 'No voice provider is configured.' })
   // Atlas is waiting on a yes or no: hear the answer first, without cutting off the waiting reply.
   if (approvals.size) {
@@ -492,7 +493,8 @@ const sendVoice = async (replyId: string, audio: Uint8Array, mime: string) => {
     return post({ type: 'done', replyId, stopped: false, error: 'I didn’t catch any speech. Try again a little closer to the mic.' })
   }
   post({ type: 'heard', replyId, text: heard })
-  await send(replyId, heard, abort, true)
+  // Voice ID: someone other than the owner said it; Atlas reads who before the words.
+  await send(replyId, speakerNote(speaker, ownerName) + heard, abort, true)
 }
 
 /** An onboarding answer said aloud: text only, no reply. */
@@ -558,7 +560,7 @@ port.on('message', ({ data }: { data: HostRequest }) => {
       break
     case 'voice':
       lastOwnerTurnAt = Date.now()
-      void sendVoice(data.replyId, data.audio, data.mime)
+      void sendVoice(data.replyId, data.audio, data.mime, data.speaker)
       break
     case 'set-speech':
       speechEnabled = data.enabled

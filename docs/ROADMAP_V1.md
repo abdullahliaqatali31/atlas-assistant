@@ -18,10 +18,10 @@ practice. Each phase ships on its own, gated by `pnpm check`. Order of work: 1 (
   same audio context, so echo cancellation removes Atlas's own voice.
 - Barge-in in live voice too.
 
-## Phase 2 — Who is speaking
+## Phase 2 — Who is speaking (done)
 
-- Speaker embeddings on the PC (sherpa-onnx, CAM++ 28 MB, Apache-2.0) in a
-  utility process. Enrolment of the owner (about 30 s, 5 phrases) and
+- Speaker embeddings on the PC (sherpa-onnx; ERes2Net base, 40 MB, Apache-2.0:
+  CAM++ did not separate voices in our test) in the gateway. Enrolment of the owner (about 30 s, 5 phrases) and
   optional family members. Only embeddings are kept, encrypted; "forget my
   voice" deletes them.
 - Atlas knows who spoke: greets people by name, personal answers only to the

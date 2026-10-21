@@ -30,6 +30,7 @@ import { WA, type WebAccessBridge, type WebAccessView } from './web.ts'
 import { TM, type TimersBridge, type TimersView } from './timers.ts'
 import { TG, type TelegramBridge, type TelegramView } from './telegram.ts'
 import { SK, type SkillEntry, type SkillsMdBridge } from './skillmd.ts'
+import { SPK, type SpeakerBridge, type SpeakerView } from './speaker.ts'
 
 /** How a bridge reaches main: a call with an answer, a one-way message, and events. */
 export interface Transport {
@@ -43,7 +44,7 @@ export const buildBridges = (t: Transport) => {
   const bridge: AssistantBridge = {
     status: () => t.invoke(CH.status),
     send: text => t.invoke(CH.send, text),
-    sendVoice: (audio, mime) => t.invoke(CH.sendVoice, audio, mime),
+    sendVoice: (audio, mime, pcm) => t.invoke(CH.sendVoice, audio, mime, pcm),
     setSpeech: enabled => t.invoke(CH.setSpeech, enabled),
     stop: () => t.invoke(CH.stop),
     interrupt: () => t.invoke(CH.interrupt),
@@ -389,6 +390,17 @@ export const buildBridges = (t: Transport) => {
     onChanged: cb => t.on<SkillEntry[]>(SK.changed, cb),
   }
 
+  /** Settings › Voice ID: the model, enrolment, a check, and forgetting. */
+  const speaker: SpeakerBridge = {
+    state: () => t.invoke(SPK.state),
+    download: () => t.invoke(SPK.download),
+    enrol: (name, owner, phrases) => t.invoke(SPK.enrol, name, { owner, phrases }),
+    identify: samples => t.invoke(SPK.identify, samples),
+    forget: name => t.invoke(SPK.forget, name),
+    setOptions: o => t.invoke(SPK.setOptions, o),
+    onChanged: cb => t.on<SpeakerView>(SPK.changed, cb),
+  }
+
   return {
     assistant: bridge,
     controls,
@@ -416,6 +428,7 @@ export const buildBridges = (t: Transport) => {
     timers,
     telegram,
     skillsMd,
+    speaker,
     /** The shortcut board: which global shortcuts Windows gave Atlas. */
     shortcuts: { list: (): Promise<ShortcutsView> => t.invoke(SCT.list) },
   }

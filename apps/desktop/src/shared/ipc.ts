@@ -4,6 +4,7 @@
  * whether each one is present.
  */
 
+import type { SpeakerResult } from './speaker.ts'
 import { isLlmProvider, type LlmProviderId } from '@assistant/providers/llm-presets'
 import type { PcNotification } from './notifications.ts'
 import type { HabitsForAtlas } from './habits.ts'
@@ -282,7 +283,8 @@ export interface AssistantBridge {
   status(): Promise<RuntimeStatus>
   send(text: string): Promise<{ replyId: string }>
   /** A recorded utterance (webm/opus); the reply arrives like a typed one, after a 'heard' event. */
-  sendVoice(audio: Uint8Array, mime: string): Promise<{ replyId: string }>
+  /** pcm: the same speech as 16 kHz mono samples (bytes), for Voice ID; optional. */
+  sendVoice(audio: Uint8Array, mime: string, pcm?: Uint8Array): Promise<{ replyId: string }>
   setSpeech(enabled: boolean): Promise<void>
   stop(): Promise<void>
   /**
@@ -401,7 +403,7 @@ export const parseSetup = (v: unknown): SetupInput | null => {
 export type HostRequest =
   | { type: 'init'; env: Record<string, string>; cwd: string; away?: 'lock' | 'suspend' | 'idle' | undefined }
   | { type: 'send'; replyId: string; text: string }
-  | { type: 'voice'; replyId: string; audio: Uint8Array; mime: string }
+  | { type: 'voice'; replyId: string; audio: Uint8Array; mime: string; speaker?: SpeakerResult | undefined }
   | { type: 'set-speech'; enabled: boolean }
   | { type: 'stop' }
   /** Barge-in: like stop, for a reply the owner talked over. */

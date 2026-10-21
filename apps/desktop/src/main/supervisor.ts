@@ -8,6 +8,7 @@ import type { PcNotification } from '../shared/notifications.ts'
 import type { HabitsForAtlas } from '../shared/habits.ts'
 
 import type { LlmProviderId } from '@assistant/providers/llm-presets'
+import type { SpeakerResult } from '../shared/speaker.ts'
 import { fork, type ChildProcess } from 'node:child_process'
 
 import type {
@@ -143,10 +144,10 @@ export class RuntimeSupervisor {
     return replyId
   }
 
-  sendVoice(audio: Uint8Array, mime: string): string {
+  sendVoice(audio: Uint8Array, mime: string, speaker?: SpeakerResult): string {
     const replyId = randomUUID()
     this.activeReply = replyId
-    this.post({ type: 'voice', replyId, audio, mime })
+    this.post({ type: 'voice', replyId, audio, mime, speaker })
     return replyId
   }
 

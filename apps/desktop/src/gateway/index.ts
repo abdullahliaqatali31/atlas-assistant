@@ -62,6 +62,8 @@ import { TimerService } from '../main/timers.ts'
 import { TelegramChannel } from '../main/telegram.ts'
 import { SkillLibrary } from '../main/skill-library.ts'
 import { SK } from '../shared/skillmd.ts'
+import { SpeakerService, speakerDir } from '../main/speaker.ts'
+import { bytesToSamples, type SpeakerResult } from '../shared/speaker.ts'
 
 const isDev = !app.isPackaged
 /** Development: the page comes from the Vite dev server, and the repo root's .env feeds setup (like `pnpm chat`). */
@@ -530,6 +532,17 @@ const timers = new TimerService({
 })
 timers.register()
 
+/** Voice ID: who is speaking, from voice prints made and kept (encrypted) on this PC. */
+const speaker = new SpeakerService({
+  dir: speakerDir(userData),
+  secrets: osCredentialStore(),
+  handle,
+  toRenderer,
+  requireOwner: () => requireOwner(),
+  log: (level, message) => log(level, message),
+})
+speaker.register()
+
 /** Settings › Skills: the SKILL.md library (Atlas uses the same folder). */
 const skillLibrary = () => new SkillLibrary(join(runtimeEnv(devEnvFile).ASSISTANT_DATA_DIR!, 'skills'))
 handle(SK.list, () => skillLibrary().list())
@@ -598,13 +611,22 @@ handle(CH.send, arg => {
   requireOwner()
   return { replyId: supervisor.send(text) }
 })
-handle(CH.sendVoice, (audio, mime) => {
+handle(CH.sendVoice, (audio, mime, pcm) => {
   const voice = parseVoice(audio, mime)
   if (!voice) throw new Error('Recording must be audio under 5 MB.')
   if (status.phase !== 'ready') throw new Error('The assistant is not ready yet.')
   if (!status.speech.available) throw new Error('No voice provider is configured; type instead.')
   requireOwner()
-  return { replyId: supervisor.sendVoice(voice.audio, voice.mime) }
+  // Voice ID: who said it (a hint for Atlas, never a lock).
+  let who: SpeakerResult | undefined
+  if (speaker.enabled && pcm instanceof Uint8Array && pcm.byteLength <= 16_000 * 4 * 60) {
+    try {
+      who = speaker.identify(bytesToSamples(pcm))
+    } catch (e) {
+      log('warn', `Voice ID: ${(e as Error).message}`)
+    }
+  }
+  return { replyId: supervisor.sendVoice(voice.audio, voice.mime, who) }
 })
 handle(CH.setSpeech, enabled => {
   if (typeof enabled !== 'boolean') throw new Error('Expected true or false.')

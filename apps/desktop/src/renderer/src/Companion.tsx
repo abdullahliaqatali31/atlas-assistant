@@ -8,7 +8,9 @@ import { record, SentencePlayer, watchForSpeech, type Recording } from './audio.
 import { wakeRequest, type WakeView } from '../../shared/wake.ts'
 import { InitiativeControls, LaterList } from './Initiative.tsx'
 import { VoiceMode, type VoicePhase } from './VoiceMode.tsx'
-import { chime, toWav, WakeListener } from './wake/listener.ts'
+import { chime, toWav, WakeListener, type WakeTrigger } from './wake/listener.ts'
+import { pcmFor, speakerView, voiceIdOn } from './voice/voiceId.ts'
+import { samplesToBytes } from '../../shared/speaker.ts'
 import type { Presence } from './Jarvis.tsx'
 import type { PresenceCommand } from '../../shared/presence.ts'
 import { ChatList } from './ChatList.tsx'
@@ -321,7 +323,8 @@ export function Companion({
           }
           setTranscribing(true)
           try {
-            begin((await window.assistant.sendVoice(result.audio, result.mime)).replyId, '🎤 …')
+            // Voice ID: the same speech as 16 kHz samples, so Atlas knows who spoke.
+            begin((await window.assistant.sendVoice(result.audio, result.mime, await pcmFor(result.audio))).replyId, '🎤 …')
           } catch (err) {
             setTranscribing(false)
             setError(cleanError(err, 'Sending your voice failed.'))
@@ -480,24 +483,37 @@ export function Companion({
       },
       onError: m => setWakeError(`Wake word paused: ${m}`),
       onWake: trigger => {
-        chime()
-        if (!conversationRef.current) convStartRef.current = linesRef.current.length
-        conversationRef.current = true
-        setConversation(true)
-        if (trigger.kind !== 'name') return void startListeningRef.current()
-        const { match, audio } = trigger
-        // A request said in the same breath ("Atlas, open my email") goes with the burst. The name
-        // alone, a repeated name or a stray word or two (often the model mishearing the name) means
-        // "listen for it now".
-        const w = wakeViewRef.current
-        if (wakeRequest(match, w?.aliases ?? [], w?.sensitivity ?? 'normal')) {
-          setError('')
-          void window.assistant
-            .sendVoice(toWav(audio), 'audio/wav')
-            .then(r => begin(r.replyId, '🎤 …'), err => setError(cleanError(err, 'Sending your voice failed.')))
-        } else void startListeningRef.current()
+        if (trigger.kind !== 'name') return wake(null)
+        // Only the owner's voice wakes Atlas, when they chose that: a clear other voice (a TV, a visitor) is ignored.
+        if (speakerView()?.wakeOnlyOwner && voiceIdOn()) {
+          void window.speaker.identify(samplesToBytes(trigger.audio)).then(
+            r => (r.verdict === 'guest' || r.verdict === 'known' ? undefined : wake(trigger)),
+            () => wake(trigger),
+          )
+          return
+        }
+        wake(trigger)
       },
     })
+    /** The wake word or a clap was heard (and passed Voice ID when that is on). */
+    function wake(trigger: Extract<WakeTrigger, { kind: 'name' }> | null) {
+      chime()
+      if (!conversationRef.current) convStartRef.current = linesRef.current.length
+      conversationRef.current = true
+      setConversation(true)
+      if (!trigger) return void startListeningRef.current()
+      const { match, audio } = trigger
+      // A request said in the same breath ("Atlas, open my email") goes with the burst. The name
+      // alone, a repeated name or a stray word or two (often the model mishearing the name) means
+      // "listen for it now".
+      const w = wakeViewRef.current
+      if (wakeRequest(match, w?.aliases ?? [], w?.sensitivity ?? 'normal')) {
+        setError('')
+        void window.assistant
+          .sendVoice(toWav(audio), 'audio/wav', voiceIdOn() ? samplesToBytes(audio) : undefined)
+          .then(r => begin(r.replyId, '🎤 …'), err => setError(cleanError(err, 'Sending your voice failed.')))
+      } else void startListeningRef.current()
+    }
     wakeRef.current = l
     setWakeError('')
     l.start().catch(err => setWakeError(`Wake word unavailable: ${cleanError(err, 'microphone or model error')}`))
