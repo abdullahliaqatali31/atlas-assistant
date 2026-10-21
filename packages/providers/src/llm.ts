@@ -12,6 +12,8 @@ export type ContentPart =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError?: boolean }
+  /** A picture in an owner turn (a screenshot to look at), base64. Vision-capable models only. */
+  | { type: 'image'; mediaType: 'image/png' | 'image/jpeg'; data: string }
 
 export interface ChatTurn {
   role: 'user' | 'assistant'

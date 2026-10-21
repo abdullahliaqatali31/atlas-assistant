@@ -52,6 +52,7 @@ import { HostNews, NEWS_RULES } from './news.ts'
 import { HostNotifications, NOTIFICATION_RULES } from './notifications.ts'
 import { HABITS_RULES, HostHabits } from './habits.ts'
 import { suggestReplies } from './suggest.ts'
+import { VISION_RULES, visionTool } from './vision.ts'
 import { HostControls } from './controls.ts'
 import { InitiativeService, parseQuietHours } from './initiative.ts'
 import { once, runPersonalityOp, sttPin } from './personality.ts'
@@ -131,7 +132,7 @@ const controls = new HostControls({
   log: (level, message) => log(level, message),
   now: () => systemClock.now(),
   extensionToken: () => store.get('PLAYWRIGHT_MCP_EXTENSION_TOKEN'),
-  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...SYSTEM_RULES, ...IMPROVEMENT_RULES, ...WORLD_RULES, ...NOTIFICATION_RULES, ...HABITS_RULES, ...CONVERSATION_RULES],
+  extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...SYSTEM_RULES, ...IMPROVEMENT_RULES, ...WORLD_RULES, ...NOTIFICATION_RULES, ...VISION_RULES, ...HABITS_RULES, ...CONVERSATION_RULES],
 })
 let voice: VoiceProvider | null = null
 let speechEnabled = true
@@ -154,6 +155,8 @@ let world: WorldWatch | null = null
 let finder: DailyFinder | null = null
 /** The cheap model that offers quick replies after each answer; set once the assistant is ready. */
 let suggester: LlmProvider | null = null
+/** The chat model for screen_look, made on first use. */
+let vision: LlmProvider | null = null
 /** What the owner said last (typed or heard), for the quick replies. */
 let lastOwnerText = ''
 
@@ -318,7 +321,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   // Answers to its own questions (project status, learning suggestions) go through these.
   // The model chip's pick may have arrived before the assistant existed.
   applyChatModel()
-  void controls.attach(assistant, [...localTools(memory, systemClock), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...system.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now()), notifications.tool(), habits.tool(), findTool()], config.mcpConfigPath)
+  void controls.attach(assistant, [...localTools(memory, systemClock), ...conversationTools(memory, { requestNew: () => assistant?.requestNewConversation(), currentId: () => assistant?.conversationId ?? '' }), ...learningTools(learning.learner), ...skillTools(memory, systemClock, config.owner.utcOffsetMin), ...code.tools(), ...files.tools(), ...desktop.tools(), ...ui.tools(), ...system.tools(), ...improvements.tools(), ...watch.tools(), news.tool(() => systemClock.now()), notifications.tool(), visionTool({ llm: () => (vision ??= meterLlm(createLlm(config.llm), { purpose: 'chat', memory: memory!, clock: systemClock, utcOffsetMin: config.owner.utcOffsetMin, onRecord: () => schedulePush() })) }), habits.tool(), findTool()], config.mcpConfigPath)
   const agendaMemory = memory
   const wrapUpMinute = parseClock(merged.ASSISTANT_WRAP_UP) ?? 18 * 60
   initiative = new InitiativeService(

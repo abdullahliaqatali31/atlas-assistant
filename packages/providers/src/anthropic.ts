@@ -159,6 +159,8 @@ export const toMessage = (turn: ChatTurn): BetaMessageParam => {
         return { type: 'tool_use', id: part.id, name: part.name, input: part.input }
       case 'tool_result':
         return { type: 'tool_result', tool_use_id: part.toolUseId, content: part.content, is_error: part.isError ?? false }
+      case 'image':
+        return { type: 'image', source: { type: 'base64', media_type: part.mediaType, data: part.data } }
     }
   })
   return { role: turn.role, content }

@@ -105,7 +105,8 @@ const turnChars = (t: ChatTurn, only?: 'tool_result' | 'other') => {
     const isResult = part.type === 'tool_result'
     if (only === 'tool_result' && !isResult) continue
     if (only === 'other' && isResult) continue
-    n += part.type === 'text' ? part.text.length : part.type === 'tool_result' ? part.content.length : JSON.stringify(part.input).length + part.name.length
+    // A picture costs about as much as 1,500 tokens of text (~6,000 characters).
+    n += part.type === 'text' ? part.text.length : part.type === 'tool_result' ? part.content.length : part.type === 'image' ? 6_000 : JSON.stringify(part.input).length + part.name.length
   }
   return n
 }

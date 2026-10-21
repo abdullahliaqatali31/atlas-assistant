@@ -23,7 +23,8 @@ export interface OpenAICompatibleOptions {
 }
 
 type OaiMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string | ({ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } })[] }
   | { role: 'assistant'; content: string | null; tool_calls?: OaiToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: string }
 
@@ -58,7 +59,9 @@ export const toMessages = (system: string | readonly string[], turns: readonly C
     }
     for (const p of t.content) if (p.type === 'tool_result') out.push({ role: 'tool', tool_call_id: p.toolUseId, content: p.isError ? `Error: ${p.content}` : p.content })
     const rest = text(t.content)
-    if (rest) out.push({ role: 'user', content: rest })
+    const images = t.content.filter((p): p is Extract<ContentPart, { type: 'image' }> => p.type === 'image')
+    if (images.length) out.push({ role: 'user', content: [...images.map(i => ({ type: 'image_url' as const, image_url: { url: `data:${i.mediaType};base64,${i.data}` } })), ...(rest ? [{ type: 'text' as const, text: rest }] : [])] })
+    else if (rest) out.push({ role: 'user', content: rest })
   }
   return out
 }
