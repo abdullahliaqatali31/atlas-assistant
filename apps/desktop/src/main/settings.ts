@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { isLlmProvider, type LlmProviderId } from '@assistant/providers/llm-presets'
-import { app } from 'electron'
+import { app } from './host/index.ts'
 
 import { VOICE_PROVIDERS, type SetupInput, type SetupSummary, type VoiceProviderChoice } from '../shared/ipc.ts'
 import { DEFAULT_LIVE_VOICE, parseLiveVoice, type LiveVoiceSettings } from '../shared/livevoice.ts'

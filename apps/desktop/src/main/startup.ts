@@ -11,7 +11,7 @@
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { app } from 'electron'
+import { app } from './host/index.ts'
 
 import { CH, type StartupView } from '../shared/ipc.ts'
 
@@ -39,7 +39,7 @@ const register = (on: boolean, show: boolean) => {
 /** The installed app's first run: start with Windows, window open. Later runs leave the owner's choice alone. */
 export const ensureStartupDefault = () => {
   if (!app.isPackaged) return
-  const marker = join(app.getPath('userData'), 'startup-chosen')
+  const marker = join(app.getPath('userData'), 'startup-chosen-gateway')
   if (existsSync(marker)) return
   register(true, true)
   try {

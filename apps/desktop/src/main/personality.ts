@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 
-import { app, dialog, type BrowserWindow } from 'electron'
+import { app, dialog } from './host/index.ts'
 
 import { parseVoice } from '../shared/ipc.ts'
 import {
@@ -28,7 +28,7 @@ export interface PersonalityIpcDeps {
   isReady: () => boolean
   speechAvailable: () => boolean
   toRenderer: (channel: string, payload: unknown) => void
-  window: () => BrowserWindow | null
+  window: () => unknown
   /** Every profile seen (the assistant's name lives in it). */
   onView?: (view: PersonalityView) => void
 }

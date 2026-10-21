@@ -1,14 +1,14 @@
 /**
- * Settings › Security › Web access: the browser interface on or off, the home
- * network, pairing codes and the browsers that are paired. In a browser the
- * card shows only "forget this browser".
+ * Settings › Security › Web access: where Atlas can be opened (this PC, and
+ * the home network if allowed), codes to pair another browser, the browsers
+ * that are paired, and forgetting this one.
  */
 import { Copy, ExternalLink, Globe, LogOut, Trash2, Wifi } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { WebAccessView } from '../../../shared/web.ts'
 import { nameOf } from '../ui/assistantName.ts'
-import { isWeb, unpair } from './transport.ts'
+import { unpair } from './transport.ts'
 
 const clean = (err: unknown) => (err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Something went wrong.')
 
@@ -33,20 +33,6 @@ function Shell({ children, note }: { children: React.ReactNode; note?: string })
 }
 
 export function WebAccessCard() {
-  if (isWeb) {
-    return (
-      <Shell note="You are here">
-        <p className="text-xs text-muted">This browser is paired with {nameOf()} on your PC. Everything you see comes from there, live.</p>
-        <button type="button" className="btn text-danger" onClick={() => void unpair()}>
-          <LogOut className="size-3.5" aria-hidden /> Forget this browser
-        </button>
-      </Shell>
-    )
-  }
-  return <DesktopCard />
-}
-
-function DesktopCard() {
   const [view, setView] = useState<WebAccessView | null>(null)
   const [error, setError] = useState('')
   const [now, setNow] = useState(Date.now())
@@ -79,18 +65,11 @@ function DesktopCard() {
   return (
     <Shell note={online ? `${online} browser${online > 1 ? 's' : ''} connected` : undefined}>
       <p className="text-xs text-muted">
-        Use {nameOf()} in a browser: the brain, maps, news, profiles, chat and voice, live from this PC. Everything still runs here, so the PC must be on. Each browser
-        connects once with a code.
+        {nameOf()} runs on this PC and shows itself in your browser. Each browser connects once (with a code, or the tray icon's own link) and can be removed here. The PC must be on for any of them to work.
       </p>
 
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={view.enabled} onChange={e => void run(() => window.webAccess.set({ enabled: e.target.checked }))} />
-        Web interface on
-        {view.enabled && !view.running && <span className="text-xs text-danger">not running</span>}
-      </label>
-
-      <label className={`flex items-start gap-2 rounded-xl border border-border p-2.5 text-sm ${view.enabled ? '' : 'opacity-60'}`}>
-        <input type="checkbox" className="mt-0.5" disabled={!view.enabled} checked={view.lan} onChange={e => void run(() => window.webAccess.set({ lan: e.target.checked }))} />
+      <label className="flex items-start gap-2 rounded-xl border border-border p-2.5 text-sm">
+        <input type="checkbox" className="mt-0.5" checked={view.lan} onChange={e => void run(() => window.webAccess.set({ lan: e.target.checked }))} />
         <span>
           <span className="flex items-center gap-1.5 font-medium">
             <Wifi className="size-4 text-accent" aria-hidden /> Also from my home network
@@ -113,11 +92,14 @@ function DesktopCard() {
             </div>
           ))}
           <div className="flex flex-wrap gap-2 pt-1">
-            <button type="button" className="btn btn-primary" onClick={() => void run(() => window.webAccess.open())}>
-              <ExternalLink className="size-3.5" aria-hidden /> Open in browser
-            </button>
-            <button type="button" className="btn" onClick={() => void run(() => window.webAccess.newCode())}>
+            <button type="button" className="btn btn-primary" onClick={() => void run(() => window.webAccess.newCode())}>
               New code
+            </button>
+            <button type="button" className="btn" onClick={() => void run(() => window.webAccess.open())}>
+              <ExternalLink className="size-3.5" aria-hidden /> Open in the default browser
+            </button>
+            <button type="button" className="btn text-danger" onClick={() => void unpair()}>
+              <LogOut className="size-3.5" aria-hidden /> Forget this browser
             </button>
           </div>
         </div>

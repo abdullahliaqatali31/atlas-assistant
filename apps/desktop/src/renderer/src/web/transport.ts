@@ -5,7 +5,6 @@
  * connection drops, the page reconnects and reloads, so nothing stays stale.
  */
 import { buildBridges, type Transport } from '../../../shared/bridges.ts'
-import { BC } from '../../../shared/backup.ts'
 import { WEB_BLOCKED } from '../../../shared/web.ts'
 import { decodeWire, encodeWire, schemeToWeb, type ClientMessage, type ServerMessage } from '../../../shared/wire.ts'
 
@@ -93,10 +92,8 @@ class SocketTransport implements Transport {
   }
 
   invoke(channel: string, ...args: unknown[]): Promise<unknown> {
-    // The window's own reports mean nothing from a browser: answered here, quietly.
-    if (WEB_BLOCKED.has(channel)) {
-      return channel === BC.create || channel === BC.restore ? Promise.reject(new Error('Backups are made in the desktop app on the PC.')) : Promise.resolve(undefined)
-    }
+    // Left-overs of the desktop window: answered here, quietly.
+    if (WEB_BLOCKED.has(channel)) return Promise.resolve(undefined)
     const id = this.nextId++
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
@@ -104,8 +101,8 @@ class SocketTransport implements Transport {
     })
   }
 
-  send() {
-    // One-way messages are only the window's reports (page state, map results): not from a browser.
+  send(channel: string, payload: unknown) {
+    if (!WEB_BLOCKED.has(channel)) this.post({ t: 'send', ch: channel, payload })
   }
 
   on<T>(channel: string, cb: (v: T) => void) {

@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
 
-import { app as electronApp } from 'electron'
+import { app as electronApp } from '../host/index.ts'
 
 import {
   appMatchesExe,

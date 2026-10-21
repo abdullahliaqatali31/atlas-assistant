@@ -39,7 +39,7 @@ export function PairScreen() {
           <li className="flex gap-2">
             <MonitorSmartphone className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
             <span>
-              On the PC, open the app › <b className="text-text">Settings</b> › <b className="text-text">Security &amp; Backups</b> › <b className="text-text">Web access</b> and press <b className="text-text">New code</b>.
+              On the PC, click the assistant&apos;s <b className="text-text">tray icon</b>: it opens here already connected. Or, in a browser that is connected, open <b className="text-text">Settings</b> › <b className="text-text">Security &amp; Backups</b> › <b className="text-text">Web access</b> and press <b className="text-text">New code</b>.
             </span>
           </li>
           <li className="flex gap-2">

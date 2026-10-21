@@ -391,6 +391,22 @@ export function App() {
   const inPanes = layout.main === "browser" || layout.side === "browser";
   const browserMode: BrowserMode =
     browserFloat === "full" ? "full" : inPanes ? "pane" : browserFloat;
+  // Its size, whether it is in front and whether its tab is showing too (re-told when they change).
+  const [screenTick, setScreenTick] = useState(0);
+  useEffect(() => {
+    let t = 0;
+    const bump = () => {
+      window.clearTimeout(t);
+      t = window.setTimeout(() => setScreenTick((n) => n + 1), 300);
+    };
+    for (const e of ["resize", "focus", "blur"]) window.addEventListener(e, bump);
+    document.addEventListener("visibilitychange", bump);
+    return () => {
+      window.clearTimeout(t);
+      for (const e of ["resize", "focus", "blur"]) window.removeEventListener(e, bump);
+      document.removeEventListener("visibilitychange", bump);
+    };
+  }, []);
   useEffect(() => {
     const view: View = drawer && drawer !== "chat" ? drawer : stage;
     window.ui.report({
@@ -400,8 +416,12 @@ export function App() {
       map3d,
       side: layout.side,
       browser: browserMode,
+      width: window.innerWidth,
+      height: window.innerHeight,
+      focused: document.hasFocus(),
+      visible: document.visibilityState === "visible",
     });
-  }, [stage, drawer, compact, map3d, layout.side, browserMode]);
+  }, [stage, drawer, compact, map3d, layout.side, browserMode, screenTick]);
 
   // Which World map is in front, 2D or 3D, so Atlas works on the one the owner sees.
   useEffect(() => {

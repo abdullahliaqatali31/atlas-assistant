@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-import { app, net, protocol } from 'electron'
+import { app, net } from './host/index.ts'
 
 import { NC, NEWS_SCHEME, type Category, type Headline, type NewsResult, type NewsSource, type SavedHeadline } from '../shared/news.ts'
 
@@ -118,7 +118,6 @@ export const parseFeed = (xml: string, feed: Pick<Feed, 'source' | 'category'>, 
 }
 
 /** Must run before app 'ready', next to the model scheme. */
-export const newsSchemePrivileges = { scheme: NEWS_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }
 
 const readJson = <T>(path: string, fallback: T): T => {
   try {
@@ -230,33 +229,30 @@ export class NewsService {
     return this.saved()
   }
 
-  /** Serves pictures for addresses that came from the feeds; disk cache first. */
-  registerProtocol() {
-    protocol.handle(NEWS_SCHEME, async req => {
-      const url = new URL(req.url)
-      const key = url.pathname.replace(/^\/+/, '')
-      if (url.hostname !== 'img' || !/^[0-9a-f]{16}$/.test(key)) return new Response('Not found', { status: 404 })
-      const file = join(this.imageDir, key)
-      if (existsSync(file) && existsSync(`${file}.type`)) {
-        return new Response(readFileSync(file), { headers: { 'content-type': readFileSync(`${file}.type`, 'utf8'), 'cache-control': 'max-age=86400' } })
-      }
-      const remote = this.images.get(key)
-      if (!remote) return new Response('Not found', { status: 404 })
-      try {
-        const res = await net.fetch(remote, { signal: AbortSignal.timeout(10_000) })
-        const type = res.headers.get('content-type') ?? ''
-        if (!res.ok || !type.startsWith('image/')) return new Response('Not an image', { status: 415 })
-        const body = Buffer.from(await res.arrayBuffer())
-        if (body.length > MAX_IMAGE_BYTES) return new Response('Too large', { status: 413 })
-        mkdirSync(this.imageDir, { recursive: true })
-        writeFileSync(file, body)
-        writeFileSync(`${file}.type`, type)
-        this.pruneImages()
-        return new Response(body, { headers: { 'content-type': type, 'cache-control': 'max-age=86400' } })
-      } catch {
-        return new Response('Unavailable', { status: 502 })
-      }
-    })
+  /** Serves pictures for addresses that came from the feeds (assistant-news://img/<key>); disk cache first. */
+  async serve(url: URL): Promise<Response> {
+    const key = url.pathname.replace(/^\/+/, '')
+    if (url.hostname !== 'img' || !/^[0-9a-f]{16}$/.test(key)) return new Response('Not found', { status: 404 })
+    const file = join(this.imageDir, key)
+    if (existsSync(file) && existsSync(`${file}.type`)) {
+      return new Response(readFileSync(file), { headers: { 'content-type': readFileSync(`${file}.type`, 'utf8'), 'cache-control': 'max-age=86400' } })
+    }
+    const remote = this.images.get(key)
+    if (!remote) return new Response('Not found', { status: 404 })
+    try {
+      const res = await net.fetch(remote, { signal: AbortSignal.timeout(10_000) })
+      const type = res.headers.get('content-type') ?? ''
+      if (!res.ok || !type.startsWith('image/')) return new Response('Not an image', { status: 415 })
+      const body = Buffer.from(await res.arrayBuffer())
+      if (body.length > MAX_IMAGE_BYTES) return new Response('Too large', { status: 413 })
+      mkdirSync(this.imageDir, { recursive: true })
+      writeFileSync(file, body)
+      writeFileSync(`${file}.type`, type)
+      this.pruneImages()
+      return new Response(body, { headers: { 'content-type': type, 'cache-control': 'max-age=86400' } })
+    } catch {
+      return new Response('Unavailable', { status: 502 })
+    }
   }
 
   private pruneImages() {

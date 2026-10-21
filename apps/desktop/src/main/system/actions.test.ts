@@ -9,7 +9,7 @@ import type { MapEntry } from '../../shared/sysmap.ts'
 // Not under AppData (Atlas refuses to write there, as tested below): a folder beside the repo's files, removed after.
 const dir = mkdtempSync(join(process.cwd(), '.atlas-make-'))
 const opened: string[] = []
-vi.mock('electron', () => ({
+vi.mock('../host/index.ts', () => ({
   app: { getPath: (k: string) => join(dir, k) },
   shell: { openPath: async (p: string) => (opened.push(p), ''), openExternal: async (u: string) => void opened.push(u), showItemInFolder: (p: string) => void opened.push(p) },
 }))

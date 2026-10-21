@@ -62,7 +62,13 @@ import { brainView } from './brain.ts'
 import { DailyFinder } from './discover.ts'
 import { startWindowSampler } from './window-sampler.ts'
 
-const port = process.parentPort
+/** The line to the main process: Node's IPC channel (forked with structured messages). */
+const port = {
+  postMessage: (m: unknown) => void (process.connected && process.send?.(m)),
+  on: (_event: 'message', fn: (e: { data: HostRequest }) => void) => process.on('message', (data: HostRequest) => fn({ data })),
+}
+// The gateway is gone (it crashed or was killed): nobody can use this process any more.
+process.on('disconnect', () => process.exit(0))
 const store = osCredentialStore()
 
 // Every line that leaves this process is scrubbed of key values.

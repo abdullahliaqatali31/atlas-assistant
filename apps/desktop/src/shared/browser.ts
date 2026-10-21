@@ -169,6 +169,9 @@ export type TabAction =
   | { kind: 'group'; ids: string[]; group: string | null; name?: string | undefined }
   | { kind: 'group-rename'; group: string; name: string }
   | { kind: 'group-collapse'; group: string; collapsed: boolean }
+  /** The toolbar: an address for the tab shown, and back, forward, reload. */
+  | { kind: 'go'; url: string }
+  | { kind: 'nav'; dir: 'back' | 'forward' | 'reload' }
 
 /** Atlas's tab requests: tabs by their number in the list (1 is the first), groups by name. */
 export type TabsOp =
@@ -209,6 +212,10 @@ export const parseTabAction = (v: unknown): TabAction | null => {
       return id(o.group) && typeof o.name === 'string' && o.name.trim() ? { kind: 'group-rename', group: id(o.group)!, name: o.name.trim().slice(0, 40) } : null
     case 'group-collapse':
       return id(o.group) ? { kind: 'group-collapse', group: id(o.group)!, collapsed: o.collapsed === true } : null
+    case 'go':
+      return typeof o.url === 'string' && toUrl(o.url.slice(0, 2000)) ? { kind: 'go', url: toUrl(o.url.slice(0, 2000))! } : null
+    case 'nav':
+      return o.dir === 'back' || o.dir === 'forward' || o.dir === 'reload' ? { kind: 'nav', dir: o.dir } : null
   }
   return null
 }
@@ -253,6 +260,8 @@ export interface TabPicture {
   url: string
   width: number
   height: number
+  /** The page in it: address, title, still loading, and whether back or forward lead anywhere. */
+  page?: { url: string; title: string; loading: boolean; back: boolean; forward: boolean }
 }
 
 /** The owner's hands on a tab from a browser: positions are 0..1 of the picture. */

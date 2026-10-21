@@ -1,8 +1,4 @@
 import { Feather, MonitorUp, Palette } from 'lucide-react'
-import { useEffect, useState } from 'react'
-
-import type { WidgetWhen } from '../../shared/presence.ts'
-
 import { ACCENTS, THEME_LABEL, THEMES, useAppearance, type Accent, type LiteChoice, type ThemeName } from './theme.ts'
 import { nameOf } from './ui/assistantName.ts'
 import { SoundSettings } from './voice/SoundSettings.tsx'
@@ -18,16 +14,6 @@ const PREVIEW: Record<Exclude<ThemeName, 'system'>, { bg: string; card: string; 
 /** Settings › Appearance: theme, accent and Lite mode, applied instantly and remembered on this computer. */
 export function AppearanceSettings() {
   const [a, set] = useAppearance()
-  const [widget, setWidget] = useState<WidgetWhen | null>(null)
-  const [widgetError, setWidgetError] = useState('')
-  useEffect(() => {
-    void window.presenceHost.when().then(setWidget, () => undefined)
-  }, [])
-  const chooseWidget = (w: WidgetWhen) =>
-    void window.presenceHost.setWhen(w).then(
-      v => (setWidget(v), setWidgetError('')),
-      e => setWidgetError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Could not change it.'),
-    )
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-3">
       <section className="space-y-3">
@@ -101,15 +87,9 @@ export function AppearanceSettings() {
         <h3 className="flex items-center gap-2 text-sm font-medium">
           <MonitorUp className="size-4 text-accent" aria-hidden /> {nameOf()} on the desktop
         </h3>
-        <p className="text-xs text-muted">A small widget that floats over your other apps: a quiet orb when idle, a pill with Stop while Atlas listens or speaks, and a card when it speaks up or needs your yes. Drag it anywhere; right-click it for size and options.</p>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Desktop widget">
-          {(['background', 'always', 'off'] as WidgetWhen[]).map(w => (
-            <button key={w} type="button" role="radio" aria-checked={widget === w} disabled={widget === null} onClick={() => chooseWidget(w)} className={`btn ${widget === w ? 'border-accent text-accent' : ''}`}>
-              {w === 'background' ? `When ${nameOf()} is minimised or closed` : w === 'always' ? `Whenever ${nameOf()} is not in front` : 'Never'}
-            </button>
-          ))}
-        </div>
-        {widgetError && <p className="text-xs text-danger">{widgetError}</p>}
+        <p className="text-xs text-muted">
+          {nameOf()} keeps a small icon in the Windows tray: click it to open {nameOf()} here, right-click it for modes, pausing and quitting. Its notices (reminders, approvals) come from there while no page is open, and Ctrl+Alt+Space talks from anywhere (Ctrl+Alt+/ shows every shortcut).
+        </p>
       </section>
     </div>
   )

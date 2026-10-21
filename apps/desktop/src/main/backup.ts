@@ -8,7 +8,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, dialog } from './host/index.ts'
 
 import { BACKUP_EXT, MIN_PASSPHRASE, openBackup, sealBackup, type BackupEntry } from './backup-format.ts'
 import { BC } from '../shared/backup.ts'
@@ -40,13 +40,12 @@ export const registerBackupIpc = (deps: BackupDeps) => {
   deps.handle(BC.create, async raw => {
     deps.requireOwner()
     const passphrase = passphraseOf(raw)
-    const win = BrowserWindow.getFocusedWindow()
     const opts = {
       title: 'Save encrypted backup',
       defaultPath: join(app.getPath('documents'), `assistant-backup-${new Date().toISOString().slice(0, 10)}.${BACKUP_EXT}`),
       filters: [{ name: 'Assistant backup', extensions: [BACKUP_EXT] }],
     }
-    const picked = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+    const picked = await dialog.showSaveDialog(opts)
     if (picked.canceled || !picked.filePath) return null
 
     mkdirSync(scratch, { recursive: true })
@@ -70,9 +69,8 @@ export const registerBackupIpc = (deps: BackupDeps) => {
   deps.handle(BC.restore, async raw => {
     deps.requireOwner()
     const passphrase = passphraseOf(raw)
-    const win = BrowserWindow.getFocusedWindow()
     const opts = { title: 'Restore from backup', properties: ['openFile' as const], filters: [{ name: 'Assistant backup', extensions: [BACKUP_EXT] }] }
-    const picked = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    const picked = await dialog.showOpenDialog(opts)
     if (picked.canceled || !picked.filePaths[0]) return null
 
     // Wrong passphrase or a damaged file fails here, before anything is touched.

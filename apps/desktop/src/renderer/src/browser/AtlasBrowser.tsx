@@ -118,7 +118,7 @@ const KEYS: Record<string, Extract<RemoteInput, { kind: 'key' }>['key']> = {
  * picture of the tab (a few times a second while it changes) and sends
  * clicks, scrolling and typing back to it.
  */
-function RemotePage({ tabId }: { tabId: string }) {
+function RemotePage({ tabId, onPage }: { tabId: string; onPage: (p: NonNullable<TabPicture['page']>) => void }) {
   const [pic, setPic] = useState<TabPicture | null | undefined>(undefined)
   const box = useRef<HTMLDivElement | null>(null)
   const soon = useRef<() => void>(() => undefined)
@@ -132,7 +132,9 @@ function RemotePage({ tabId }: { tabId: string }) {
         const width = Math.round((box.current?.clientWidth ?? 1024) * Math.min(2, devicePixelRatio))
         const p = await window.atlasTabs.picture(tabId, width).catch(() => null)
         if (!alive) return
-        setPic(p)
+        // While a page loads a picture can miss: keep the last one rather than flash a message.
+        setPic(prev => p ?? prev ?? null)
+        if (p?.page) onPage(p.page)
       }
       timer = window.setTimeout(() => void grab(), 900)
     }
@@ -146,6 +148,7 @@ function RemotePage({ tabId }: { tabId: string }) {
       alive = false
       window.clearTimeout(timer)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onPage only reports; a new one each render must not restart the loop
   }, [tabId])
 
   const send = (input: RemoteInput) => {
@@ -163,11 +166,11 @@ function RemotePage({ tabId }: { tabId: string }) {
     return { x: clamp((e.clientX - left) / (nw * k)), y: clamp((e.clientY - r.top) / (nh * k)) }
   }
 
-  if (pic === undefined) return <div className="absolute inset-0 grid place-items-center bg-slate-950 text-xs text-slate-400">Loading the page from your PC…</div>
+  if (pic === undefined) return <div className="absolute inset-0 grid place-items-center bg-slate-950 text-xs text-slate-400">Opening the page…</div>
   if (pic === null)
     return (
       <div className="absolute inset-0 grid place-items-center bg-slate-950 p-6 text-center text-xs text-slate-400">
-        This tab is open in {nameOf()} on your PC, but its page is asleep or the window there is closed. Ask {nameOf()} to open a site, or open the browser on the PC.
+        {nameOf()}'s browser could not show this tab. It uses Google Chrome or Microsoft Edge on your PC: check one is installed, then try the address bar or ask {nameOf()} to open a site.
       </div>
     )
   return (
@@ -499,7 +502,8 @@ export function AtlasBrowser({ mode, driving, panes, onMode }: { mode: BrowserMo
     const url = toUrl(address)
     editing.current = false
     if (!url) return
-    if (activeView) void activeView.loadURL(url).catch(() => undefined)
+    if (isWeb) act({ kind: 'go', url })
+    else if (activeView) void activeView.loadURL(url).catch(() => undefined)
     else act({ kind: 'new', url })
   }
   const shownTab = state.tabs.find(t => t.id === state.active)
@@ -512,15 +516,15 @@ export function AtlasBrowser({ mode, driving, panes, onMode }: { mode: BrowserMo
     >
       {!mini && <TabStrip state={state} />}
       <div className="flex shrink-0 items-center gap-1 border-b border-white/10 bg-slate-950 px-1.5 py-1 text-slate-200">
-        <button type="button" className="icon-btn size-7" disabled={!page.back} onClick={() => activeView?.goBack()} aria-label="Back">
+        <button type="button" className="icon-btn size-7" disabled={!page.back} onClick={() => (isWeb ? act({ kind: 'nav', dir: 'back' }) : activeView?.goBack())} aria-label="Back">
           <ArrowLeft className="size-4" aria-hidden />
         </button>
         {!mini && (
-          <button type="button" className="icon-btn size-7" disabled={!page.forward} onClick={() => activeView?.goForward()} aria-label="Forward">
+          <button type="button" className="icon-btn size-7" disabled={!page.forward} onClick={() => (isWeb ? act({ kind: 'nav', dir: 'forward' }) : activeView?.goForward())} aria-label="Forward">
             <ArrowRight className="size-4" aria-hidden />
           </button>
         )}
-        <button type="button" className="icon-btn size-7" onClick={() => (page.loading ? activeView?.stop() : activeView?.reload())} aria-label={page.loading ? 'Stop' : 'Reload'}>
+        <button type="button" className="icon-btn size-7" onClick={() => (isWeb ? act({ kind: 'nav', dir: 'reload' }) : page.loading ? activeView?.stop() : activeView?.reload())} aria-label={page.loading ? 'Stop' : 'Reload'}>
           {page.loading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <RotateCw className="size-3.5" aria-hidden />}
         </button>
         {mini && state.tabs.length > 1 && (
@@ -577,7 +581,16 @@ export function AtlasBrowser({ mode, driving, panes, onMode }: { mode: BrowserMo
       </div>
       <div className="relative min-h-0 flex-1 bg-white">
         {isWeb
-          ? state.active && <RemotePage key={state.active} tabId={state.active} />
+          ? state.active && (
+              <RemotePage
+                key={state.active}
+                tabId={state.active}
+                onPage={p => {
+                  setPage({ url: p.url, title: p.title, loading: p.loading, back: p.back, forward: p.forward || p.back })
+                  if (!editing.current) setAddress(p.url)
+                }}
+              />
+            )
           : state.tabs
               .filter(t => awake.includes(t.id))
               .map(t => <TabPage key={t.id} tab={t} shown={t.id === state.active} onEl={onEl} />)}

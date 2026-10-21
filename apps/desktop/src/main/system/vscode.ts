@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { shell } from 'electron'
+import { shell } from '../host/index.ts'
 
 import { vscodeLink } from '../../shared/pcactions.ts'
 

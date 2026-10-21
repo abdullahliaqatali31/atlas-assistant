@@ -1,13 +1,13 @@
 /**
  * Files, main side: the folders the owner chose (and what Atlas may do in
  * each), the change history, the Files page IPC, and the model's file tools.
- * Removing uses the Windows Recycle Bin through Electron.
+ * Removing uses the Windows Recycle Bin.
  */
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, normalize, resolve } from 'node:path'
 
-import { app, dialog, shell, type BrowserWindow } from 'electron'
+import { app, dialog, shell, type OpenDialogOptions } from '../host/index.ts'
 
 import { FC, isFileAccess, type FileBatchView, type FileFolderView, type FileOp, type FilesState } from '../../shared/files.ts'
 import { notAProject } from '../code/discover.ts'
@@ -34,7 +34,7 @@ export class FileService {
     private readonly deps: {
       handle: <T>(channel: string, fn: (a: unknown, b: unknown) => T | Promise<T>) => void
       toRenderer: (channel: string, payload: unknown) => void
-      window: () => BrowserWindow | null
+      window: () => unknown
       requireOwner: () => void
       log: (level: 'info' | 'warn' | 'error', message: string) => void
     },
@@ -93,7 +93,7 @@ export class FileService {
 
   private async pick() {
     const win = this.deps.window()
-    const opts: Electron.OpenDialogOptions = { title: 'Folders Atlas may look after', properties: ['openDirectory', 'multiSelections'] }
+    const opts: OpenDialogOptions = { title: 'Folders Atlas may look after', properties: ['openDirectory', 'multiSelections'] }
     const picked = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     if (picked.canceled) return
     const errors: string[] = []

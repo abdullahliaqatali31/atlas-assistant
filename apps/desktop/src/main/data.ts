@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { DEFAULT_EXCLUDED_APPS } from '@assistant/runtime/activity-defaults'
-import { app } from 'electron'
+import { app } from './host/index.ts'
 
 import { AC, parseAppName, parseHours, RETENTION_DAYS, type ActivityHostEvent, type ActivityHostRequest, type ActivitySettings, type ActivityView } from '../shared/activity.ts'
 import { parseProjectOp, PJ, type ProjectOp, type ProjectsHostEvent, type ProjectsHostRequest } from '../shared/projects.ts'

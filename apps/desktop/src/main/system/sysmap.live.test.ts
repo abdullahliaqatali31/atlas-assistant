@@ -14,7 +14,7 @@ import { searchMap } from '../../shared/sysmap.ts'
 
 const live = !!process.env.ATLAS_LIVE
 
-vi.mock('electron', () => ({
+vi.mock('../host/index.ts', () => ({
   app: {
     getPath: (k: string) => join(homedir(), { desktop: 'Desktop', documents: 'Documents', downloads: 'Downloads', pictures: 'Pictures', music: 'Music', videos: 'Videos' }[k] ?? k),
   },

@@ -14,7 +14,7 @@ const noSubmit = (e: KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && e.
  * At the budget, Atlas stops its background work and its own speak-ups;
  * answering you keeps working.
  */
-/** Start with Windows: window open (the default), or quietly in the tray. */
+/** Start with Windows: opened in the browser (the default), or quietly in the tray. */
 export function StartupToggle() {
   const [s, setS] = useState<{ available: boolean; enabled: boolean; show: boolean } | null>(null)
   const [error, setError] = useState('')
@@ -33,7 +33,7 @@ export function StartupToggle() {
       {s.available && s.enabled && (
         <div className="flex flex-wrap gap-3 pl-6 text-xs" role="radiogroup" aria-label="How it starts">
           <label className="flex items-center gap-1.5">
-            <input type="radio" name="startup-show" checked={s.show} onChange={() => set(true, true)} /> Open its window
+            <input type="radio" name="startup-show" checked={s.show} onChange={() => set(true, true)} /> Open it in the browser
           </label>
           <label className="flex items-center gap-1.5">
             <input type="radio" name="startup-show" checked={!s.show} onChange={() => set(true, false)} /> Quietly, in the tray

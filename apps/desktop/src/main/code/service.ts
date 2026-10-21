@@ -9,7 +9,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeF
 import { homedir } from 'node:os'
 import { basename, dirname, join, normalize, resolve } from 'node:path'
 
-import { app, dialog, shell, type BrowserWindow } from 'electron'
+import { app, dialog, shell, type OpenDialogOptions } from '../host/index.ts'
 
 import {
   activityScore,
@@ -60,7 +60,7 @@ export interface CodeDeps {
   toRenderer: (channel: string, payload: unknown) => void
   /** Latest projects and runs for the runtime's tools, briefing and questions. */
   toRuntime: (snapshot: { projects: CodeProjectView[]; running: RunView[] }) => void
-  window: () => BrowserWindow | null
+  window: () => unknown
   requireOwner: () => void
   log: (level: 'info' | 'warn', message: string) => void
 }
@@ -246,7 +246,7 @@ export class CodeService {
 
   private async pick() {
     const win = this.deps.window()
-    const opts: Electron.OpenDialogOptions = { title: 'Project folders Atlas may follow', properties: ['openDirectory', 'multiSelections'] }
+    const opts: OpenDialogOptions = { title: 'Project folders Atlas may follow', properties: ['openDirectory', 'multiSelections'] }
     const picked = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     if (picked.canceled) return
     for (const f of picked.filePaths) this.add(f)

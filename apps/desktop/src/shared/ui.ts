@@ -117,7 +117,7 @@ export const UC = {
 
 export interface UiBridge {
   /** The page tells main what it shows. */
-  report(state: PageUi): void
+  report(state: PageUi & { width?: number; height?: number; focused?: boolean; visible?: boolean }): void
   onCommand(cb: (c: PageCommand) => void): () => void
   /** The owner's own buttons (compact, pin) go through the same path as Atlas's. */
   set(change: UiChange): Promise<UiState>
@@ -162,13 +162,13 @@ export const parseUiChange = (v: unknown): UiChange | null => {
 
 /** The window described for the model, in plain words. */
 export const describeUi = (s: UiState): string => {
-  if (!s.visible) return 'Atlas’s window is closed (only the tray icon is showing).'
+  if (!s.visible) return 'No browser has Atlas open right now (only the tray icon is showing).'
   const parts = [
     s.compact ? 'Compact mode: a small chat-only window' : `Showing ${VIEW_LABEL[s.view]}${s.view === 'world' || s.side === 'world' ? (s.map3d ? ' (World in the 3D view: the map_* tools and map_3d act on it)' : '') : ''}`,
     !s.compact && s.side ? `with ${SURFACE_LABEL[s.side]} beside it in a second pane` : '',
     !s.compact && s.browser && s.browser !== 'hidden' && s.browser !== 'pane' ? `your browser is open ${s.browser === 'full' ? 'over the whole window' : 'as a mini view in the corner'}` : '',
     s.compact ? '' : s.chatOpen ? 'conversation open' : 'conversation hidden',
-    s.minimized ? 'minimized' : s.maximized ? 'maximized' : `${s.width}×${s.height} (${s.layout} layout)`,
+    s.minimized ? 'its tab is in the background' : `${s.width}×${s.height} (${s.layout} layout)`,
     s.pinned ? 'kept on top of other windows' : '',
     s.focused ? 'in front' : 'behind other windows',
   ]

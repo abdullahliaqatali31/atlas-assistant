@@ -40,8 +40,9 @@ describe('web access', () => {
   it('names devices and keeps window-only calls away from browsers', () => {
     expect(deviceName('Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36')).toBe('Chrome on Android')
     expect(deviceName('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1')).toBe('Safari on iPhone')
-    expect(WEB_BLOCKED.has(UC.report)).toBe(true)
-    expect(WEB_BLOCKED.has(WA.newCode)).toBe(true)
+    expect(WEB_BLOCKED.has(UC.solid)).toBe(true)
+    expect(WEB_BLOCKED.has(UC.report)).toBe(false)
+    expect(WEB_BLOCKED.has(WA.newCode)).toBe(false)
     expect(WEB_BLOCKED.has(CH.send)).toBe(false)
     expect(parseWebChange({ lan: 'yes' })).toBeNull()
     expect(parseWebChange({ lan: true })).toEqual({ lan: true })

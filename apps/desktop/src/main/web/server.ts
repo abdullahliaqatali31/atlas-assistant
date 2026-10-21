@@ -5,13 +5,11 @@
  * unless the owner allows the home network; each browser pairs once with a
  * code from the desktop app and gets a device cookie (only its hash is kept).
  */
-import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, request, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
 import { extname, join, normalize, sep } from 'node:path'
-
-import { net } from 'electron'
 
 import { CH, type ReplyEvent } from '../../shared/ipc.ts'
 import { allowedHost, CODE_TTL_MS, DEFAULT_WEB_PORT, DEVICE_COOKIE, deviceName, PairGuard, parseWebChange, readCookie, sameOrigin, TICKET_TTL_MS, WA, WEB_BLOCKED, type WebAccessView } from '../../shared/web.ts'
@@ -43,6 +41,8 @@ interface Client {
 }
 
 export interface WebAccessDeps {
+  /** Atlas's own addresses (news pictures, the speech model), answered without the network. */
+  schemes: Record<(typeof WEB_SCHEMES)[number], (url: URL) => Response | Promise<Response>>
   /** Every IPC handler main registered, by channel. */
   handlers: ReadonlyMap<string, Handler>
   /** Throws unless the owner is confirmed, for the owner-only channels. */
@@ -53,10 +53,11 @@ export interface WebAccessDeps {
   rendererDir: string
   devUrl: string | null
   handle: (channel: string, fn: Handler) => void
-  toWindow: (channel: string, payload: unknown) => void
   openExternal: (url: string) => void
   /** A browser connected or left. */
   onClients: () => void
+  /** The atlas command on this PC: open the page, or quit. Asked with the control token (kept beside the data, never sent to a page). */
+  control?: { token: string; act: (action: 'open' | 'quit') => void }
   log: (level: 'info' | 'warn' | 'error', message: string) => void
 }
 
@@ -89,11 +90,14 @@ export class WebAccess {
   private port = 0
   private error: string | null = null
   private code: { value: string; expires: number } | null = null
-  private ticket: { value: string; expires: number } | null = null
+  /** One-time pairing links (Open in browser, the one printed at start); each works once. */
+  private tickets: { value: string; expires: number }[] = []
   private readonly guard = new PairGuard()
   private readonly clients = new Map<string, Client>()
   /** Which browser asked for a reply, so only it speaks the answer. */
   private readonly replyOwners = new Map<string, string>()
+  /** One-way messages from the page (what it shows, map results), by channel. */
+  private readonly listeners = new Map<string, (payload: unknown) => void>()
   private lastSeenSaved = 0
 
   constructor(private readonly deps: WebAccessDeps) {
@@ -151,7 +155,7 @@ export class WebAccess {
   }
 
   private publish() {
-    this.deps.toWindow(WA.changed, this.view())
+    this.broadcast(WA.changed, this.view())
   }
 
   register() {
@@ -164,6 +168,8 @@ export class WebAccess {
       requireOwner()
       const change = parseWebChange(raw)
       if (!change) throw new Error('Invalid web access setting.')
+      // The page is how the owner reaches Atlas: it stays on, on this PC at least.
+      if (change.enabled === false) throw new Error('Atlas is used through this page, so it stays on (on this PC at least).')
       this.stored = { ...this.stored, ...change }
       this.save()
       await this.restart()
@@ -185,23 +191,35 @@ export class WebAccess {
       this.publish()
       return this.view()
     })
-    handle(WA.open, async () => {
+    handle(WA.open, () => {
       requireOwner()
-      if (!this.server) {
-        this.stored.enabled = true
-        this.save()
-        await this.restart()
-      }
-      if (!this.server) throw new Error(this.error ?? 'The web interface could not start.')
-      this.ticket = { value: randomBytes(24).toString('base64url'), expires: Date.now() + TICKET_TTL_MS }
-      this.deps.openExternal(`http://localhost:${this.port}/#pair=${this.ticket.value}`)
+      this.openInBrowser()
     })
+  }
+
+  /** Atlas's address on this PC, or null while the server is not up. */
+  get url() {
+    return this.server ? `http://localhost:${this.port}` : null
+  }
+
+  /** Atlas's address with a one-time pairing ticket: whoever opens it within the time is paired. */
+  pairingUrl(ttlMs = TICKET_TTL_MS) {
+    if (!this.server) throw new Error(this.error ?? 'Atlas is not serving its page.')
+    const now = Date.now()
+    const ticket = { value: randomBytes(24).toString('base64url'), expires: now + ttlMs }
+    this.tickets = [...this.tickets.filter(t => t.expires > now).slice(-3), ticket]
+    return `http://localhost:${this.port}/#pair=${ticket.value}`
+  }
+
+  /** Opens Atlas in the default browser, paired at once by a one-time ticket. */
+  openInBrowser() {
+    this.deps.openExternal(this.pairingUrl())
   }
 
   // ── server ────────────────────────────────────────────────
 
   async start() {
-    if (this.stored.enabled) await this.listen()
+    await this.listen()
     this.publish()
   }
 
@@ -283,6 +301,16 @@ export class WebAccess {
     const url = new URL(req.url ?? '/', 'http://atlas')
     const path = url.pathname
 
+    if (path === '/api/control' && req.method === 'POST') {
+      const c = this.deps.control
+      const given = req.headers['x-atlas-control']
+      // Browsers cannot read the token, and a page's request carries an Origin: the command line never does.
+      if (!c || req.headers.origin || typeof given !== 'string' || given.length !== c.token.length || !timingSafeEqual(Buffer.from(given), Buffer.from(c.token))) return this.send(res, 403, 'Forbidden')
+      const action = url.searchParams.get('action')
+      if (action !== 'open' && action !== 'quit') return this.send(res, 400, 'Unknown action')
+      this.send(res, 200, '{"ok":true}', 'application/json')
+      return c.act(action)
+    }
     if (path === '/api/me' && req.method === 'GET') {
       const d = this.device(req)
       return this.send(res, 200, JSON.stringify({ paired: d !== null, name: d?.name ?? null }), 'application/json')
@@ -316,14 +344,15 @@ export class WebAccess {
     } catch {
       return this.send(res, 400, JSON.stringify({ error: 'Bad request.' }), 'application/json')
     }
-    const byTicket = typeof input.ticket === 'string' && this.ticket !== null && this.ticket.expires > now && input.ticket === this.ticket.value
+    const ticket = typeof input.ticket === 'string' ? this.tickets.find(t => t.value === input.ticket && t.expires > now) : undefined
+    const byTicket = ticket !== undefined
     const byCode = typeof input.code === 'string' && this.code !== null && this.code.expires > now && input.code.replace(/\D/g, '') === this.code.value
     if (!byTicket && !byCode) {
       this.guard.fail(now)
       return this.send(res, 401, JSON.stringify({ error: 'That code is not right, or it has expired.' }), 'application/json')
     }
     // Each code and ticket works once.
-    if (byTicket) this.ticket = null
+    if (byTicket) this.tickets = this.tickets.filter(t => t !== ticket)
     else this.code = null
     const token = randomBytes(32).toString('base64url')
     this.stored.devices.push({ id: randomUUID(), name: deviceName(req.headers['user-agent']), hash: hash(token), created: now, lastSeen: now })
@@ -337,7 +366,7 @@ export class WebAccess {
     const [scheme, ...rest] = path.slice(SCHEME_PATH.length).split('/')
     if (!WEB_SCHEMES.includes(scheme as (typeof WEB_SCHEMES)[number]) || rest.some(p => p === '..')) return this.send(res, 404, 'Not found')
     try {
-      const r = await net.fetch(`${scheme}://${rest.join('/')}`)
+      const r = await this.deps.schemes[scheme as (typeof WEB_SCHEMES)[number]](new URL(`${scheme}://${rest.join('/')}`))
       const body = Buffer.from(await r.arrayBuffer())
       res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') ?? 'application/octet-stream', 'Cache-Control': 'max-age=86400', ...SECURITY_HEADERS })
       res.end(body)
@@ -401,7 +430,7 @@ export class WebAccess {
     if (!m) return
     // The device may have been removed while connected.
     if (!this.stored.devices.some(d => d.id === client.deviceId)) return client.conn.close(4001)
-    if (m.t === 'send') return
+    if (m.t === 'send') return this.listeners.get(m.ch)?.(m.payload)
     const fn = this.deps.handlers.get(m.ch)
     let reply: ServerMessage
     if (!fn || WEB_BLOCKED.has(m.ch)) reply = { t: 'ret', id: m.id, ok: false, error: 'That works only in the desktop app.' }
@@ -420,6 +449,15 @@ export class WebAccess {
       }
     }
     client.conn.send(encodeWire(reply))
+  }
+
+  /** One-way messages from the page on this channel. */
+  onMessage(channel: string, fn: (payload: unknown) => void) {
+    this.listeners.set(channel, fn)
+  }
+
+  get clientCount() {
+    return this.clients.size
   }
 
   get hasClients() {

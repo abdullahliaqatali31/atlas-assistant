@@ -1,49 +1,50 @@
 /**
- * Atlas's own window, main side: what it shows (reported by the page), its
- * size and place, compact mode (a small chat-only window in the corner that
- * remembers the full size), keeping it on top, and the same changes for the
- * owner's buttons and for Atlas's tools.
+ * Atlas's screen, gateway side: the page in the owner's browser reports what
+ * it shows (page, panes, its size, whether it is in front); Atlas's tools
+ * change the page, open it when no browser has it, and run map operations
+ * on the World page. Window sizes belong to the browser, so they are the
+ * owner's to set.
  */
 import { randomUUID } from 'node:crypto'
 
-import { ipcMain, screen, type BrowserWindow, type Rectangle } from 'electron'
-
 import { MC, type MapOp } from '../shared/map.ts'
 import { describeUi, layoutFor, parseUiChange, UC, isView, type PageCommand, type PageUi, type UiChange, type UiOp, type UiState, type VoiceChange, type WorldDataOp } from '../shared/ui.ts'
-import type { GlassOp } from '../shared/glass.ts'
 import type { SystemOp } from '../shared/system.ts'
 import { isSurface, type BrowserMode, type BrowserOp } from '../shared/browser.ts'
 
-const COMPACT = { width: 400, height: 640 }
-const NORMAL = { width: 1180, height: 760 }
-const LARGE = { width: 1480, height: 920 }
-const MARGIN = 16
 /** How long a map op may wait for the World page, and how often it is sent again meanwhile. */
 const MAP_TIMEOUT_MS = 20_000
 const MAP_RESEND_MS = 1_500
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
+/** What the page says about itself besides what it shows. */
+interface PageReport extends PageUi {
+  width: number
+  height: number
+  focused: boolean
+  visible: boolean
+}
+
 export class UiService {
-  private page: PageUi = { view: 'home', chatOpen: true, compact: false }
-  /** The full-size bounds to come back to from compact mode. */
-  private fullBounds: Rectangle | null = null
+  private page: PageReport = { view: 'home', chatOpen: true, compact: false, width: 0, height: 0, focused: false, visible: false }
   private waiters: (() => void)[] = []
   private readonly mapWaiters = new Map<string, (r: { result?: string | undefined; error?: string | undefined }) => void>()
 
   constructor(
     private readonly deps: {
-      window: () => BrowserWindow | null
-      /** Opens (or shows) the window, waiting until the page is listening. */
-      open: () => Promise<BrowserWindow>
+      /** Browsers showing Atlas right now. */
+      clients: () => number
+      /** Opens Atlas in the default browser (paired), waiting until the page is listening. */
+      open: () => Promise<void>
       toRenderer: (channel: string, payload: unknown) => void
       handle: <T>(channel: string, fn: (a: unknown, b: unknown) => T | Promise<T>) => void
+      /** One-way messages from the page. */
+      listen: (channel: string, fn: (payload: unknown) => void) => void
       requireOwner: () => void
-      /** Called whenever the window changes, so the runtime knows. */
+      /** Called whenever the screen changes, so the runtime knows. */
       onChange: (s: UiState) => void
-      /** The glass panel beside the desktop widget. */
-      glass?: (op: GlassOp) => Promise<string>
-      /** The PC itself: status, Settings pages, and (later) opening and making things. */
+      /** The PC itself: status, Settings pages, opening and making things. */
       system?: (op: SystemOp) => Promise<string>
       /** Atlas's own browser. */
       browser?: (op: BrowserOp) => Promise<string>
@@ -55,46 +56,29 @@ export class UiService {
   ) {}
 
   state(): UiState {
-    const win = this.deps.window()
-    if (!win || win.isDestroyed()) return { ...this.page, width: 0, height: 0, layout: 'wide', maximized: false, minimized: false, visible: false, focused: false, pinned: false }
-    const [width, height] = win.getContentSize() as [number, number]
+    const open = this.deps.clients() > 0
+    const p = this.page
     return {
-      ...this.page,
-      width,
-      height,
-      layout: layoutFor(width),
-      maximized: win.isMaximized(),
-      minimized: win.isMinimized(),
-      visible: win.isVisible(),
-      focused: win.isFocused(),
-      pinned: win.isAlwaysOnTop(),
+      view: p.view,
+      chatOpen: p.chatOpen,
+      compact: p.compact,
+      map3d: p.map3d,
+      side: p.side,
+      browser: p.browser,
+      width: open ? p.width : 0,
+      height: open ? p.height : 0,
+      layout: layoutFor(p.width || 1180),
+      maximized: false,
+      minimized: open && !p.visible,
+      visible: open,
+      focused: open && p.focused,
+      pinned: false,
     }
   }
 
-  /** Window events worth telling the runtime about. */
-  watch(win: BrowserWindow) {
-    let timer: NodeJS.Timeout | null = null
-    const changed = () => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => this.deps.onChange(this.state()), 300)
-    }
-    for (const e of ['resize', 'maximize', 'unmaximize', 'minimize', 'restore', 'show', 'hide', 'always-on-top-changed'] as const) win.on(e as 'resize', changed)
-    win.on('closed', () => this.deps.onChange(this.state()))
-  }
-
-  /**
-   * Windows lets a background app only flash its taskbar button, not come
-   * forward: a moment on top, then focus, then back to the owner's own
-   * keep-on-top choice.
-   */
-  raise(win: BrowserWindow) {
-    if (win.isMinimized()) win.restore()
-    if (!win.isVisible()) win.show()
-    const pinned = win.isAlwaysOnTop()
-    win.setAlwaysOnTop(true, 'screen-saver')
-    win.moveTop()
-    win.focus()
-    setTimeout(() => !win.isDestroyed() && win.setAlwaysOnTop(pinned, 'floating'), 300)
+  /** The browsers changed (one opened or closed). */
+  clientsChanged() {
+    this.deps.onChange(this.state())
   }
 
   /** What Atlas's browser shows as now. */
@@ -102,12 +86,12 @@ export class UiService {
     return this.page.browser ?? 'hidden'
   }
 
-  /** Page commands from other main parts (the browser). */
+  /** Page commands from other parts (the browser). */
   send(c: PageCommand) {
     this.command(c)
   }
 
-  /** Open the News page on a tab, scrolled to one story (the glass panel handing over). */
+  /** Open the News page on a tab, scrolled to one story. */
   async showNews(tab: string, focus: string | null) {
     await this.apply({ view: 'news' })
     this.command({ news: { tab, focus } })
@@ -122,70 +106,14 @@ export class UiService {
     return Promise.race([new Promise<void>(r => this.waiters.push(r)), sleep(900)])
   }
 
-  private workArea(win: BrowserWindow) {
-    return screen.getDisplayMatching(win.getBounds()).workArea
-  }
-
-  private center(win: BrowserWindow, size: { width: number; height: number }) {
-    const area = this.workArea(win)
-    const width = Math.min(size.width, Math.round(area.width * 0.95))
-    const height = Math.min(size.height, Math.round(area.height * 0.95))
-    win.setBounds({ x: area.x + Math.round((area.width - width) / 2), y: area.y + Math.round((area.height - height) / 2), width, height })
-  }
-
-  private enterCompact(win: BrowserWindow) {
-    if (this.page.compact) return
-    if (win.isMaximized()) win.unmaximize()
-    this.fullBounds = win.getBounds()
-    const area = this.workArea(win)
-    win.setBounds({ x: area.x + area.width - COMPACT.width - MARGIN, y: area.y + area.height - COMPACT.height - MARGIN, ...COMPACT })
-    this.command({ compact: true })
-  }
-
-  private leaveCompact(win: BrowserWindow) {
-    if (!this.page.compact) return false
-    if (this.fullBounds) win.setBounds(this.fullBounds)
-    else this.center(win, NORMAL)
-    this.fullBounds = null
-    this.command({ compact: false })
-    return true
-  }
-
   async apply(change: UiChange): Promise<UiState> {
-    let win = this.deps.window()
-    if (change.size === 'minimized') {
-      win?.minimize()
-      return this.state()
-    }
-    if (!win || win.isDestroyed() || !win.isVisible()) win = await this.deps.open()
-    if (win.isMinimized()) win.restore()
-    switch (change.size) {
-      case 'compact':
-        this.enterCompact(win)
-        break
-      case 'normal':
-        if (!this.leaveCompact(win)) {
-          if (win.isMaximized()) win.unmaximize()
-          this.center(win, NORMAL)
-        }
-        break
-      case 'large':
-        this.leaveCompact(win)
-        if (win.isMaximized()) win.unmaximize()
-        this.center(win, LARGE)
-        break
-      case 'maximized':
-        this.leaveCompact(win)
-        win.maximize()
-        break
-    }
-    // Going to a page means the full window.
-    if (change.view && this.page.compact) this.leaveCompact(win)
-    if (change.pinned !== undefined) win.setAlwaysOnTop(change.pinned, 'floating')
-    // The owner asked for it: over whatever app is in front, not just restored behind it.
-    this.raise(win)
+    // Minimising and sizes are the browser's; there is nothing to do here for them.
+    if (change.size === 'minimized') return this.state()
+    if (this.deps.clients() === 0) await this.deps.open()
+    if (change.size === 'compact' && !this.page.compact) this.command({ compact: true })
+    if ((change.size === 'normal' || change.size === 'large' || change.size === 'maximized' || change.view) && this.page.compact) this.command({ compact: false })
     if (change.view !== undefined || change.chat !== undefined || change.side !== undefined) this.command({ view: change.view, chat: change.chat, ...(change.side !== undefined ? { side: change.side === 'none' ? null : change.side } : {}) })
-    if (change.view !== undefined || change.chat !== undefined || change.side !== undefined || change.size === 'compact' || change.size === 'normal' || change.size === 'large' || change.size === 'maximized') await this.settle()
+    if (change.view !== undefined || change.chat !== undefined || change.side !== undefined || change.size !== undefined) await this.settle()
     const s = this.state()
     this.deps.onChange(s)
     return s
@@ -211,17 +139,15 @@ export class UiService {
       if (!this.deps.browser) throw new Error('The browser is not available.')
       return this.deps.browser(op.op)
     }
-    if (op.kind === 'glass') {
-      if (!this.deps.glass) throw new Error('The glass panel is not available.')
-      return this.deps.glass(op.op)
-    }
-    return `Done. Now: ${describeUi(await this.apply(op.change))}`
+    if (op.kind === 'glass') throw new Error('There is no glass panel any more: show things on the page instead (ui_show news, the World map, or say it in the reply).')
+    const size = op.change.size
+    const note = size && size !== 'compact' && size !== 'normal' ? ' (the browser sets its own window size; the owner can resize it)' : op.change.pinned !== undefined ? ' (keeping a browser on top is not possible from here)' : ''
+    return `Done${note}. Now: ${describeUi(await this.apply(op.change))}`
   }
 
   /** Map ops run on the World page: open it first if something else shows. */
   private async mapOp(op: MapOp): Promise<string> {
-    const s = this.state()
-    if ((this.page.view !== 'world' && this.page.side !== 'world') || this.page.compact || !s.visible || s.minimized) await this.apply({ view: 'world' })
+    if ((this.page.view !== 'world' && this.page.side !== 'world') || this.page.compact || this.deps.clients() === 0) await this.apply({ view: 'world' })
     return this.askMap(op)
   }
 
@@ -251,28 +177,34 @@ export class UiService {
     })
   }
 
-  /** One line for the assistant's context every turn, so it knows its own window. */
+  /** One line for the assistant's context every turn, so it knows its own screen. */
   contextLine(): string {
-    return `Your own window (Atlas app): ${describeUi(this.state())}`
+    return `Your own screen (Atlas in the owner's browser): ${describeUi(this.state())}`
   }
 
   register() {
-    ipcMain.on(MC.result, (event, raw: unknown) => {
-      const win = this.deps.window()
-      if (!win || event.sender !== win.webContents) return
+    this.deps.listen(MC.result, raw => {
       const o = raw as { requestId?: unknown; result?: unknown; error?: unknown } | null
       if (!o || typeof o.requestId !== 'string') return
       this.mapWaiters.get(o.requestId)?.({ result: typeof o.result === 'string' ? o.result.slice(0, 8_000) : undefined, error: typeof o.error === 'string' ? o.error.slice(0, 500) : undefined })
     })
-    ipcMain.on(UC.report, (event, raw: unknown) => {
-      const win = this.deps.window()
-      if (!win || event.sender !== win.webContents) return
-      const o = raw as Partial<PageUi> | null
+    this.deps.listen(UC.report, raw => {
+      const o = raw as Partial<PageReport> | null
       if (!o || !isView(o.view) || typeof o.chatOpen !== 'boolean' || typeof o.compact !== 'boolean') return
-      // A reloaded page starts full-size; the window may still be compact.
-      if (this.fullBounds && !o.compact) this.command({ compact: true })
       const modes: readonly unknown[] = ['pane', 'mini', 'full', 'hidden']
-      this.page = { view: o.view, chatOpen: o.chatOpen, compact: o.compact || this.fullBounds !== null, map3d: o.map3d === true, side: isSurface(o.side) ? o.side : null, browser: modes.includes(o.browser) ? (o.browser as BrowserMode) : 'hidden' }
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 20_000 ? Math.round(v) : 0)
+      this.page = {
+        view: o.view,
+        chatOpen: o.chatOpen,
+        compact: o.compact,
+        map3d: o.map3d === true,
+        side: isSurface(o.side) ? o.side : null,
+        browser: modes.includes(o.browser) ? (o.browser as BrowserMode) : 'hidden',
+        width: num(o.width),
+        height: num(o.height),
+        focused: o.focused === true,
+        visible: o.visible !== false,
+      }
       for (const w of this.waiters.splice(0)) w()
       this.deps.onChange(this.state())
     })

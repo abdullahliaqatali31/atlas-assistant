@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 
-import { net, powerMonitor, shell } from 'electron'
+import { net, powerMonitor, shell } from '../host/index.ts'
 
 import { diffSnapshots, interpretProbe, SETTINGS_PAGES, describeSystem, type SystemChange, type SystemOp, type SystemSnapshot } from '../../shared/system.ts'
 import PROBE_PS1 from './probe.ps1?raw'

@@ -1,9 +1,9 @@
 /**
  * OS session watcher: lock/unlock, sleep/resume and idle from Electron's
- * powerMonitor, reported as typed changes for the runtime. Returns carry how
+ * the host's power monitor (a PowerShell watcher), reported as typed changes for the runtime. Returns carry how
  * long the owner was away so the runtime can decide on a welcome back.
  */
-import { powerMonitor } from 'electron'
+import { powerMonitor } from './host/index.ts'
 
 import type { SessionChange } from '../shared/ipc.ts'
 

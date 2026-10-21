@@ -64,8 +64,12 @@ practice. Each phase ships on its own, gated by `pnpm check`. Order of work: 1 (
   the same interface in any browser: home and brain, world maps, news,
   profiles, notifications, PC status, chat and voice. Data still comes from
   the desktop app on the PC; the PC must be on.
-- Atlas's own browser appears as a live picture you can click. The widget,
-  glass panel, tray, global shortcuts and Windows Hello stay desktop-only.
+- Atlas's own browser appears as a live picture you can click.
+- Then (owner's choice) Electron went entirely: Atlas is one Node process,
+  the gateway, serving this page; a PowerShell tray keeps the icon, notices,
+  global shortcuts and lock/sleep/idle; Atlas's browser is the PC's Chrome or
+  Edge through Playwright. One-command install (install.ps1 + the atlas
+  command), about 260 MB of memory instead of about 1 GB.
 
 ## Phase 7 — Open-source ready
 

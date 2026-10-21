@@ -21,10 +21,12 @@
     "trial:skills": "tsx packages/runtime/src/skill-trial.ts",
     "trial:provider": "tsx packages/runtime/src/provider-trial.ts",
     "licenses:inventory": "node tools/license-inventory.mjs",
-    "dist": "pnpm licenses:inventory && pnpm --filter @assistant/desktop dist",
+    "dist": "pnpm licenses:inventory && pnpm build",
     "check": "pnpm typecheck && pnpm test",
-    "desktop": "pnpm --filter @assistant/desktop dev",
-    "trial:files": "tsx apps/desktop/src/runtime/files-trial.ts"
+    "trial:files": "tsx apps/desktop/src/runtime/files-trial.ts",
+    "dev": "pnpm --filter @assistant/desktop dev",
+    "build": "pnpm --filter @assistant/desktop build",
+    "start": "pnpm --filter @assistant/desktop start"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

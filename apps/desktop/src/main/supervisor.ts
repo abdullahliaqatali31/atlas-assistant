@@ -8,7 +8,7 @@ import type { PcNotification } from '../shared/notifications.ts'
 import type { HabitsForAtlas } from '../shared/habits.ts'
 
 import type { LlmProviderId } from '@assistant/providers/llm-presets'
-import { utilityProcess, type UtilityProcess } from 'electron'
+import { fork, type ChildProcess } from 'node:child_process'
 
 import type {
   ActionNotice,
@@ -73,7 +73,7 @@ const STABLE_MS = 60_000
 const MAX_BACKOFF_MS = 30_000
 
 export class RuntimeSupervisor {
-  private child: UtilityProcess | null = null
+  private child: ChildProcess | null = null
   private stopping = false
   private backoff = 1_000
   private startedAt = 0
@@ -96,7 +96,14 @@ export class RuntimeSupervisor {
 
   start() {
     this.stopping = false
-    const child = utilityProcess.fork(this.deps.entry, [], { serviceName: 'Assistant runtime', stdio: 'pipe' })
+    // Its own Node process; structured messages, so recorded voice and spoken audio cross as bytes.
+    const child = fork(this.deps.entry, [], {
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      serialization: 'advanced',
+      execArgv: ['--disable-warning=ExperimentalWarning'],
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      windowsHide: true,
+    })
     this.child = child
     this.startedAt = Date.now()
     child.stdout?.on('data', (b: Buffer) => this.deps.log('info', b.toString().trimEnd()))
@@ -124,7 +131,7 @@ export class RuntimeSupervisor {
         clearTimeout(kill)
         resolve()
       })
-      child.postMessage({ type: 'shutdown' } satisfies HostRequest)
+      child.send({ type: 'shutdown' } satisfies HostRequest)
     })
   }
 
@@ -389,7 +396,7 @@ export class RuntimeSupervisor {
   }
 
   private post(msg: HostRequest) {
-    this.child?.postMessage(msg)
+    if (this.child?.connected) this.child.send(msg)
   }
 
   private handle(e: HostEvent) {
@@ -506,7 +513,7 @@ export class RuntimeSupervisor {
     }
   }
 
-  private exited(child: UtilityProcess, code: number) {
+  private exited(child: ChildProcess, code: number | null) {
     if (this.child !== child) return
     this.child = null
     if (this.activeReply) {

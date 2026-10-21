@@ -3,8 +3,7 @@ import { extname, join, resolve } from 'node:path'
 
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'electron-vite'
-import type { Plugin } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 
 /**
  * CesiumJS (the 3D World view) loads its workers, assets and widget styles
@@ -36,39 +35,15 @@ const cesiumStatic = (): Plugin => {
   }
 }
 
-// Workspace packages ship TypeScript source, so main, preload and the runtime
-// host are bundled whole; only Electron, Node built-ins and native addons stay external.
+/** The page Atlas serves to the owner's browser (the gateway's build is vite.gateway.config.ts). */
 export default defineConfig({
-  main: {
-    build: {
-      externalizeDeps: false,
-      rollupOptions: {
-        input: {
-          index: resolve('src/main/index.ts'),
-          runtime: resolve('src/runtime/host.ts'),
-        },
-        // Native addon: loaded from node_modules at run time, not bundled.
-        external: ['@napi-rs/keyring'],
-      },
-    },
-  },
-  preload: {
-    build: {
-      externalizeDeps: false,
-      rollupOptions: {
-        input: { index: resolve('src/preload/index.ts'), presence: resolve('src/preload/presence.ts'), glass: resolve('src/preload/glass.ts') },
-        // Sandboxed preloads must be a single CommonJS file.
-        output: { format: 'cjs', entryFileNames: '[name].cjs' },
-      },
-    },
-  },
-  renderer: {
-    root: resolve('src/renderer'),
-    build: { rollupOptions: { input: { index: resolve('src/renderer/index.html'), presence: resolve('src/renderer/presence.html'), glass: resolve('src/renderer/glass.html') } } },
-    plugins: [react(), tailwindcss(), cesiumStatic()],
-    // Lazy pages (3D view, on-device speech) import these late: bundle them up front in dev, or the late re-bundle leaves two copies of React.
-    optimizeDeps: { include: ['@cesium/engine', '@cesium/core', '@huggingface/transformers'] },
-    // satellite.js ships an optional WebAssembly worker that uses top-level await: bundle workers as ES modules.
-    worker: { format: 'es' },
-  },
+  root: resolve('src/renderer'),
+  base: '/',
+  build: { outDir: resolve('out/renderer'), emptyOutDir: true, chunkSizeWarningLimit: 16_000 },
+  plugins: [react(), tailwindcss(), cesiumStatic()],
+  server: { port: 5173, strictPort: true, host: '127.0.0.1' },
+  // Lazy pages (3D view, on-device speech) import these late: bundle them up front in dev, or the late re-bundle leaves two copies of React.
+  optimizeDeps: { include: ['@cesium/engine', '@cesium/core', '@huggingface/transformers'] },
+  // satellite.js ships an optional WebAssembly worker that uses top-level await: bundle workers as ES modules.
+  worker: { format: 'es' },
 })

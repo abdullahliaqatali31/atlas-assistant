@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, normalize } from 'node:path'
 
-import { app, shell } from 'electron'
+import { app, shell } from '../host/index.ts'
 
 import { boldRuns, claudeAppLink, claudeCliLink, markdownBlocks, safeName, vscodeLink, withExt, wslUnc, type DocBlock, type OpenWith, type SheetSpec } from '../../shared/pcactions.ts'
 import { openInVsCode } from './vscode.ts'

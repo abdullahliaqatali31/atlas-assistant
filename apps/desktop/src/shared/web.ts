@@ -3,10 +3,7 @@
  * Loopback only unless the owner allows the home network; every browser is
  * paired once with a code shown in the desktop app, and can be removed.
  */
-import { BC } from './backup.ts'
 import { BRT } from './browser.ts'
-import { CH } from './ipc.ts'
-import { MC } from './map.ts'
 import { PRS } from './presence.ts'
 import { UC } from './ui.ts'
 
@@ -58,22 +55,11 @@ export interface WebAccessBridge {
 }
 
 /**
- * Calls a browser may never make: the ones that only make sense from the
- * desktop window itself (its page reports, its map, the widget's feed, the
- * window's own look), web access itself, and backups (they open file
- * dialogs on the PC).
+ * Calls left over from the desktop window that mean nothing from a browser:
+ * the widget's feed, the in-window browser's page reports and the window's
+ * own look. The page answers them itself, quietly.
  */
-export const WEB_BLOCKED: ReadonlySet<string> = new Set([
-  UC.report,
-  UC.solid,
-  MC.result,
-  PRS.update,
-  BRT.report,
-  CH.ready,
-  BC.create,
-  BC.restore,
-  ...Object.values(WA),
-])
+export const WEB_BLOCKED: ReadonlySet<string> = new Set([UC.solid, PRS.update, BRT.report])
 
 /** Host names a browser may use to reach Atlas, against DNS rebinding: loopback, plus the PC's own addresses when the home network is allowed. */
 export const allowedHost = (host: string | undefined, port: number, lanAddresses: readonly string[]): boolean => {

@@ -13,7 +13,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest'
 
 // Not under AppData: Windows redirects Store apps' (WhatsApp's) writes there into their private storage.
 const dir = mkdtempSync(join(homedir(), 'atlas-desktop-live-'))
-vi.mock('electron', () => ({ app: { getPath: () => dir } }))
+vi.mock('../host/index.ts', () => ({ app: { getPath: () => dir } }))
 
 const live = !!process.env.ATLAS_LIVE
 vi.setConfig({ testTimeout: 300_000 })

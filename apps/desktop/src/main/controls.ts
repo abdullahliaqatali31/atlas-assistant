@@ -11,7 +11,7 @@ import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve 
 
 import { connectorById, connectorServer, type BriefingCall } from '@assistant/mcp/connectors'
 import { osCredentialStore } from '@assistant/runtime/credentials'
-import { app, dialog, globalShortcut, shell, type BrowserWindow } from 'electron'
+import { app, dialog, shell, type OpenDialogOptions } from './host/index.ts'
 
 import {
   CATALOGUE,
@@ -128,7 +128,7 @@ const within = (child: string, parent: string) => {
 
 export interface ControlsDeps {
   handle: (channel: string, fn: (arg: unknown, arg2: unknown) => unknown) => void
-  window: () => BrowserWindow | null
+  window: () => unknown
   mcpConfigPath: () => string
   /** Post to the runtime host; dropped while it is down (it gets `initMessages` on start). */
   post: (msg: ControlHostRequest) => void
@@ -366,9 +366,10 @@ export class Controls {
     this.setPaused(true)
   }
 
-  registerHotkey() {
+  /** The pause hotkey, through whoever owns global shortcuts (the tray). */
+  registerHotkey(register: (accelerator: string, fn: () => void) => boolean) {
     try {
-      this.hotkey = globalShortcut.register(PAUSE_HOTKEY, () => this.setPaused(!this.paused)) ? PAUSE_HOTKEY : null
+      this.hotkey = register(PAUSE_HOTKEY, () => this.setPaused(!this.paused)) ? PAUSE_HOTKEY : null
     } catch {
       this.hotkey = null
     }
@@ -428,7 +429,7 @@ export class Controls {
     const credentialsEnv = catalog ? connectorById(catalog)?.credentialsEnv : undefined
     if (!credentialsEnv) throw new Error('This connection does not use a credentials file.')
     const win = this.deps.window()
-    const opts: Electron.OpenDialogOptions = { title: 'OAuth client file (gcp-oauth.keys.json)', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] }
+    const opts: OpenDialogOptions = { title: 'OAuth client file (gcp-oauth.keys.json)', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] }
     const picked = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     const path = picked.filePaths[0]
     if (picked.canceled || !path) return this.state()
@@ -489,7 +490,7 @@ export class Controls {
 
   async addFolder() {
     const win = this.deps.window()
-    const opts: Electron.OpenDialogOptions = { title: 'Folders the assistant may use', properties: ['openDirectory', 'multiSelections'] }
+    const opts: OpenDialogOptions = { title: 'Folders the assistant may use', properties: ['openDirectory', 'multiSelections'] }
     const picked = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     if (picked.canceled || !picked.filePaths.length) return this.state()
     const folders = picked.filePaths.map(p => resolve(p))
@@ -527,7 +528,7 @@ export class Controls {
 
   async addApp() {
     const win = this.deps.window()
-    const opts: Electron.OpenDialogOptions = {
+    const opts: OpenDialogOptions = {
       title: 'Application the assistant may open',
       properties: ['openFile'],
       filters: process.platform === 'win32' ? [{ name: 'Applications', extensions: ['exe', 'lnk', 'appref-ms'] }] : [],
@@ -594,7 +595,7 @@ export class Controls {
 
   async pickScopeFolder(): Promise<string | null> {
     const win = this.deps.window()
-    const opts: Electron.OpenDialogOptions = { title: 'Folder this rule covers', properties: ['openDirectory'] }
+    const opts: OpenDialogOptions = { title: 'Folder this rule covers', properties: ['openDirectory'] }
     const picked = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     return picked.canceled ? null : (picked.filePaths[0] ?? null)
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('electron', () => ({ net: { fetch: vi.fn() }, protocol: { handle: vi.fn() }, app: { getPath: () => '/tmp' } }))
+vi.mock('./host/index.ts', () => ({ net: { fetch: vi.fn() }, protocol: { handle: vi.fn() }, app: { getPath: () => '/tmp' } }))
 
 const { findImage, parseFeed, idOf } = await import('./news.ts')
 

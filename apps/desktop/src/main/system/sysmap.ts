@@ -14,7 +14,7 @@ import { readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 
-import { app } from 'electron'
+import { app } from '../host/index.ts'
 
 import { EMPTY_MAP, isProtectedPath, mapCounts, parseWorkspaceUri, SKIP_DIRS, type MapEntry, type MapKind, type SystemMap } from '../../shared/sysmap.ts'
 import { claudeSessions } from '../code/discover.ts'

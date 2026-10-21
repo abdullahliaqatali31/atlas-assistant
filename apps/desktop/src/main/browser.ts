@@ -1,25 +1,24 @@
 /**
- * Atlas's own browser, main side. The page hosts a <webview> in its own
- * persistent session; here every webview is hardened before it attaches
- * (no preload, no Node, sandboxed, web pages only), new windows open in the
- * tab next to the one that asked, permission prompts are refused, and the browser looks like
- * plain Chrome to the sites it visits. Atlas drives it through the guest's
- * webContents: reading the page (text and numbered things to click or type
- * into) and clicking or typing with real input events, as a person would.
+ * Atlas's own browser: Google Chrome (or Edge) installed on this PC, driven
+ * with Playwright, in its own profile (its sign-ins stay apart from the
+ * owner's browsers) and without a window of its own: the owner's page shows
+ * a live picture of the tab and sends clicks, scrolling and typing back.
+ * Atlas reads pages (text and numbered things to click or type into) and
+ * acts with real mouse and keyboard input, as a person would. Pages a site
+ * opens by itself become tabs next to the one that asked.
  *
- * The browser has tabs: main keeps the list (saved between runs, pinned and
- * grouped tabs included); the page draws one webview per awake tab and tells
- * main which webContents is which tab. Atlas acts on the tab shown.
+ * The browser has tabs: the list is kept here (saved between runs, pinned
+ * and grouped tabs included); a few pages stay awake, the rest load again
+ * when shown, and the whole browser closes after minutes of nobody using it.
  */
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-import { screen, session, webContents, type BrowserWindow, type WebContents } from 'electron'
+import { chromium, type BrowserContext, type Page } from 'playwright-core'
 
 import {
   BROWSER_HOME,
-  BROWSER_PARTITION,
   BRT,
   EMPTY_TABS,
   GROUP_COLORS,
@@ -39,7 +38,6 @@ import {
 } from '../shared/browser.ts'
 import type { PageCommand } from '../shared/ui.ts'
 
-const ATTACH_TIMEOUT_MS = 12_000
 const LOAD_TIMEOUT_MS = 15_000
 const MAX_TEXT = 6_000
 const MAX_ITEMS = 120
@@ -54,14 +52,6 @@ const PAGE_SCROLLBARS = `
 ::-webkit-scrollbar-thumb:hover { background: rgb(56 189 248 / 0.65); border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 `
-
-/** A plain Chrome user agent: some sites (Google sign-in among them) refuse embedded browsers that say otherwise. */
-const chromeAgent = () => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`
-
-/** What Google's sign-in accepts: a current Firefox (it does not check Firefox the way it checks embedded Chromium). */
-const FIREFOX_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:144.0) Gecko/20100101 Firefox/144.0'
-const SIGN_IN_URLS = ['https://accounts.google.com/*', 'https://accounts.youtube.com/*']
-const isSignIn = (url: string) => /^https:\/\/accounts\.(google|youtube)\.com\//.test(url)
 
 /** Runs in the page: its text, and the things on screen one can click or type into, numbered. */
 const READ_PAGE = `(() => {
@@ -152,18 +142,25 @@ const loadTabs = (file: string): BrowserTabsState => {
   }
 }
 
+/** Pages awake at once (each is a renderer process); more sleep and load again when shown. */
+const AWAKE = 3
+/** Nobody looked at or used the browser for this long: it closes (and opens again on demand). */
+const IDLE_CLOSE_MS = 5 * 60_000
+const VIEWPORT = { width: 1280, height: 800 }
+const KEY_NAMES: Record<string, string> = { Up: 'ArrowUp', Down: 'ArrowDown', Left: 'ArrowLeft', Right: 'ArrowRight' }
+
 export class BrowserService {
+  private context: BrowserContext | null = null
+  private starting: Promise<BrowserContext> | null = null
   /** Each awake tab's page, by tab id (sleeping tabs have none). */
-  private readonly pages = new Map<string, WebContents>()
-  private readonly waiters = new Map<string, (() => void)[]>()
-  private prepared = false
+  private readonly pages = new Map<string, Page>()
   private tabs: BrowserTabsState
   private saveTimer: ReturnType<typeof setTimeout> | null = null
+  private idleTimer: ReturnType<typeof setTimeout> | null = null
+  private agent = ''
 
   constructor(
     private readonly deps: {
-      /** Opens (or shows) Atlas's window. */
-      ensureWindow: () => Promise<BrowserWindow>
       command: (c: PageCommand) => void
       mode: () => BrowserMode
       log: (level: 'info' | 'warn', message: string) => void
@@ -171,6 +168,8 @@ export class BrowserService {
       toRenderer: (channel: string, payload: unknown) => void
       /** Where the tab list is kept between runs. */
       file: string
+      /** The browser's own profile: its sign-ins and cookies, apart from the owner's own browsers. */
+      profileDir: string
     },
   ) {
     this.tabs = loadTabs(deps.file)
@@ -180,66 +179,167 @@ export class BrowserService {
     this.deps.handle(BRT.get, () => this.tabs)
     this.deps.handle(BRT.act, a => {
       const action = parseTabAction(a)
-      if (action) this.act(action)
+      if (action) return this.act(action)
     })
-    this.deps.handle(BRT.report, r => this.report(r))
     this.deps.handle(BRT.picture, (id, width) => this.picture(id, width))
     this.deps.handle(BRT.input, (id, input) => this.remote(id, input))
   }
 
-  /** The size of each tab's last picture, to place the web interface's clicks. */
-  private readonly pictured = new Map<string, { width: number; height: number }>()
+  // ── the browser itself ───────────────────────────────────
+
+  /** Chrome (or Edge) installed on this PC, its own profile, no window: the page shows it. */
+  private async browser(): Promise<BrowserContext> {
+    if (this.context) return this.context
+    this.starting ??= (async () => {
+      let last: unknown = null
+      for (const channel of ['chrome', 'msedge'] as const) {
+        try {
+          const ctx = await chromium.launchPersistentContext(this.deps.profileDir, {
+            channel,
+            headless: true,
+            viewport: VIEWPORT,
+            ignoreDefaultArgs: ['--enable-automation'],
+            // Lean: no extensions, sync, translate or background downloads, and a cap on page processes.
+            args: [
+              '--disable-blink-features=AutomationControlled',
+              '--no-first-run',
+              '--no-default-browser-check',
+              '--disable-extensions',
+              '--disable-component-update',
+              '--disable-background-networking',
+              '--disable-sync',
+              '--disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication',
+              '--renderer-process-limit=4',
+            ],
+          })
+          // Sites see plain Chrome, not "HeadlessChrome".
+          const version = ctx.browser()?.version() ?? '140.0.0.0'
+          this.agent = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version.split('.')[0]}.0.0.0 Safari/537.36`
+          await ctx.setExtraHTTPHeaders({}).catch(() => undefined)
+          await ctx.addInitScript(`Object.defineProperty(navigator, 'webdriver', { get: () => undefined })`)
+          await ctx.addInitScript(`addEventListener('DOMContentLoaded', () => { const s = document.createElement('style'); s.textContent = ${JSON.stringify(PAGE_SCROLLBARS)}; document.documentElement.appendChild(s) })`)
+          // A page the site opened by itself (target=_blank, sign-in pop-ups) becomes a tab next to its opener.
+          ctx.on('page', p => void this.adopt(p))
+          ctx.on('close', () => {
+            this.context = null
+            this.pages.clear()
+          })
+          for (const p of ctx.pages()) await p.close().catch(() => undefined)
+          this.context = ctx
+          this.deps.log('info', `Atlas's browser started (${channel} ${version}).`)
+          return ctx
+        } catch (e) {
+          last = e
+        }
+      }
+      throw new Error(`Atlas's browser needs Google Chrome or Microsoft Edge on this PC (${last instanceof Error ? last.message.split('\n')[0] : String(last)}).`)
+    })().finally(() => {
+      this.starting = null
+    })
+    return this.starting
+  }
+
+  /** Used just now: closes after a while of nobody using or watching it. */
+  private touch() {
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = setTimeout(() => void this.close(), IDLE_CLOSE_MS)
+    this.idleTimer.unref?.()
+  }
+
+  async close() {
+    const ctx = this.context
+    this.context = null
+    this.pages.clear()
+    await ctx?.close().catch(() => undefined)
+  }
+
+  /** Page events keep the tab's address and title. */
+  private follow(id: string, page: Page) {
+    this.pages.set(id, page)
+    page.on('framenavigated', f => {
+      if (f === page.mainFrame()) this.report(id, f.url(), null)
+    })
+    page.on('load', () => void page.title().then(t => this.report(id, null, t), () => undefined))
+    page.on('close', () => {
+      if (this.pages.get(id) === page) this.pages.delete(id)
+    })
+    void page.setExtraHTTPHeaders({ 'User-Agent': this.agent }).catch(() => undefined)
+  }
+
+  private async adopt(page: Page) {
+    if ([...this.pages.values()].includes(page)) return
+    const opener = await page.opener().catch(() => null)
+    const from = opener ? [...this.pages].find(([, p]) => p === opener)?.[0] : undefined
+    if (!from) return
+    const fromTab = this.tabs.tabs.find(t => t.id === from)
+    const tab = this.newTab(page.url() === 'about:blank' ? BROWSER_HOME : page.url(), { byAtlas: fromTab?.byAtlas ?? false, after: from })
+    this.follow(tab.id, page)
+  }
+
+  /** The tab's page, opened (and loaded at its address) if it was asleep; the longest-unused pages sleep. */
+  private async pageFor(id: string): Promise<Page> {
+    const existing = this.pages.get(id)
+    if (existing && !existing.isClosed()) return existing
+    const tab = this.tabs.tabs.find(t => t.id === id)
+    if (!tab) throw new Error('That tab is closed.')
+    const ctx = await this.browser()
+    const page = await ctx.newPage()
+    this.follow(id, page)
+    await page.goto(tab.url, { waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS }).catch(() => undefined)
+    // Keep a few pages awake: the one shown and the most recently used.
+    const awake = [...this.pages.keys()].map(k => this.tabs.tabs.find(t => t.id === k)).filter((t): t is BrowserTab => t !== undefined)
+    for (const t of awake.sort((a, b) => b.lastUsed - a.lastUsed).slice(AWAKE)) if (t.id !== this.tabs.active) void this.pages.get(t.id)?.close()
+    return page
+  }
+
+  // ── the web interface's picture and hands ────────────────
 
   private async picture(id: unknown, width: unknown): Promise<TabPicture | null> {
-    const wc = typeof id === 'string' ? this.pages.get(id) : undefined
-    if (!wc || wc.isDestroyed()) return null
-    const img = await wc.capturePage()
-    if (img.isEmpty()) return null
-    const size = img.getSize()
-    this.pictured.set(id as string, size)
+    if (typeof id !== 'string' || !this.tabs.tabs.some(t => t.id === id)) return null
+    this.touch()
+    const page = await this.pageFor(id).catch(() => null)
+    if (!page) return null
     const w = typeof width === 'number' && Number.isFinite(width) ? Math.max(320, Math.min(1600, Math.round(width))) : 1024
-    const small = size.width > w ? img.resize({ width: w, quality: 'good' }) : img
-    const s = small.getSize()
-    return { url: `data:image/jpeg;base64,${small.toJPEG(70).toString('base64')}`, width: s.width, height: s.height }
-  }
-
-  private remote(id: unknown, raw: unknown) {
-    const input = parseRemoteInput(raw)
-    const wc = typeof id === 'string' ? this.pages.get(id) : undefined
-    const size = typeof id === 'string' ? this.pictured.get(id) : undefined
-    if (!input || !wc || wc.isDestroyed()) return
-    // Captures are in device pixels; input events in Windows' scaled ones.
-    const zoom = screen.getPrimaryDisplay().scaleFactor || 1
-    const at = (fx: number, fy: number) => ({ x: Math.round(((size?.width ?? 0) * fx) / zoom), y: Math.round(((size?.height ?? 0) * fy) / zoom) })
-    if (input.kind === 'click') {
-      const p = at(input.x, input.y)
-      wc.focus()
-      wc.sendInputEvent({ type: 'mouseDown', ...p, button: 'left', clickCount: 1 })
-      wc.sendInputEvent({ type: 'mouseUp', ...p, button: 'left', clickCount: 1 })
-    } else if (input.kind === 'wheel') {
-      wc.sendInputEvent({ type: 'mouseWheel', ...at(input.x, input.y), deltaX: 0, deltaY: -input.dy })
-    } else if (input.kind === 'key') {
-      wc.sendInputEvent({ type: 'keyDown', keyCode: input.key })
-      wc.sendInputEvent({ type: 'keyUp', keyCode: input.key })
-    } else {
-      for (const ch of input.text) wc.sendInputEvent({ type: 'char', keyCode: ch })
+    const shot = await page.screenshot({ type: 'jpeg', quality: w < VIEWPORT.width ? 65 : 75, scale: 'css', timeout: 5_000 }).catch(() => null)
+    if (!shot) return null
+    const loading = await page.evaluate('document.readyState !== "complete"').catch(() => false)
+    const hist = (await page.evaluate('history.length').catch(() => 1)) as number
+    return {
+      url: `data:image/jpeg;base64,${shot.toString('base64')}`,
+      width: VIEWPORT.width,
+      height: VIEWPORT.height,
+      page: { url: page.url(), title: await page.title().catch(() => ''), loading: loading === true, back: hist > 1, forward: false },
     }
   }
+
+  private async remote(id: unknown, raw: unknown) {
+    const input = parseRemoteInput(raw)
+    if (!input || typeof id !== 'string') return
+    this.touch()
+    const page = await this.pageFor(id)
+    const at = (fx: number, fy: number) => ({ x: Math.round(VIEWPORT.width * fx), y: Math.round(VIEWPORT.height * fy) })
+    if (input.kind === 'click') {
+      const p = at(input.x, input.y)
+      await page.mouse.click(p.x, p.y)
+    } else if (input.kind === 'wheel') {
+      const p = at(input.x, input.y)
+      await page.mouse.move(p.x, p.y)
+      await page.mouse.wheel(0, input.dy)
+    } else if (input.kind === 'key') await page.keyboard.press(KEY_NAMES[input.key] ?? input.key)
+    else await page.keyboard.insertText(input.text)
+  }
+
+  // ── tabs ──────────────────────────────────────────────────
 
   /** The tab Atlas and the toolbar act on. */
   private activeTab(): BrowserTab | null {
     return this.tabs.tabs.find(t => t.id === this.tabs.active) ?? null
   }
 
-  private activePage(): WebContents | null {
-    const wc = this.tabs.active ? this.pages.get(this.tabs.active) : undefined
-    return wc && !wc.isDestroyed() ? wc : null
-  }
-
-  /** The site the browser shows (host name), for the widget. */
+  /** The site the browser shows (host name). */
   site(): string | null {
     try {
-      const url = this.activePage()?.getURL() ?? this.activeTab()?.url
+      const url = (this.tabs.active && this.pages.get(this.tabs.active)?.url()) || this.activeTab()?.url
       return url ? new URL(url).hostname.replace(/^www\./, '') || null : null
     } catch {
       return null
@@ -261,37 +361,20 @@ export class BrowserService {
     }, 600)
   }
 
-  /** A tab's page told its webContents id, address or title. */
-  private report(v: unknown) {
-    const r = (v ?? {}) as { id?: unknown; wcId?: unknown; url?: unknown; title?: unknown }
-    const tab = this.tabs.tabs.find(t => t.id === r.id)
+  /** A tab's page moved to an address or got its title. */
+  private report(id: string, url: string | null, title: string | null) {
+    const tab = this.tabs.tabs.find(t => t.id === id)
     if (!tab) return
-    if (typeof r.wcId === 'number') {
-      const wc = webContents.fromId(r.wcId)
-      // Only a webview in the browser's own session can be a tab.
-      if (wc && !wc.isDestroyed() && wc.getType() === 'webview' && wc.session === session.fromPartition(BROWSER_PARTITION)) {
-        this.pages.set(tab.id, wc)
-        wc.once('destroyed', () => {
-          if (this.pages.get(tab.id) === wc) this.pages.delete(tab.id)
-        })
-        for (const w of this.waiters.get(tab.id)?.splice(0) ?? []) w()
-      }
-    }
     let dirty = false
-    if (typeof r.url === 'string' && /^https?:/.test(r.url) && r.url !== tab.url) {
-      tab.url = r.url.slice(0, 2000)
+    if (url && /^https?:/.test(url) && url !== tab.url) {
+      tab.url = url.slice(0, 2000)
       dirty = true
     }
-    if (typeof r.title === 'string' && r.title !== tab.title) {
-      tab.title = r.title.slice(0, 200)
+    if (title !== null && title !== tab.title) {
+      tab.title = title.slice(0, 200)
       dirty = true
     }
     if (dirty) this.changed()
-  }
-
-  private tabOf(wc: WebContents): BrowserTab | null {
-    for (const [id, page] of this.pages) if (page === wc) return this.tabs.tabs.find(t => t.id === id) ?? null
-    return null
   }
 
   /** A new tab, placed after `after` (or at the end); when the list is full the longest-unused ordinary tab makes room. */
@@ -323,6 +406,7 @@ export class BrowserService {
 
   private remove(ids: string[]) {
     const gone = new Set(ids)
+    for (const id of ids) void this.pages.get(id)?.close()
     const order = orderTabs(this.tabs)
     const at = order.findIndex(t => t.id === this.tabs.active)
     this.tabs.tabs = this.tabs.tabs.filter(t => !gone.has(t.id))
@@ -350,16 +434,17 @@ export class BrowserService {
   }
 
   private setGroup(ids: string[], group: string | null) {
-    for (const t of this.tabs.tabs) if (ids.includes(t.id)) {
-      t.group = group
-      if (group) t.pinned = false
-    }
+    for (const t of this.tabs.tabs)
+      if (ids.includes(t.id)) {
+        t.group = group
+        if (group) t.pinned = false
+      }
     this.tidyGroups()
     this.changed()
   }
 
-  /** The owner's own clicks on the tab strip. */
-  private act(a: TabAction) {
+  /** The owner's own clicks on the tab strip and the toolbar. */
+  private async act(a: TabAction) {
     switch (a.kind) {
       case 'new': {
         const url = (a.url && toUrl(a.url)) || BROWSER_HOME
@@ -397,6 +482,21 @@ export class BrowserService {
         if (g) g.collapsed = a.collapsed
         return this.changed()
       }
+      case 'go': {
+        if (!this.activeTab()) return void this.newTab(a.url, { byAtlas: false })
+        this.touch()
+        const page = await this.pageFor(this.tabs.active!)
+        await page.goto(a.url, { waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS }).catch(() => undefined)
+        return
+      }
+      case 'nav': {
+        if (!this.tabs.active) return
+        this.touch()
+        const page = await this.pageFor(this.tabs.active)
+        const opts = { waitUntil: 'domcontentloaded' as const, timeout: LOAD_TIMEOUT_MS }
+        await (a.dir === 'back' ? page.goBack(opts) : a.dir === 'forward' ? page.goForward(opts) : page.reload(opts)).catch(() => undefined)
+        return
+      }
     }
   }
 
@@ -430,17 +530,17 @@ export class BrowserService {
         if (!url) return 'That is not a web address.'
         const group = op.group ? this.groupNamed(op.group).id : null
         this.newTab(url, { byAtlas: true, after: this.tabs.active, group, pinned: op.pin })
-        const wc = await this.ensure()
-        await this.settle(wc)
-        return `Opened a new tab${op.group ? ` in "${op.group}"` : ''}${op.pin ? ' (pinned)' : ''}.\n${this.describe(await this.read(wc), false)}`
+        const page = await this.ensure()
+        await this.settle(page)
+        return `Opened a new tab${op.group ? ` in "${op.group}"` : ''}${op.pin ? ' (pinned)' : ''}.\n${this.describe(await this.read(page), false)}`
       }
       case 'switch': {
         const t = order[op.n - 1]
         if (!t) return `There is no tab ${op.n}. ${this.listTabs()}`
         this.activate(t.id)
-        const wc = await this.ensure()
-        await this.settle(wc, 6_000)
-        return `Switched to tab ${op.n}.\n${this.describe(await this.read(wc), false)}`
+        const page = await this.ensure()
+        await this.settle(page, 6_000)
+        return `Switched to tab ${op.n}.\n${this.describe(await this.read(page), false)}`
       }
       case 'close': {
         const ts = pick(op.ns)
@@ -479,93 +579,23 @@ export class BrowserService {
     }
   }
 
-  /** The browser's own session: Chrome's face, no permission prompts, nothing but web pages. */
-  private prepare() {
-    if (this.prepared) return
-    this.prepared = true
-    const s = session.fromPartition(BROWSER_PARTITION)
-    s.setUserAgent(chromeAgent())
-    // Google refuses sign-in from browsers it takes for embedded ones ("this browser may not be secure").
-    // On its sign-in pages only, the browser presents as Firefox, without Chromium's client hints.
-    s.webRequest.onBeforeSendHeaders({ urls: SIGN_IN_URLS }, (details, done) => {
-      const headers: Record<string, string> = { ...details.requestHeaders, 'User-Agent': FIREFOX_AGENT }
-      for (const h of Object.keys(headers)) if (/^sec-ch-ua/i.test(h)) delete headers[h]
-      done({ requestHeaders: headers })
-    })
-    s.setPermissionRequestHandler((_wc, permission, done) => done(permission === 'fullscreen' || permission === 'clipboard-sanitized-write'))
-    s.setPermissionCheckHandler((_wc, permission) => permission === 'fullscreen' || permission === 'clipboard-sanitized-write')
-  }
-
-  /** Watch the main window's page for webviews: harden each before it attaches; pop-ups become new tabs. */
-  watch(host: WebContents) {
-    this.prepare()
-    host.on('will-attach-webview', (event, prefs, params) => {
-      delete (prefs as { preload?: string }).preload
-      prefs.nodeIntegration = false
-      prefs.nodeIntegrationInSubFrames = false
-      prefs.contextIsolation = true
-      prefs.sandbox = true
-      prefs.webSecurity = true
-      prefs.allowRunningInsecureContent = false
-      if (params.partition !== BROWSER_PARTITION || !/^(https?:|about:blank)/.test(params.src ?? '')) event.preventDefault()
-    })
-    host.on('did-attach-webview', (_event, wc) => {
-      wc.setWindowOpenHandler(({ url }) => {
-        // Pop-ups (sign-in windows included) open as a tab next to the one that asked.
-        if (/^https?:/.test(url)) {
-          const from = this.tabOf(wc)
-          this.newTab(url, { byAtlas: from?.byAtlas ?? false, after: from?.id ?? this.tabs.active })
-        }
-        return { action: 'deny' }
-      })
-      wc.on('will-navigate', (e, url) => {
-        if (!/^(https?:|about:blank)/.test(url)) e.preventDefault()
-      })
-      // The page's own navigator.userAgent follows the header: Firefox on Google's sign-in, Chrome everywhere else.
-      wc.on('did-start-navigation', details => {
-        if (!details.isMainFrame) return
-        const agent = isSignIn(details.url) ? FIREFOX_AGENT : chromeAgent()
-        if (wc.getUserAgent() !== agent) wc.setUserAgent(agent)
-      })
-      // Slim, rounded scrollbars that suit light and dark pages alike, instead of Windows' grey bars.
-      wc.on('dom-ready', () => void wc.insertCSS(PAGE_SCROLLBARS).catch(() => undefined))
-    })
-  }
-
-  /** The tab shown, opened (in the corner if the browser was out of sight) and loaded into a page. */
-  private async ensure(): Promise<WebContents> {
+  /** The tab shown, with its page loaded; the owner's page shows the browser (in the corner if it was put away). */
+  private async ensure(): Promise<Page> {
     if (!this.activeTab()) this.newTab(BROWSER_HOME, { byAtlas: true })
-    const id = this.tabs.active!
-    const ready = this.activePage()
-    if (ready) {
-      if (this.deps.mode() === 'hidden') this.deps.command({ browser: { mode: 'mini' } })
-      return ready
-    }
-    await this.deps.ensureWindow()
-    this.deps.command({ browser: { mode: this.deps.mode() === 'hidden' ? 'mini' : this.deps.mode() } })
-    await Promise.race([
-      new Promise<void>(r => {
-        const list = this.waiters.get(id) ?? []
-        list.push(r)
-        this.waiters.set(id, list)
-      }),
-      sleep(ATTACH_TIMEOUT_MS),
-    ])
-    const wc = this.activePage()
-    if (!wc) throw new Error('The browser did not open.')
-    return wc
+    if (this.deps.mode() === 'hidden') this.deps.command({ browser: { mode: 'mini' } })
+    this.touch()
+    return this.pageFor(this.tabs.active!)
   }
 
   /** Wait for the page to finish loading (or give up after a while), then a moment for scripts. */
-  private async settle(wc: WebContents, ms = LOAD_TIMEOUT_MS) {
-    const started = Date.now()
+  private async settle(page: Page, ms = LOAD_TIMEOUT_MS) {
     await sleep(250)
-    while (wc.isLoading() && Date.now() - started < ms) await sleep(150)
+    await page.waitForLoadState('load', { timeout: ms }).catch(() => undefined)
     await sleep(500)
   }
 
-  private async read(wc: WebContents): Promise<PageRead> {
-    return (await wc.executeJavaScript(READ_PAGE, true)) as PageRead
+  private async read(page: Page): Promise<PageRead> {
+    return (await page.evaluate(READ_PAGE)) as PageRead
   }
 
   private describe(p: PageRead, full: boolean): string {
@@ -577,30 +607,16 @@ export class BrowserService {
     return lines.join('\n')
   }
 
-  private async click(wc: WebContents, x: number, y: number) {
-    wc.sendInputEvent({ type: 'mouseMove', x, y })
-    wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
-    await sleep(40)
-    wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
-  }
-
-  private key(wc: WebContents, keyCode: string) {
-    wc.sendInputEvent({ type: 'keyDown', keyCode })
-    if (keyCode === 'Enter') wc.sendInputEvent({ type: 'char', keyCode: '\r' })
-    wc.sendInputEvent({ type: 'keyUp', keyCode })
-  }
-
   async handle(op: BrowserOp): Promise<string> {
     if (op.kind === 'view') {
-      if (op.mode !== 'hidden') await this.deps.ensureWindow()
       this.deps.command({ browser: { mode: op.mode } })
-      return op.mode === 'hidden' ? 'The browser is put away (the pages stay open).' : `The browser now shows ${op.mode === 'pane' ? 'as a pane beside the other one' : op.mode === 'mini' ? 'as a mini view in the corner' : 'over the whole window'}.`
+      return op.mode === 'hidden' ? 'The browser is put away (the pages stay open).' : `The browser now shows ${op.mode === 'pane' ? 'as a pane beside the other one' : op.mode === 'mini' ? 'as a mini view in the corner' : 'over the whole page'}.`
     }
     if (op.kind === 'state') {
       const tab = this.activeTab()
       if (!tab) return 'The browser has no tabs open.'
-      const wc = this.activePage()
-      return `The browser (${this.deps.mode()}, ${this.tabs.tabs.length} tab${this.tabs.tabs.length === 1 ? '' : 's'}) shows "${wc?.getTitle() ?? tab.title}" at ${wc?.getURL() ?? tab.url}${wc?.isLoading() ? ', still loading' : ''}.`
+      const page = this.pages.get(tab.id)
+      return `The browser (${this.deps.mode()}, ${this.tabs.tabs.length} tab${this.tabs.tabs.length === 1 ? '' : 's'}) shows "${(await page?.title().catch(() => null)) ?? tab.title}" at ${page?.url() ?? tab.url}.`
     }
     if (op.kind === 'tabs' && (op.op.kind === 'list' || op.op.kind === 'close' || op.op.kind === 'pin' || op.op.kind === 'group' || op.op.kind === 'ungroup')) return this.tabsOp(op.op)
     if (op.kind === 'open' && (op.newTab || !this.activeTab())) {
@@ -611,75 +627,68 @@ export class BrowserService {
     this.deps.command({ browser: { driving: true } })
     try {
       if (op.kind === 'tabs') return await this.tabsOp(op.op)
-      const wc = await this.ensure()
+      const page = await this.ensure()
       switch (op.kind) {
         case 'open': {
-          if (!op.newTab && this.activeTab()?.url !== toUrl(op.target)) {
-            const url = toUrl(op.target)
-            if (!url) throw new Error('That is not a web address.')
-            await wc.loadURL(url).catch((e: unknown) => {
-              // A redirect aborts the first load; the page still arrives.
-              if (!String(e).includes('ERR_ABORTED')) throw e
-            })
-          }
-          await this.settle(wc)
-          return (op.newTab ? 'Opened in a new tab.\n' : '') + this.describe(await this.read(wc), false)
+          const url = toUrl(op.target)
+          if (!url) throw new Error('That is not a web address.')
+          if (!op.newTab && page.url() !== url) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS }).catch(() => undefined)
+          await this.settle(page)
+          return (op.newTab ? 'Opened in a new tab.\n' : '') + this.describe(await this.read(page), false)
         }
         case 'read':
-          return this.describe(await this.read(wc), true)
+          return this.describe(await this.read(page), true)
         case 'scroll': {
-          await wc.executeJavaScript(`window.scrollBy({ top: ${op.dir === 'up' ? -1 : 1} * innerHeight * 0.85 })`, true)
+          await page.evaluate(`window.scrollBy({ top: ${op.dir === 'up' ? -1 : 1} * innerHeight * 0.85 })`)
           await sleep(400)
-          return this.describe(await this.read(wc), false)
+          return this.describe(await this.read(page), false)
         }
         case 'back':
         case 'forward': {
-          const h = wc.navigationHistory
-          if (op.kind === 'back' ? !h.canGoBack() : !h.canGoForward()) return `Nothing to go ${op.kind} to.`
-          if (op.kind === 'back') h.goBack()
-          else h.goForward()
-          await this.settle(wc)
-          return this.describe(await this.read(wc), false)
+          const moved = await (op.kind === 'back' ? page.goBack({ timeout: LOAD_TIMEOUT_MS }) : page.goForward({ timeout: LOAD_TIMEOUT_MS })).catch(() => null)
+          if (!moved) return `Nothing to go ${op.kind} to.`
+          await this.settle(page)
+          return this.describe(await this.read(page), false)
         }
         case 'click': {
-          const at = (await wc.executeJavaScript(LOCATE(op.n ?? null, op.text ?? null), true)) as { x: number; y: number; label: string } | null
+          const at = (await page.evaluate(LOCATE(op.n ?? null, op.text ?? null))) as { x: number; y: number; label: string } | null
           if (!at) throw new Error(`Could not find ${op.n ? `[${op.n}]` : `"${op.text}"`} on the page. Read the page again for fresh numbers.`)
           await sleep(250)
-          const again = ((await wc.executeJavaScript(LOCATE(op.n ?? null, op.text ?? null), true)) as { x: number; y: number } | null) ?? at
+          const again = ((await page.evaluate(LOCATE(op.n ?? null, op.text ?? null))) as { x: number; y: number } | null) ?? at
           const before = this.tabs.tabs.length
-          await this.click(wc, again.x, again.y)
-          await this.settle(wc, 8_000)
+          await page.mouse.click(again.x, again.y)
+          await this.settle(page, 8_000)
           // The click opened a new tab (a link with target=_blank): read that one.
           if (this.tabs.tabs.length > before) {
             const fresh = await this.ensure()
             await this.settle(fresh, 8_000)
             return `Clicked ${op.n ? `[${op.n}] ` : ''}"${at.label}"; it opened in a new tab. Now:\n${this.describe(await this.read(fresh), false)}`
           }
-          return `Clicked ${op.n ? `[${op.n}] ` : ''}"${at.label}". Now:\n${this.describe(await this.read(wc), false)}`
+          return `Clicked ${op.n ? `[${op.n}] ` : ''}"${at.label}". Now:\n${this.describe(await this.read(page), false)}`
         }
         case 'type': {
           if (op.n !== undefined) {
-            const at = (await wc.executeJavaScript(LOCATE(op.n, null), true)) as { x: number; y: number; editable: boolean } | null
+            const at = (await page.evaluate(LOCATE(op.n, null))) as { x: number; y: number; editable: boolean } | null
             if (!at) throw new Error(`Could not find [${op.n}] on the page. Read the page again for fresh numbers.`)
             await sleep(200)
-            await this.click(wc, at.x, at.y)
+            await page.mouse.click(at.x, at.y)
             await sleep(150)
             // Replace what was there.
-            await wc.executeJavaScript(`(() => { const e = document.activeElement; if (e && 'select' in e && typeof e.select === 'function') e.select(); else document.execCommand('selectAll') })()`, true)
+            await page.keyboard.press('Control+A')
           }
-          await wc.insertText(op.text)
+          await page.keyboard.insertText(op.text)
           if (op.enter) {
             await sleep(120)
-            this.key(wc, 'Enter')
-            await this.settle(wc, 10_000)
-            return `Typed and pressed Enter. Now:\n${this.describe(await this.read(wc), false)}`
+            await page.keyboard.press('Enter')
+            await this.settle(page, 10_000)
+            return `Typed and pressed Enter. Now:\n${this.describe(await this.read(page), false)}`
           }
           return `Typed "${op.text.slice(0, 60)}${op.text.length > 60 ? '…' : ''}"${op.n ? ` into [${op.n}]` : ''}.`
         }
         case 'key': {
-          this.key(wc, op.key)
-          await this.settle(wc, 6_000)
-          return `Pressed ${op.key}. Now:\n${this.describe(await this.read(wc), false)}`
+          await page.keyboard.press(KEY_NAMES[op.key] ?? op.key)
+          await this.settle(page, 6_000)
+          return `Pressed ${op.key}. Now:\n${this.describe(await this.read(page), false)}`
         }
       }
     } finally {

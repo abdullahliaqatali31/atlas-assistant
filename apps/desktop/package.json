@@ -1,20 +1,19 @@
 {
   "name": "@assistant/desktop",
   "productName": "Personal Assistant",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "description": "Electron shell: sandboxed renderer, preload bridge, tray and supervised runtime process.",
-  "main": "out/main/index.js",
+  "description": "Atlas: a Node gateway (runtime, PC services, Playwright browser, tray) serving its web interface.",
+  "main": "out/gateway/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
-    "icons": "node scripts/make-icons.mjs",
-    "start": "electron-vite preview",
+    "dev": "node scripts/dev.mjs",
+    "build": "vite build && vite build -c vite.gateway.config.ts",
+    "start": "node --disable-warning=ExperimentalWarning out/gateway/index.js",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
-    "postinstall": "node node_modules/electron/install.js",
-    "dist": "electron-vite build && electron-builder --win --x64"
+    "icons": "node scripts/make-icons.mjs",
+    "pack": "node scripts/pack.mjs"
   },
   "dependencies": {
     "@cesium/core": "0.1.0",
@@ -26,6 +25,7 @@
     "hls.js": "1.6.13",
     "mammoth": "1.12.3",
     "maplibre-gl": "5.24.0",
+    "playwright-core": "1.56.1",
     "satellite.js": "7.1.0",
     "sherpa-onnx-node": "1.13.8",
     "unpdf": "1.8.1"
@@ -48,9 +48,6 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "docx": "9.8.1",
-    "electron": "^44.9.0",
-    "electron-builder": "26.15.3",
-    "electron-vite": "^6.0.0",
     "lucide-react": "^1.59.0",
     "onnxruntime-web": "1.31.0-dev.20260914-8d85527a0",
     "pdf-lib": "1.17.1",
@@ -61,60 +58,13 @@
     "simple-icons": "^16.35.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.7.2",
-    "vite": "^8.3.4"
-  },
-  "build": {
-    "appId": "org.personal-assistant.desktop",
-    "productName": "Personal Assistant",
-    "directories": {
-      "output": "release",
-      "buildResources": "build"
-    },
-    "files": [
-      "out/**",
-      "resources/**",
-      "package.json"
-    ],
-    "asarUnpack": [
-      "**/*.node"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "build/icon.ico",
-      "signExecutable": false
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "shortcutName": "Personal Assistant",
-      "license": "../../LICENSE"
-    },
-    "extraResources": [
-      {
-        "from": "../../NOTICE",
-        "to": "NOTICE"
-      },
-      {
-        "from": "../../LICENSE",
-        "to": "LICENSE"
-      },
-      {
-        "from": "../../docs/THIRD_PARTY_LICENSES.md",
-        "to": "THIRD_PARTY_LICENSES.md"
-      }
-    ]
+    "vite": "8.3.4"
   },
   "author": "Personal Assistant contributors",
   "optionalDependencies": {
     "@napi-rs/keyring-win32-x64-msvc": "2.1.1"
+  },
+  "bin": {
+    "atlas": "bin/atlas.mjs"
   }
 }

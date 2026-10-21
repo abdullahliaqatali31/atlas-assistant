@@ -6,14 +6,12 @@
  */
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
 
-import { app, net, protocol } from 'electron'
+import { app, net } from './host/index.ts'
 
-import { DEFAULT_WAKE, LEGACY_MODEL_IDS, MODEL_BYTES, MODEL_FILES, MODEL_ID, MODEL_REPO, MODEL_SCHEME, parseWakePatch, WC, type ModelState, type WakeSettings, type WakeView } from '../shared/wake.ts'
+import { DEFAULT_WAKE, LEGACY_MODEL_IDS, MODEL_BYTES, MODEL_FILES, MODEL_ID, MODEL_REPO, parseWakePatch, WC, type ModelState, type WakeSettings, type WakeView } from '../shared/wake.ts'
 
 /** Lets fetch() in the renderer read assistant-model:// URLs; registered with the other schemes before app 'ready'. */
-export const modelSchemePrivileges = { scheme: MODEL_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }
 
 export interface WakeDeps {
   handle: <T>(channel: string, fn: (arg: unknown, arg2: unknown) => T | Promise<T>) => void
@@ -65,17 +63,14 @@ export class WakeService {
     this.deps.toRenderer(WC.changed, this.view())
   }
 
-  /** Serves files from the model folder only; anything else is 404. */
-  registerProtocol() {
-    protocol.handle(MODEL_SCHEME, req => {
-      const url = new URL(req.url)
-      // assistant-model://models/moonshine-tiny/onnx/encoder_model_quantized.onnx
-      const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '')
-      const base = join(app.getPath('userData'), 'models')
-      const file = normalize(join(base, url.hostname === 'models' ? rel : '__none__'))
-      if (!file.startsWith(base + sep) || !existsSync(file)) return new Response('Not found', { status: 404 })
-      return net.fetch(pathToFileURL(file).toString())
-    })
+  /** Serves files from the model folder only (assistant-model://models/…); anything else is 404. */
+  serve(url: URL): Response {
+    // assistant-model://models/moonshine-tiny/onnx/encoder_model_quantized.onnx
+    const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '')
+    const base = join(app.getPath('userData'), 'models')
+    const file = normalize(join(base, url.hostname === 'models' ? rel : '__none__'))
+    if (!file.startsWith(base + sep) || !existsSync(file)) return new Response('Not found', { status: 404 })
+    return new Response(readFileSync(file), { headers: { 'content-type': file.endsWith('.json') ? 'application/json' : 'application/octet-stream' } })
   }
 
   register() {
