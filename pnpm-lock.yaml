@@ -169,6 +169,10 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.0
         version: 1.32.1(zod@4.6.7)
+    devDependencies:
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/memory:
     dependencies:

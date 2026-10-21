@@ -4,6 +4,16 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "exports": { ".": "./src/index.ts", "./connectors": "./src/connectors.ts" },
-  "dependencies": { "@assistant/shared": "workspace:*", "@assistant/policy": "workspace:*", "@modelcontextprotocol/sdk": "^1.32.0" }
+  "exports": {
+    ".": "./src/index.ts",
+    "./connectors": "./src/connectors.ts"
+  },
+  "dependencies": {
+    "@assistant/policy": "workspace:*",
+    "@assistant/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.0"
+  },
+  "devDependencies": {
+    "zod": "4.6.7"
+  }
 }

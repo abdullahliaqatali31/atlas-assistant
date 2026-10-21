@@ -226,6 +226,8 @@ export const CC = {
   setFullControl: 'controls:set-full-control',
   stopAll: 'controls:stop-all',
   pickCredentials: 'controls:pick-credentials',
+  addRemote: 'controls:add-remote',
+  removeServer: 'controls:remove-server',
   setBrowser: 'controls:set-browser',
   setExtensionToken: 'controls:set-extension-token',
 } as const
@@ -236,6 +238,10 @@ export interface ControlBridge {
   onState(cb: (s: ControlState) => void): () => void
   /** Turns a catalogue connector or configured server on or off; only the MCP host restarts. */
   setServer(name: string, enabled: boolean): Promise<ControlState>
+  /** A remote MCP server (https), with an optional bearer token kept in Windows Credential Manager. */
+  addRemote(name: string, url: string, token?: string): Promise<ControlState>
+  /** Removes a connection the owner added (not the built-in ones). */
+  removeServer(name: string): Promise<ControlState>
   setTrusted(name: string, trusted: boolean): Promise<ControlState>
   /** Opens a folder chooser and adds the picks to the Files connector. */
   addFolder(): Promise<ControlState>

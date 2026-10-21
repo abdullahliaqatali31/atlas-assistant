@@ -40,6 +40,8 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   CC.setServer,
   CC.setTrusted,
   CC.pickCredentials,
+  CC.addRemote,
+  CC.removeServer,
   CC.addFolder,
   CC.removeFolder,
   CC.addApp,

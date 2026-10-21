@@ -51,8 +51,11 @@ export const PAUSE_HOTKEY = 'CommandOrControl+Alt+P'
 
 interface StoredServer {
   enabled: boolean
-  transport: 'stdio'
-  command: string
+  transport: 'stdio' | 'http'
+  command?: string
+  /** Remote connectors: the https address and the credential-store entry holding their token. */
+  url?: string
+  authSecret?: string
   args?: string[]
   env?: Record<string, string>
   trusted?: boolean
@@ -235,7 +238,7 @@ export class Controls {
         error: error ?? (state === 'failed' ? reported?.error : undefined),
         folders: cfg.folders ?? [],
         browser: catalog === 'playwright' ? (cfg.browser ?? DEFAULT_BROWSER) : undefined,
-        command: [cfg.command, ...(cfg.args ?? [])].join(' '),
+        command: cfg.transport === 'http' ? (cfg.url ?? '') : [cfg.command, ...(cfg.args ?? [])].join(' '),
         tools: (this.capabilities?.tools ?? []).filter(t => t.server === name),
         readOnly: cfg.readOnly === true,
         briefing: (cfg.briefing ?? []).length > 0,
@@ -420,6 +423,41 @@ export class Controls {
     controls.rules = on ? [...others, { id, tool: `${name}__*`, actionClass: 'observe', effect: 'allow' }] : others
     this.writeControls(controls)
     this.deps.post({ type: 'set-rules', rules: controls.rules })
+  }
+
+  /** A remote MCP server: an https address, and its token (if any) in the credential store, never in the file. */
+  addRemote(name: string, url: string, token: string | undefined) {
+    const id = name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+    if (!id || !isServerName(id)) throw new Error('Give it a short name (letters, digits, hyphens).')
+    if (isCatalogueId(id)) throw new Error('That name belongs to a built-in connection; choose another.')
+    let u: URL
+    try {
+      u = new URL(url.trim())
+    } catch {
+      throw new Error('That is not a web address.')
+    }
+    if (u.protocol !== 'https:') throw new Error('Remote connectors need an https address.')
+    const authSecret = token?.trim() ? (`MCP_REMOTE_${id.toUpperCase().replace(/-/g, '_')}` as const) : undefined
+    this.mutateMcp(file => {
+      file.servers[id] = { enabled: true, transport: 'http', url: u.toString(), ...(authSecret ? { authSecret } : {}) }
+    })
+    if (authSecret) this.secrets.set(authSecret, token!.trim())
+    this.reloadMcp()
+    return this.state()
+  }
+
+  removeServer(name: string) {
+    let secret: `MCP_REMOTE_${string}` | undefined
+    this.mutateMcp(file => {
+      const cfg = file.servers[name]
+      if (!cfg) throw new Error('No such connection.')
+      if (cfg.catalog || isCatalogueId(name)) throw new Error('Built-in connections can be turned off, not removed.')
+      secret = cfg.authSecret && /^MCP_REMOTE_[A-Z0-9_]+$/.test(cfg.authSecret) ? (cfg.authSecret as `MCP_REMOTE_${string}`) : undefined
+      delete file.servers[name]
+    })
+    if (secret) this.secrets.delete(secret)
+    this.reloadMcp()
+    return this.state()
   }
 
   /** Lets the owner point a connector at its OAuth client file; the file stays where it is. */
@@ -616,6 +654,13 @@ export class Controls {
     handle(CC.setServer, (name, enabled) => this.setServer(server(name), bool(enabled)))
     handle(CC.setTrusted, (name, trusted) => this.setTrusted(server(name), bool(trusted)))
     handle(CC.pickCredentials, name => this.pickCredentials(server(name)))
+    handle(CC.addRemote, (name, raw) => {
+      const { url, token } = (raw ?? {}) as { url?: unknown; token?: unknown }
+      if (typeof name !== 'string' || typeof url !== 'string' || url.length > 500) throw new Error('Give a name and an https address.')
+      if (token !== undefined && token !== null && (typeof token !== 'string' || token.length > 4000)) throw new Error('That token is not valid.')
+      return this.addRemote(name, url, typeof token === 'string' ? token : undefined)
+    })
+    handle(CC.removeServer, name => this.removeServer(server(name)))
     handle(CC.addFolder, () => this.addFolder())
     handle(CC.setExtensionToken, raw => {
       const token = parseExtensionToken(raw)

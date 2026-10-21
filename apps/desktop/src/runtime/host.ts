@@ -28,6 +28,7 @@ import {
   skillTools,
   localTools,
   osCredentialStore,
+  isRemoteConnectorSecret,
   SECRET_NAMES,
   startOfLocalDay,
   VOICE_KEY_NAME,
@@ -135,6 +136,8 @@ const controls = new HostControls({
   log: (level, message) => log(level, message),
   now: () => systemClock.now(),
   extensionToken: () => store.get('PLAYWRIGHT_MCP_EXTENSION_TOKEN'),
+  // Only remote connectors' own tokens, by the name their entry gives.
+  secret: name => (isRemoteConnectorSecret(name) ? store.get(name) : undefined),
   extraRules: [...CODE_RULES, ...NEWS_RULES, ...FILE_RULES, ...DESKTOP_RULES, ...UI_RULES, ...SYSTEM_RULES, ...IMPROVEMENT_RULES, ...WORLD_RULES, ...NOTIFICATION_RULES, ...VISION_RULES, ...SKILLMD_RULES, ...HABITS_RULES, ...CONVERSATION_RULES],
 })
 let voice: VoiceProvider | null = null

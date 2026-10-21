@@ -19,6 +19,8 @@ export interface HostControlsDeps {
   now: () => number
   /** The Playwright Extension token, from the OS credential store. */
   extensionToken?: () => string | undefined
+  /** Remote connectors' tokens, by credential-store name. */
+  secret?: (name: string) => string | undefined
   /** Standing allows for the host's own tools (e.g. code projects). */
   extraRules?: Rule[]
 }
@@ -84,7 +86,7 @@ export class HostControls {
     // The Playwright Extension token lives in the OS credential store; only the server that uses it gets it.
     const token = this.deps.extensionToken?.()
     if (token) for (const cfg of Object.values(config.servers)) if (cfg.args?.includes('--extension')) cfg.env = { ...cfg.env, PLAYWRIGHT_MCP_EXTENSION_TOKEN: token }
-    const host = new McpHost(config, this.rules, this.deps.now)
+    const host = new McpHost(config, this.rules, this.deps.now, name => this.deps.secret?.(name))
     const failures = new Map((await host.start()).map(f => [f.server, f.error]))
     for (const [server, error] of failures) this.deps.log('warn', `MCP server ${server} failed to start: ${error}`)
     this.mcp = host

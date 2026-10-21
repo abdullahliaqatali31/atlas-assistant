@@ -98,6 +98,8 @@ export const buildBridges = (t: Transport) => {
     setFullControl: (on, mode) => t.invoke(CC.setFullControl, on, mode ?? 'session'),
     stopAll: () => t.invoke(CC.stopAll),
     pickCredentials: name => t.invoke(CC.pickCredentials, name),
+    addRemote: (name, url, token) => t.invoke(CC.addRemote, name, { url, token }),
+    removeServer: name => t.invoke(CC.removeServer, name),
   }
 
   const personality: PersonalityBridge = {

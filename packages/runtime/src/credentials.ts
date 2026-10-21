@@ -33,10 +33,15 @@ export const SECRET_NAMES = [
   'TOMTOM_API_KEY',
   // More flight data (OpenSky Network API client, stored as clientId:clientSecret).
   'OPENSKY_CLIENT',
+  // The owner's Telegram bot (Atlas from the phone).
+  'TELEGRAM_BOT_TOKEN',
 ] as const
-export type SecretName = (typeof SECRET_NAMES)[number]
+/** Remote MCP connectors keep their tokens under their own name: MCP_REMOTE_<NAME>. */
+export type RemoteConnectorSecret = `MCP_REMOTE_${string}`
+export type SecretName = (typeof SECRET_NAMES)[number] | RemoteConnectorSecret
 
-export const isSecretName = (name: string): name is SecretName => (SECRET_NAMES as readonly string[]).includes(name)
+export const isRemoteConnectorSecret = (name: string): name is RemoteConnectorSecret => /^MCP_REMOTE_[A-Z0-9_]{1,40}$/.test(name)
+export const isSecretName = (name: string): name is SecretName => (SECRET_NAMES as readonly string[]).includes(name) || isRemoteConnectorSecret(name)
 
 export interface CredentialStore {
   get(name: SecretName): string | undefined

@@ -16,7 +16,7 @@ export {
   type VoiceConfig,
   type VoiceProviderId,
 } from './config.ts'
-export { osCredentialStore, withStoredSecrets, isSecretName, SECRET_NAMES, type CredentialStore, type SecretName } from './credentials.ts'
+export { osCredentialStore, withStoredSecrets, isSecretName, isRemoteConnectorSecret, SECRET_NAMES, type CredentialStore, type SecretName } from './credentials.ts'
 export { PERSONA, addressee, briefingInstruction, profileBlock, systemPrompt, welcomeInstruction } from './persona.ts'
 export { callScope, DEFAULT_RULES, learningTools, localTools, mcpTools, validateInput, type RuntimeTool } from './tools.ts'
 export { formatEvidence, gatherEvidence, mcpEvidenceSources, type EvidenceBlock, type EvidenceSource } from './evidence.ts'

@@ -6,14 +6,22 @@
 import { readFileSync } from 'node:fs'
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
 import { classifyMcpTool, evaluate, type ActionClass, type Decision, type Rule, type ToolAnnotations } from '@assistant/policy'
 
 export interface ServerConfig {
   enabled: boolean
-  transport: 'stdio'
-  command: string
+  /** stdio: a program Atlas starts; http: a remote server at an https address. */
+  transport: 'stdio' | 'http'
+  /** stdio only. */
+  command?: string
+  /** http only: the server's address. */
+  url?: string
+  /** http only: the credential-store entry whose value goes as "Authorization: Bearer …". */
+  authSecret?: string
   args?: string[]
   env?: Record<string, string>
   /** Owner marks a server trusted to let its annotations relax classification. */
@@ -109,7 +117,30 @@ export class McpHost {
     private readonly config: McpConfig,
     private readonly rules: () => readonly Rule[],
     private readonly now: () => number,
+    /** Reads a secret by name (remote servers' tokens); never written to the config file. */
+    private readonly secret: (name: string) => string | undefined = () => undefined,
   ) {}
+
+  /** A remote server: the current streamable HTTP transport, else the older SSE one. */
+  private async connectHttp(client: Client, cfg: ServerConfig): Promise<Client> {
+    // https everywhere; plain http only for a server on this PC.
+    if (!cfg.url || !(/^https:\/\//i.test(cfg.url) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(cfg.url))) throw new Error('A remote connector needs an https address.')
+    const token = cfg.authSecret ? this.secret(cfg.authSecret) : undefined
+    if (cfg.authSecret && !token) throw new Error('Its token is missing; add it again in Links.')
+    const requestInit = token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(cfg.url), { requestInit }))
+      return client
+    } catch (first) {
+      const fallback = new Client({ name: 'personal-assistant', version: '0.1.0' })
+      try {
+        await fallback.connect(new SSEClientTransport(new URL(cfg.url), { requestInit }))
+        return fallback
+      } catch {
+        throw first
+      }
+    }
+  }
 
   /** Starts enabled servers. A server that fails to start is reported, not fatal. */
   async start(): Promise<{ server: string; error: string }[]> {
@@ -117,8 +148,12 @@ export class McpHost {
     for (const [name, cfg] of Object.entries(this.config.servers)) {
       if (!cfg.enabled) continue
       try {
-        const client = new Client({ name: 'personal-assistant', version: '0.1.0' })
-        await client.connect(new StdioClientTransport({ command: cfg.command, args: cfg.args ?? [], env: cfg.env }))
+        let client = new Client({ name: 'personal-assistant', version: '0.1.0' })
+        if (cfg.transport === 'http') client = await this.connectHttp(client, cfg)
+        else {
+          if (!cfg.command) throw new Error('No command to start.')
+          await client.connect(new StdioClientTransport({ command: cfg.command, args: cfg.args ?? [], env: cfg.env }))
+        }
         this.clients.set(name, client)
         const { tools } = await client.listTools()
         for (const t of tools) {

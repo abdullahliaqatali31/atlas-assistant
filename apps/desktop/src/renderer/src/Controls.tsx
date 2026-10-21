@@ -141,6 +141,7 @@ function Connections({ state, run }: { state: ControlState; run: Run }) {
       {state.servers.map(s => (
         <ServerCard key={s.name} server={s} state={state} run={run} />
       ))}
+      <RemoteForm run={run} />
       <WindowTracking />
       {planned.map(c => (
         <section key={c.id} className="flex items-center gap-3 rounded-[0.875rem] border border-dashed border-border p-3">
@@ -271,6 +272,52 @@ function BrowserChoice({ setting, state, run }: { setting: BrowserSetting; state
   )
 }
 
+/**
+ * A remote MCP server (an https address many services now offer), with an
+ * optional token kept in Windows Credential Manager. Its tools ask before
+ * anything that writes, like every connection's.
+ */
+function RemoteForm({ run }: { run: Run }) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+  const [token, setToken] = useState('')
+  if (!open)
+    return (
+      <button type="button" className="btn w-full justify-center border-dashed" onClick={() => setOpen(true)}>
+        Add a remote connector (MCP over https)…
+      </button>
+    )
+  return (
+    <form
+      className="tile space-y-2 p-3"
+      onSubmit={e => {
+        e.preventDefault()
+        void run(() => window.controls.addRemote(name, url, token || undefined)).then(() => {
+          setOpen(false)
+          setName('')
+          setUrl('')
+          setToken('')
+        })
+      }}
+    >
+      <h3 className="font-medium">Remote connector</h3>
+      <p className="text-xs text-muted">A service's MCP address (for example from Notion, GitHub, Linear or Zapier). The token, if it needs one, stays in Windows Credential Manager.</p>
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="Name, e.g. notion" className="field" aria-label="Name" />
+      <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/mcp" className="field" aria-label="Address" />
+      <input type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="Token (optional)" autoComplete="off" className="field" aria-label="Token" />
+      <div className="flex gap-2">
+        <button type="submit" className="btn btn-primary" disabled={!name.trim() || !url.trim().toLowerCase().startsWith('https://')}>
+          Connect
+        </button>
+        <button type="button" className="btn" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  )
+}
+
 function ServerCard({ server: s, state, run }: { server: ServerView; state: ControlState; run: Run }) {
   const entry = CATALOGUE.find(c => c.id === s.catalog)
   const needsFolder = s.catalog === 'filesystem' && s.folders.length === 0
@@ -297,6 +344,11 @@ function ServerCard({ server: s, state, run }: { server: ServerView; state: Cont
         {entry?.description ?? s.command}
       </p>
       {s.state === 'failed' && s.error && <p className="mt-2 break-words text-xs text-danger">Why: {s.error}</p>}
+      {!s.catalog && (
+        <button type="button" className="btn mt-2 text-xs text-danger" onClick={() => void run(() => window.controls.removeServer(s.name))}>
+          Remove this connection
+        </button>
+      )}
 
       {(entry?.setup || entry?.needsCredentialsFile) && (
         <div className="mt-2 rounded-lg border border-border bg-bg p-2.5 text-xs">
