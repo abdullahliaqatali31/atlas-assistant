@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 
-import { connectorById, connectorServer, type BriefingCall } from '@assistant/mcp/connectors'
+import { connectorById, connectorServer, withWrites, type BriefingCall, type ConnectorId } from '@assistant/mcp/connectors'
 import { osCredentialStore } from '@assistant/runtime/credentials'
 import { app, dialog, shell, type OpenDialogOptions } from './host/index.ts'
 
@@ -67,6 +67,7 @@ interface StoredServer {
   /** The Browser connector: separate browser or the owner's own. */
   browser?: BrowserSetting
   readOnly?: boolean
+  allowTools?: string[]
   briefing?: BriefingCall[]
 }
 
@@ -241,6 +242,7 @@ export class Controls {
         command: cfg.transport === 'http' ? (cfg.url ?? '') : [cfg.command, ...(cfg.args ?? [])].join(' '),
         tools: (this.capabilities?.tools ?? []).filter(t => t.server === name),
         readOnly: cfg.readOnly === true,
+        writes: catalog && connectorById(catalog) ? { label: connectorById(catalog)!.writes.label, on: cfg.readOnly !== true } : null,
         briefing: (cfg.briefing ?? []).length > 0,
         credentialsFile: credentialsEnv ? cfg.env?.[credentialsEnv] || null : null,
       })
@@ -423,6 +425,28 @@ export class Controls {
     controls.rules = on ? [...others, { id, tool: `${name}__*`, actionClass: 'observe', effect: 'allow' }] : others
     this.writeControls(controls)
     this.deps.post({ type: 'set-rules', rules: controls.rules })
+  }
+
+  /**
+   * Calendar and email writes: the connector offers its few send and create
+   * tools (never delete) as external sends, and a standing rule makes each one
+   * ask, so the owner says yes to every email and every invitation.
+   */
+  setWrites(name: string, on: boolean) {
+    const entry = connectorById(name)
+    if (!entry) throw new Error('Only calendar and email connections can send or create.')
+    this.mutateMcp(file => {
+      const cfg = this.serverFor(file, name)
+      file.servers[name] = { ...cfg, ...withWrites(name as ConnectorId, cfg as Parameters<typeof withWrites>[1], on) } as StoredServer
+    })
+    const controls = this.readControls()
+    const prefix = `owner-connector-write-${name}-`
+    const others = controls.rules.filter(r => !r.id.startsWith(prefix))
+    controls.rules = on ? [...others, ...entry.writes.tools.map(t => ({ id: `${prefix}${t}`, tool: `${name}__${t}`, actionClass: 'external-send' as const, effect: 'ask' as const }))] : others
+    this.writeControls(controls)
+    this.deps.post({ type: 'set-rules', rules: controls.rules })
+    this.reloadMcp()
+    return this.state()
   }
 
   /** A remote MCP server: an https address, and its token (if any) in the credential store, never in the file. */
@@ -661,6 +685,7 @@ export class Controls {
       return this.addRemote(name, url, typeof token === 'string' ? token : undefined)
     })
     handle(CC.removeServer, name => this.removeServer(server(name)))
+    handle(CC.setWrites, (name, on) => this.setWrites(server(name), bool(on)))
     handle(CC.addFolder, () => this.addFolder())
     handle(CC.setExtensionToken, raw => {
       const token = parseExtensionToken(raw)

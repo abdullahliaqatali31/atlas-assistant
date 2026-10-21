@@ -33,6 +33,8 @@ export interface ServerConfig {
    * callable. Curated calendar and email connectors start this way.
    */
   readOnly?: boolean
+  /** When set, only these tools of the server are ever offered (a connector's reads plus the few writes the owner allowed). */
+  allowTools?: string[]
   /** Read calls whose results ground the daily briefing, cited by label. */
   briefing?: BriefingCall[]
 }
@@ -160,6 +162,7 @@ export class McpHost {
           const hosted = toHostedTool(name, cfg, t as Parameters<typeof toHostedTool>[2])
           // A read-only connector's write tools are never offered, whatever a rule says.
           if (cfg.readOnly && hosted.actionClass !== 'observe') continue
+          if (cfg.allowTools && !cfg.allowTools.includes(t.name)) continue
           this.tools.set(hosted.name, hosted)
         }
       } catch (error) {
@@ -217,4 +220,4 @@ export class McpHost {
   }
 }
 
-export { CONNECTORS, connectorById, connectorServer, type ConnectorEntry, type ConnectorId } from './connectors.ts'
+export { CONNECTORS, connectorById, connectorServer, withWrites, type ConnectorEntry, type ConnectorId } from './connectors.ts'

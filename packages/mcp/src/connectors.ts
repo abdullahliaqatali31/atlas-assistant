@@ -29,6 +29,8 @@ export interface ConnectorEntry {
   /** Environment variable the server reads an OAuth client file from, picked by the owner in Connections. */
   credentialsEnv?: string
   server: ServerConfig
+  /** The few tools that send or create (never delete), offered only when the owner allows them; each asks first. */
+  writes: { tools: string[]; label: string }
 }
 
 const observe = (tools: string[]): Record<string, ActionClass> => Object.fromEntries(tools.map(t => [t, 'observe' as const]))
@@ -60,6 +62,7 @@ export const CONNECTORS: readonly ConnectorEntry[] = [
       overrides: observe(GOOGLE_CALENDAR_READS),
       briefing: [calendarToday('Google Calendar', 'list-events', { calendarId: 'primary', timeMin: '{dayStart}', timeMax: '{dayEnd}' })],
     },
+    writes: { tools: ['create-event', 'update-event'], label: 'Create and change events' },
   },
   {
     id: 'gmail',
@@ -78,6 +81,7 @@ export const CONNECTORS: readonly ConnectorEntry[] = [
       overrides: observe(GMAIL_READS),
       briefing: [{ kind: 'email', label: 'Gmail', tool: 'search_emails', args: { query: 'is:unread newer_than:2d -category:promotions -category:social', maxResults: 10 } }],
     },
+    writes: { tools: ['send_email', 'draft_email'], label: 'Write drafts and send email' },
   },
   {
     id: 'microsoft-365',
@@ -98,10 +102,32 @@ export const CONNECTORS: readonly ConnectorEntry[] = [
         { kind: 'email', label: 'Outlook', tool: 'list-mail-messages', args: {} },
       ],
     },
+    writes: { tools: ['send-mail', 'create-calendar-event'], label: 'Send mail and create events' },
   },
 ]
 
 export const connectorById = (id: string): ConnectorEntry | undefined => CONNECTORS.find(c => c.id === id)
+
+const READS: Record<ConnectorId, string[]> = { 'google-calendar': GOOGLE_CALENDAR_READS, gmail: GMAIL_READS, 'microsoft-365': MS365_READS }
+
+/**
+ * A connector's config with its writes allowed or not: the listed write
+ * tools are offered (as external sends: each asks first), nothing else is,
+ * and servers with their own read-only switch get it turned off or on.
+ */
+export const withWrites = (id: ConnectorId, cfg: ServerConfig, on: boolean): ServerConfig => {
+  const entry = connectorById(id)!
+  const reads = READS[id]
+  const next: ServerConfig = {
+    ...cfg,
+    readOnly: !on,
+    allowTools: on ? [...reads, ...entry.writes.tools] : undefined,
+    overrides: { ...observe(reads), ...(on ? Object.fromEntries(entry.writes.tools.map(t => [t, 'external-send' as const])) : {}) },
+  }
+  if (id === 'google-calendar') next.env = { ...cfg.env, ENABLED_TOOLS: (on ? [...reads, ...entry.writes.tools] : reads).join(',') }
+  if (id === 'microsoft-365') next.args = [...(cfg.args ?? []).filter(a => a !== '--read-only'), ...(on ? [] : ['--read-only'])]
+  return next
+}
 
 /** A fresh, disabled server config for a connector (a copy the owner's file can own). */
 export const connectorServer = (id: ConnectorId): ServerConfig => structuredClone(connectorById(id)!.server)

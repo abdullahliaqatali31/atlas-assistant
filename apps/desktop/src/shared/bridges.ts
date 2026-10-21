@@ -100,6 +100,7 @@ export const buildBridges = (t: Transport) => {
     pickCredentials: name => t.invoke(CC.pickCredentials, name),
     addRemote: (name, url, token) => t.invoke(CC.addRemote, name, { url, token }),
     removeServer: name => t.invoke(CC.removeServer, name),
+    setWrites: (name, on) => t.invoke(CC.setWrites, name, on),
   }
 
   const personality: PersonalityBridge = {

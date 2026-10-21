@@ -344,6 +344,15 @@ function ServerCard({ server: s, state, run }: { server: ServerView; state: Cont
         {entry?.description ?? s.command}
       </p>
       {s.state === 'failed' && s.error && <p className="mt-2 break-words text-xs text-danger">Why: {s.error}</p>}
+      {s.writes && (
+        <label className="mt-2 flex items-start gap-2 rounded-lg border border-border p-2 text-xs">
+          <input type="checkbox" className="mt-0.5" checked={s.writes.on} onChange={e => void run(() => window.controls.setWrites(s.name, e.target.checked))} />
+          <span>
+            <span className="font-medium text-text">{s.writes.label}</span>
+            <span className="block text-muted">Every email and every invitation asks you first (here or on Telegram); deleting stays off. Full control lets them go without asking.</span>
+          </span>
+        </label>
+      )}
       {!s.catalog && (
         <button type="button" className="btn mt-2 text-xs text-danger" onClick={() => void run(() => window.controls.removeServer(s.name))}>
           Remove this connection

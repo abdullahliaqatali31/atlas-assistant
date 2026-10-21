@@ -49,7 +49,7 @@ practice. Each phase ships on its own, gated by `pnpm check`. Order of work: 1 (
   hour); a small learner (contextual bandit) picks when to speak up within
   those limits. "The LLM proposes, the rules decide."
 
-## Phase 5 — More hands
+## Phase 5 — More hands (done, except OAuth sign-in for remote connectors)
 
 - Telegram bot (official API): talk to Atlas from the phone, receive its
   notices, approve actions. Owner-only by pairing code.

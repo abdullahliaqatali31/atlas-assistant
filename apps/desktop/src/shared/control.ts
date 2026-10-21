@@ -135,6 +135,8 @@ export interface ServerView {
   tools: ToolView[]
   /** Only read tools are offered; enabling it also adds a standing allow for its reads (removable in Permissions). */
   readOnly: boolean
+  /** Calendar and email: the few writes (send, create) the owner can allow; each asks first. Null for other connections. */
+  writes: { label: string; on: boolean } | null
   /** Contributes to the daily briefing as a cited source. */
   briefing: boolean
   /** The OAuth client file this connector uses, when it needs one; null until picked. */
@@ -227,6 +229,7 @@ export const CC = {
   stopAll: 'controls:stop-all',
   pickCredentials: 'controls:pick-credentials',
   addRemote: 'controls:add-remote',
+  setWrites: 'controls:set-writes',
   removeServer: 'controls:remove-server',
   setBrowser: 'controls:set-browser',
   setExtensionToken: 'controls:set-extension-token',
@@ -240,6 +243,8 @@ export interface ControlBridge {
   setServer(name: string, enabled: boolean): Promise<ControlState>
   /** A remote MCP server (https), with an optional bearer token kept in Windows Credential Manager. */
   addRemote(name: string, url: string, token?: string): Promise<ControlState>
+  /** Calendar and email: allow (or stop) sending and creating; each send still asks. */
+  setWrites(name: string, on: boolean): Promise<ControlState>
   /** Removes a connection the owner added (not the built-in ones). */
   removeServer(name: string): Promise<ControlState>
   setTrusted(name: string, trusted: boolean): Promise<ControlState>
