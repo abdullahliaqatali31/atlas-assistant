@@ -50,6 +50,8 @@ import type { TrafficIncident } from '../../../shared/traffic.ts'
 import { Atmos } from './Atmos.tsx'
 import { MAP_VIEW_EVENT } from '../../../shared/map.ts'
 import { latLonLabel } from './sky.ts'
+import { FlightSim, type FlyStart } from './flightsim/FlightSim.tsx'
+import { AIRCRAFT, type AircraftId } from './flightsim/physics.ts'
 
 ;(window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = './cesium/'
 
@@ -423,6 +425,11 @@ export default function Globe3D({
   const layersRef = useRef(layers)
   layersRef.current = layers
   const [widget, setWidget] = useState<Cesium.CesiumWidget | null>(null)
+  /** Flying a plane yourself (flightsim/): which one, and where it starts. */
+  const [flying, setFlying] = useState<{ aircraft: AircraftId; start: FlyStart } | null>(null)
+  const flyingRef = useRef(false)
+  flyingRef.current = !!flying
+  const [flyMenu, setFlyMenu] = useState(false)
   const parts = useRef<{ bills: Cesium.BillboardCollection; shipBills: Cesium.BillboardCollection; sats: Satellites3D; cables: Cables3D; cams: Cameras3D; radio: Points3D<RadioStation>; news: Points3D<NewsItem>; intel: Points3D<IntelEvent>; fires: Points3D<FireSpot> } | null>(null)
   const [radioPick, setRadioPick] = useState<number | null>(null)
   const [newsPick, setNewsPick] = useState<number | null>(null)
@@ -452,7 +459,7 @@ export default function Globe3D({
   const applyRender = () => {
     const w = viewerRef.current
     if (!w || w.isDestroyed()) return
-    w.scene.requestRenderMode = !(nearHold.current || trafficLive.current || followRef.current || satRideRef.current || shipRideRef.current || orbitRef.current)
+    w.scene.requestRenderMode = !(nearHold.current || trafficLive.current || followRef.current || satRideRef.current || shipRideRef.current || orbitRef.current || flyingRef.current)
     w.scene.requestRender()
   }
   /** Orbit: circling a point on the ground, or spinning the whole globe. */
@@ -1675,6 +1682,8 @@ export default function Globe3D({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      // Flying a plane: Escape is the game's (it lands you back on the globe).
+      if (flyingRef.current) return
       if (shipRideRef.current) return setShipRide(null)
       if (satRideRef.current) return setSatRide(null)
       if (followRef.current) return setFollow(null)
@@ -1756,13 +1765,13 @@ export default function Globe3D({
       {incHover && <IncidentCard i={incHover.i} style={{ left: Math.max(8, incHover.x - 140), top: incHover.y + 14 }} />}
       <div ref={box} className="absolute inset-0" style={{ filter: display ? MODE_FILTER[display.mode] : undefined }} />
       {display && <DisplayFx mode={display.mode} scope={display.scope} />}
-      <Atmos dim={!!follow || !!satRide} />
+      {!flying && <Atmos dim={!!follow || !!satRide} />}
       {display?.hud && hudSource && !follow && <TacticalHud />}
       {hover && world && box.current && <HoverOverlay itemKey={hover.key} info={hoverInfo(hover.sel.kind, hover.sel.props, world, clock ?? Date.now())} p={{ x: hover.x, y: hover.y }} w={box.current.clientWidth} h={box.current.clientHeight} />}
       <div ref={credits} className="hidden" />
       {layers.celestial && widget && !follow && !satRide && <CelestialRing widget={widget} />}
-      {/* Top bar: tier, counts, back to 2D. */}
-      <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2">
+      {/* Top bar: tier, counts, back to 2D (out of the way while flying a plane: the cockpit has its own). */}
+      <div className={`absolute left-3 top-3 flex flex-wrap items-center gap-2 ${flying ? 'hidden' : ''}`}>
         <span className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] ${panel}`}>
           <Box className="size-3.5 text-accent" aria-hidden /> 3D · {tier ? TIER_LABEL[tier] : 'loading…'}
         </span>
@@ -1777,13 +1786,13 @@ export default function Globe3D({
         )}
         {tier === 'keyless' && <span className="rounded-full bg-black/60 px-2.5 py-1 text-[10px] text-white/60">Add a Cesium ion or Google key in Setup › Power up for 3D buildings and cities</span>}
       </div>
-      <button type="button" onClick={onClose} className={`absolute right-3 top-3 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs hover:border-accent ${panel}`}>
+      <button type="button" onClick={onClose} className={`absolute right-3 top-3 ${flying ? 'hidden' : 'flex'} items-center gap-1.5 rounded-full px-3 py-1.5 text-xs hover:border-accent ${panel}`}>
         <ArrowLeftRight className="size-3.5" aria-hidden /> Back to 2D
       </button>
       {error && <p className="absolute left-3 top-12 max-w-md rounded-lg bg-black/70 px-2 py-1 text-[11px] text-warm">{error}</p>}
 
       {/* Data layers: what the globe shows, with satellite groups (on the right; the card opens on the left). */}
-      {!follow && !satRide && (
+      {!follow && !satRide && !flying && (
         <div className={`absolute right-3 top-14 w-48 space-y-0.5 p-2 ${panel}`}>
           <p className={`px-1 pb-0.5 text-[10px] text-accent/80 ${mono}`}>Data layers</p>
           {RAIL.map(r => (
@@ -1908,6 +1917,54 @@ export default function Globe3D({
       {landing && !cable && !sat && !follow && <p className={`absolute bottom-24 left-3 px-3 py-1.5 text-[11px] ${panel}`}>Cable landing · {landing}</p>}
 
       {/* Flying with an aircraft: the HUD. */}
+      {!flying && !follow && !satRide && !shipRide && (
+          <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
+            <button type="button" onClick={() => setFlyMenu(o => !o)} aria-expanded={flyMenu} className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs hover:border-accent ${panel}`}>
+              <Plane className="size-3.5 text-accent" aria-hidden /> Fly a plane
+            </button>
+            {flyMenu && (
+              <div className={`absolute bottom-10 left-1/2 z-20 w-72 -translate-x-1/2 space-y-2 p-3 ${panel}`}>
+                <p className="text-[11px] text-white/60">Fly it yourself among the real planes in the sky now. Keys: W/S stick, A/D bank, R/F throttle, C camera, Esc leave.</p>
+                {(Object.keys(AIRCRAFT) as AircraftId[]).map(id => (
+                  <div key={id} className="flex items-center gap-1.5">
+                    <span className="flex-1 text-xs">{AIRCRAFT[id].name}</span>
+                    {(['here', 'traffic'] as FlyStart[]).map(start => (
+                      <button
+                        key={start}
+                        type="button"
+                        className="rounded-full border border-accent/40 px-2 py-0.5 text-[10px] hover:bg-accent hover:text-black"
+                        onClick={() => {
+                          setFlyMenu(false)
+                          setFollow(null)
+                          setShipRide(null)
+                          setSatRide(null)
+                          orbitRef.current = null
+                          setOrbit(false)
+                          setFlying({ aircraft: id, start })
+                        }}
+                      >
+                        {start === 'here' ? 'Here' : 'Join traffic'}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      {flying && widget && (
+        <FlightSim
+          widget={widget}
+          flights={flights}
+          aircraft={flying.aircraft}
+          start={flying.start}
+          onExit={() => {
+            setFlying(null)
+            // Back to drawing only on change (unless something else still moves).
+            queueMicrotask(applyRender)
+          }}
+        />
+      )}
       {follow && <FlightHud follow={follow} flights={flights} route={route} setFollow={setFollow} stopFollow={stopFollow} />}
       {/* Riding hint for any vehicle. */}
       {(follow || satRide || shipRide) && (
