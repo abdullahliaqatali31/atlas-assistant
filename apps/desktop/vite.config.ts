@@ -6,7 +6,7 @@ import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 
 /**
- * CesiumJS (the 3D World view) loads its workers, assets and widget styles
+ * CesiumJS (the 3D World view) loads its workers and assets
  * at run time from CESIUM_BASE_URL. Served from node_modules in development
  * and copied next to the page in a build, under ./cesium/.
  */
@@ -30,7 +30,8 @@ const cesiumStatic = (): Plugin => {
       })
     },
     closeBundle: () => {
-      for (const dir of ['Workers', 'ThirdParty', 'Assets', 'Widgets']) cpSync(join(CESIUM_DIR, dir), join(outDir, 'cesium', dir), { recursive: true })
+      // No Widgets: the page's styles come from the engine's own CSS import.
+      for (const dir of ['Workers', 'ThirdParty', 'Assets']) cpSync(join(CESIUM_DIR, dir), join(outDir, 'cesium', dir), { recursive: true })
     },
   }
 }

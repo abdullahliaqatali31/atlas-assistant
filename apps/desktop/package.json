@@ -9,7 +9,7 @@
   "main": "out/gateway/index.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "build": "vite build && vite build -c vite.gateway.config.ts",
+    "build": "vite build && vite build -c vite.gateway.config.ts && node scripts/compress.mjs",
     "start": "node --disable-warning=ExperimentalWarning out/gateway/index.js",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "icons": "node scripts/make-icons.mjs",

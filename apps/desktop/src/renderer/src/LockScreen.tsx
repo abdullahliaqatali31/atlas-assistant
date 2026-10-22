@@ -61,10 +61,23 @@ export function LockScreen({ view, ownerName }: { view: IdentityView; ownerName:
   const lockedOut = view.lockoutUntil !== null && view.lockoutUntil > now
   const helloOn = view.hello && view.helloAvailable
 
+  // The clock ticks only while a lockout counts down, and not while the window is hidden.
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
+    const until = view.lockoutUntil
+    if (until === null || until <= Date.now()) return
+    setNow(Date.now())
+    const tick = () => {
+      if (document.hidden) return
+      setNow(Date.now())
+      if (Date.now() > until) clearInterval(timer)
+    }
+    const timer = setInterval(tick, 1000)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [view.lockoutUntil])
 
   // The owner's language for the text, as soon as it is known.
   useEffect(() => {

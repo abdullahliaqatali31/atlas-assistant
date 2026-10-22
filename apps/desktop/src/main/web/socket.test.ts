@@ -43,6 +43,26 @@ describe('WebSocket server', () => {
     expect(await roundTrip(url, long)).toBe(`echo:${long}`)
   })
 
+  it('compresses when the client offers it, and keeps messages in order', async () => {
+    const url = await echo()
+    const ws = new WebSocket(url)
+    const got: string[] = []
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => {
+        // Small and large messages interleaved: the large ones are compressed and must not be overtaken.
+        for (let i = 0; i < 6; i++) ws.send(i % 2 ? `{"n":${i}}` : JSON.stringify({ n: i, list: Array.from({ length: 3000 }, (_, k) => ({ lat: k / 7, lon: -k / 3, name: `plane ${k}` })) }))
+      }
+      ws.onmessage = e => {
+        got.push(String(e.data))
+        if (got.length === 6) resolve()
+      }
+      ws.onerror = () => reject(new Error('socket error'))
+    })
+    expect(ws.extensions).toContain('permessage-deflate')
+    ws.close()
+    expect(got.map(t => (JSON.parse(t.slice('echo:'.length)) as { n: number }).n)).toEqual([0, 1, 2, 3, 4, 5])
+  })
+
   it('refuses plain HTTP on the upgrade path', async () => {
     server = createServer()
     server.on('upgrade', (req, socket, head) => acceptUpgrade(req, socket, head))

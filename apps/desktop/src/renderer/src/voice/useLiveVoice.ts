@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ApprovalRequest, ReplyEvent } from '../../../shared/ipc.ts'
+import { setMicLevel } from '../shell/micLevel.ts'
 import { LiveCall, type LivePhase } from './live.ts'
 
 /** The final text of one reply, collected from its chunks. */
@@ -39,7 +40,7 @@ const nextApproval = (known: Set<string>) => {
 export function useLiveVoice(opts: { assistantName: string; show: (replyId: string, text: string) => void; approvals: () => ApprovalRequest[] }) {
   const [active, setActive] = useState(false)
   const [phase, setPhase] = useState<LivePhase>('connecting')
-  const [level, setLevel] = useState(0)
+  // The level goes to the mic store (shell/micLevel.ts), not React state: it changes many times a second.
   const [heard, setHeard] = useState('')
   const [said, setSaid] = useState('')
   const [cost, setCost] = useState(0)
@@ -88,14 +89,14 @@ export function useLiveVoice(opts: { assistantName: string; show: (replyId: stri
           setSaid('')
         },
         onSaid: t => setSaid(t),
-        onLevel: setLevel,
+        onLevel: setMicLevel,
         onCost: setCost,
         onAsk: ask,
         onEnd: reason => {
           call.current = null
           waiting.current = null
           setActive(false)
-          setLevel(0)
+          setMicLevel(0)
           if (reason) setError(reason)
         },
       })
@@ -113,5 +114,5 @@ export function useLiveVoice(opts: { assistantName: string; show: (replyId: stri
   const cancel = useCallback(() => call.current?.cancel(), [])
   useEffect(() => () => call.current?.stop(null), [])
 
-  return { active, phase, level, heard, said, cost, error, start, stop, cancel, clearError: () => setError('') }
+  return { active, phase, heard, said, cost, error, start, stop, cancel, clearError: () => setError('') }
 }

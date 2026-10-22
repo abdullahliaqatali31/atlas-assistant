@@ -76,17 +76,39 @@ export function usePanelLayout(area: RefObject<HTMLElement | null>, panel: strin
   }, [])
 
   // The area appears after the app's first screens: watch it from whenever it exists.
-  const observed = useRef<{ el: HTMLElement; ro: ResizeObserver } | null>(null)
+  const observed = useRef<{ el: HTMLElement; ro: ResizeObserver; frame: number } | null>(null)
   useEffect(() => {
     const el = area.current
     if (!el || observed.current?.el === el) return
-    observed.current?.ro.disconnect()
-    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }))
+    if (observed.current) {
+      observed.current.ro.disconnect()
+      cancelAnimationFrame(observed.current.frame)
+    }
+    // At most one size update per frame, and none when the size did not change.
+    const measure = () => {
+      const w = el.clientWidth
+      const h = el.clientHeight
+      setSize(s => (s.w === w && s.h === h ? s : { w, h }))
+    }
+    const ro = new ResizeObserver(() => {
+      const o = observed.current
+      if (!o || o.frame) return
+      o.frame = requestAnimationFrame(() => {
+        o.frame = 0
+        measure()
+      })
+    })
     ro.observe(el)
-    observed.current = { el, ro }
-    setSize({ w: el.clientWidth, h: el.clientHeight })
+    observed.current = { el, ro, frame: 0 }
+    measure()
   })
-  useEffect(() => () => observed.current?.ro.disconnect(), [])
+  useEffect(
+    () => () => {
+      observed.current?.ro.disconnect()
+      if (observed.current) cancelAnimationFrame(observed.current.frame)
+    },
+    [],
+  )
 
   const docked = layout.place !== 'float'
   const maxW = docked ? size.w - STAGE_MIN : size.w - 16
@@ -101,7 +123,11 @@ export function usePanelLayout(area: RefObject<HTMLElement | null>, panel: strin
   float.x = clamp(layout.float.x, 0, size.w - float.w)
   float.y = clamp(layout.float.y, 0, size.h - Math.min(float.h, 48))
 
-  /** Press on the header and move: the panel follows; drop on an edge to dock, elsewhere to float. */
+  /**
+   * Press on the header and move: the panel follows; drop on an edge to dock, elsewhere to float.
+   * The app re-renders only when the drag starts and when the edge it would dock to changes; in
+   * between the panel moves itself (a transform), and the place is saved on release.
+   */
   const startMove = (e: RPointerEvent<HTMLElement>) => {
     if (e.button !== 0 || (e.target as HTMLElement).closest('button,input,select,textarea,a,[data-nodrag]')) return
     const el = area.current
@@ -118,17 +144,36 @@ export function usePanelLayout(area: RefObject<HTMLElement | null>, panel: strin
     const oy = Math.min(sy - r.top, 24)
     let moved = false
     let last: Drag | null = null
+    /** Where the drag was first drawn: later moves are offsets from it. */
+    let first: Drag | null = null
+    let frame = 0
+    const paint = () => {
+      frame = 0
+      if (!first || !last) return
+      aside.style.transform = `translate(${last.rect.x - first.rect.x}px, ${last.rect.y - first.rect.y}px)`
+    }
     const move = (ev: PointerEvent) => {
       if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return
       moved = true
       const px = ev.clientX - box.left
       const zone: PanelPlace = px < SNAP ? 'left' : px > box.width - SNAP ? 'right' : 'float'
       last = { zone, rect: { x: clamp(px - ox, 0, box.width - w), y: clamp(ev.clientY - box.top - oy, 0, box.height - 40), w, h } }
-      setDrag(last)
+      if (!first) {
+        first = last
+        setDrag(first)
+        return
+      }
+      if (zone !== first.zone) {
+        first = { ...first, zone }
+        setDrag(first)
+      }
+      frame ||= requestAnimationFrame(paint)
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      cancelAnimationFrame(frame)
+      aside.style.transform = ''
       setDrag(null)
       const d = last
       if (!moved || !d) return
@@ -138,18 +183,27 @@ export function usePanelLayout(area: RefObject<HTMLElement | null>, panel: strin
     window.addEventListener('pointerup', up)
   }
 
-  /** Drag an edge: the docked panel's inner edge sets its width; a floating one resizes from its sides and corner. */
+  /**
+   * Drag an edge: the docked panel's inner edge sets its width; a floating one resizes from its sides and corner.
+   * While dragging, the panel's own style follows the pointer (no app re-render); the size is saved on release.
+   */
   const startResize = (e: RPointerEvent<HTMLElement>, edge: ResizeEdge) => {
     if (e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
+    const aside = (e.currentTarget as HTMLElement).closest('aside')
     const sx = e.clientX
     const sy = e.clientY
     const l0 = layoutRef.current
     const w0 = width
     const f0 = float
+    // The style React drew: put back before the new size is committed, so React's own record stays true.
+    const before = aside ? { left: aside.style.left, width: aside.style.width, height: aside.style.height } : null
     document.body.style.cursor = edge === 's' ? 'ns-resize' : edge === 'se' ? 'nwse-resize' : 'ew-resize'
     document.body.style.userSelect = 'none'
+    let next: ((l: PanelLayout) => PanelLayout) | null = null
+    let frame = 0
+    let draw: () => void = () => undefined
     const move = (ev: PointerEvent) => {
       const dx = ev.clientX - sx
       const dy = ev.clientY - sy
@@ -163,18 +217,36 @@ export function usePanelLayout(area: RefObject<HTMLElement | null>, panel: strin
         if (edge === 's' || edge === 'se') f.h = f0.h + dy
         f.w = clamp(f.w, MIN_W, size.w - f.x)
         f.h = clamp(f.h, 200, size.h - f.y)
-        setRaw(l => ({ ...l, float: f }))
+        next = l => ({ ...l, float: f })
+        draw = () => {
+          if (!aside) return
+          aside.style.left = `${f.x}px`
+          aside.style.width = `${f.w}px`
+          aside.style.height = `${f.h}px`
+        }
       } else {
-        const next = clamp(l0.place === 'right' ? w0 - dx : w0 + dx, MIN_W, maxW)
-        setRaw(l => ({ ...l, widths: { ...l.widths, [panel]: next } }))
+        const w = clamp(l0.place === 'right' ? w0 - dx : w0 + dx, MIN_W, maxW)
+        next = l => ({ ...l, widths: { ...l.widths, [panel]: w } })
+        draw = () => {
+          if (aside) aside.style.width = `${w}px`
+        }
       }
+      // No panel to draw on (never expected): fall back to state.
+      if (!aside) return setRaw(next)
+      frame ||= requestAnimationFrame(() => {
+        frame = 0
+        draw()
+      })
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      cancelAnimationFrame(frame)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      save(layoutRef.current)
+      if (aside && before) Object.assign(aside.style, before)
+      if (next) update(next)
+      else save(layoutRef.current)
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)

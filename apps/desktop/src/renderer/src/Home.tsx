@@ -20,11 +20,11 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 
 import { BRAIN_KIND_COLOR, BRAIN_KIND_LABEL, BRAIN_KINDS, type BrainKind, type BrainNode, type BrainView, type DailyFind } from '../../shared/brain.ts'
 import type { ControlState } from '../../shared/control.ts'
-import type { RuntimeStatus, TaskView } from '../../shared/ipc.ts'
+import type { RuntimeStatus } from '../../shared/ipc.ts'
 import type { WorldSnapshot } from '../../shared/world.ts'
 import { Brain, MemoryCard, type BrainMood } from './brain/Brain.tsx'
 import { useBrain, type InMind } from './brain/useBrain.ts'
@@ -34,24 +34,19 @@ import { Orb, type OrbState } from './ui/Orb.tsx'
 import { RemoteImg } from './world/RemoteImg.tsx'
 import { nameOf, possessive } from './ui/assistantName.ts'
 import { LiveOrb } from './ui/LiveOrb.tsx'
+import { useTasks } from './shell/tasksStore.ts'
 
 export type HomeTarget = 'today' | 'projects' | 'world' | 'chat' | 'news' | 'learning'
 
 /** What the header and the one-line summary need, kept current by the same events the drawers use. */
 const useHomeData = (ready: boolean) => {
-  const [tasks, setTasks] = useState<TaskView[] | null>(null)
+  // Tasks come from the shared store: one poll for the whole window.
+  const tasks = useTasks(ready)
   const [world, setWorld] = useState<WorldSnapshot | null>(null)
   useEffect(() => {
     if (!ready) return
-    const loadTasks = () => void window.assistant.listTasks().then(setTasks, () => undefined)
-    loadTasks()
-    const timer = setInterval(loadTasks, 60_000)
     void window.world.state().then(setWorld, () => undefined)
-    const offWorld = window.world.onChanged(setWorld)
-    return () => {
-      clearInterval(timer)
-      offWorld()
-    }
+    return window.world.onChanged(setWorld)
   }, [ready])
   return { tasks, world, setWorld }
 }
@@ -331,8 +326,8 @@ function AboutYou({ view, onPick, forget, onClose, openLearning }: { view: Brain
 
 const PICK_EVENT = 'atlas:brain-pick'
 
-/** The brain's stage: the living graph, its legend, the pinned memory and "About you". */
-function BrainStage({ brain, mood, ready, openLearning }: { brain: ReturnType<typeof useBrain>; mood: BrainMood; ready: boolean; openLearning: () => void }) {
+/** The brain's stage: the living graph, its legend, the pinned memory and "About you". Re-renders only when its own props change. */
+const BrainStage = memo(function BrainStage({ brain, mood, ready, openLearning }: { brain: ReturnType<typeof useBrain>; mood: BrainMood; ready: boolean; openLearning: () => void }) {
   const [focus, setFocus] = useState<BrainKind | null>(null)
   const [picked, setPicked] = useState<BrainNode | null>(null)
   const [about, setAbout] = useState(false)
@@ -434,7 +429,7 @@ function BrainStage({ brain, mood, ready, openLearning }: { brain: ReturnType<ty
       )}
     </section>
   )
-}
+})
 
 /**
  * Home, one screen: the time, the weather and today's find on top; Atlas's
@@ -442,11 +437,14 @@ function BrainStage({ brain, mood, ready, openLearning }: { brain: ReturnType<ty
  * thinks); today's tasks and the news on the left; its face, what it has in
  * mind and what it did on the right. In a narrow pane, the brain alone.
  */
-export function Home({ status, controls, presence, ownerName, open }: { status: RuntimeStatus; controls: ControlState | null; presence: Presence; ownerName: string; open: (t: HomeTarget) => void }) {
+export const Home = memo(function Home({ status, controls, presence, ownerName, open }: { status: RuntimeStatus; controls: ControlState | null; presence: Presence; ownerName: string; open: (t: HomeTarget) => void }) {
   const now = useNow(30_000)
   const ready = status.phase === 'ready'
   const { tasks, world, setWorld } = useHomeData(ready)
-  const brain = useBrain(ready)
+  const raw = useBrain(ready)
+  // The same object while nothing in it changed, so the brain stage skips Home's other renders.
+  const brain = useMemo(() => raw, [raw.view, raw.error, raw.used, raw.born, raw.recent, raw.forget, raw.reload]) // eslint-disable-line react-hooks/exhaustive-deps
+  const openLearning = useCallback(() => open('learning'), [open])
   const orbState: OrbState = controls?.paused ? 'paused' : !ready ? 'offline' : presence.state
 
   const overdue = (tasks ?? []).filter(t => t.dueAt !== null && t.dueAt < now)
@@ -481,7 +479,7 @@ export function Home({ status, controls, presence, ownerName, open }: { status: 
           </div>
           <MiniNews onOpen={() => open('news')} />
         </div>
-        <BrainStage brain={brain} mood={orbState} ready={ready} openLearning={() => open('learning')} />
+        <BrainStage brain={brain} mood={orbState} ready={ready} openLearning={openLearning} />
         <div className="hidden min-h-0 flex-col gap-3 @min-[960px]:flex">
           <Face orbState={orbState} presence={presence} line={line} ready={ready} />
           <InMindCard recent={brain.recent} view={brain.view} onPick={n => window.dispatchEvent(new CustomEvent(PICK_EVENT, { detail: n }))} />
@@ -492,4 +490,4 @@ export function Home({ status, controls, presence, ownerName, open }: { status: 
       </div>
     </div>
   )
-}
+})

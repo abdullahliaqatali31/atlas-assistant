@@ -268,8 +268,13 @@ export class Controls {
     return this.paused
   }
 
+  private changeSoon: ReturnType<typeof setTimeout> | null = null
+  /** A burst of changes (a tool starting and ending, servers reporting in) goes to the page once. */
   private changed() {
-    this.deps.onChange(this.state())
+    this.changeSoon ??= setTimeout(() => {
+      this.changeSoon = null
+      this.deps.onChange(this.state())
+    }, 60)
   }
 
   private reloadMcp() {

@@ -180,7 +180,8 @@ body {
   app-region: no-drag;
 }
 
-/* Slow aurora behind everything: a visual base where acrylic is off. */
+/* Aurora behind everything: a visual base where acrylic is off. It stays still: a moving
+   background would make every frosted panel above it blur again on each frame. */
 .aurora {
   position: fixed;
   inset: -20%;
@@ -191,13 +192,6 @@ body {
     radial-gradient(35% 30% at 85% 80%, var(--glow-2), transparent 70%),
     radial-gradient(25% 25% at 70% 20%, var(--glow-3), transparent 70%);
   filter: blur(20px);
-  animation: aurora-drift 40s ease-in-out infinite alternate;
-}
-
-@keyframes aurora-drift {
-  to {
-    transform: translate3d(3%, -2%, 0) rotate(4deg);
-  }
 }
 
 @layer components {
@@ -546,11 +540,11 @@ input[type='radio']:disabled {
     white-space: nowrap;
     border-radius: 9999px;
     border: 1px solid var(--edge);
-    background: color-mix(in srgb, var(--solid) 82%, transparent);
+    /* Nearly solid instead of frosted: over a moving map a blur is redone on every frame. */
+    background: color-mix(in srgb, var(--solid) 92%, transparent);
     padding: 0 0.75rem;
     font-size: 0.75rem;
     color: var(--text);
-    backdrop-filter: blur(10px);
     transition: border-color 120ms, color 120ms;
   }
   .map-chip:hover {
@@ -736,9 +730,8 @@ input[type='radio']:disabled {
 .atmos-grain {
   inset: -50%;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
-  mix-blend-mode: overlay;
-  opacity: 0.05;
-  animation: atmos-grain 0.8s steps(5) infinite;
+  /* Still, and without a blend mode: blending it over the map meant redoing the whole pane on every frame. */
+  opacity: 0.035;
 }
 .atmos-mark {
   left: 50%;
@@ -773,14 +766,6 @@ input[type='radio']:disabled {
     transform: translateY(420%);
   }
 }
-@keyframes atmos-grain {
-  0% { transform: translate(0, 0); }
-  20% { transform: translate(-7%, 4%); }
-  40% { transform: translate(5%, -6%); }
-  60% { transform: translate(-3%, 8%); }
-  80% { transform: translate(8%, 2%); }
-  100% { transform: translate(0, 0); }
-}
 @keyframes atmos-breathe {
   0%,
   100% {
@@ -794,6 +779,10 @@ input[type='radio']:disabled {
 }
 :root[data-lite='true'] .atmos * {
   animation: none !important;
+}
+/* While the map moves, the overlay holds still, so the frame goes to the map. */
+:root[data-map-moving] .atmos * {
+  animation-play-state: paused !important;
 }
 :root[data-lite='true'] .atmos-grain {
   display: none;

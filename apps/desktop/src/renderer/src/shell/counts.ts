@@ -1,12 +1,13 @@
 /**
  * Live numbers for the rail: one small number per module, kept current from
  * the same bridges the pages use. Cheap: event-driven where possible, a slow
- * poll (60 s) only for tasks; nothing is fetched while Atlas is locked.
+ * poll (60 s, shared with the whole window) only for tasks; nothing is fetched while Atlas is locked.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { ControlState } from '../../../shared/control.ts'
 import type { RuntimeStatus } from '../../../shared/ipc.ts'
+import { useTasks } from './tasksStore.ts'
 
 export interface Count {
   /** What the rail shows under the icon; null shows nothing. */
@@ -23,7 +24,12 @@ const safe = <T,>(p: Promise<T>, set: (v: T) => void) => void p.then(set, () => 
 
 export const useCounts = ({ status, controls, locked, suggestions, unread }: { status: RuntimeStatus; controls: ControlState | null; locked: boolean; suggestions: number; unread: number }): Record<CountKey, Count> => {
   const ready = status.phase === 'ready' && !locked
-  const [tasks, setTasks] = useState<{ open: number; overdue: number } | null>(null)
+  const list = useTasks(ready, status.later.length)
+  const tasks = useMemo(() => {
+    if (!list) return null
+    const now = Date.now()
+    return { open: list.length, overdue: list.filter(t => t.dueAt !== null && t.dueAt < now).length }
+  }, [list])
   const [running, setRunning] = useState<number | null>(null)
   const [projects, setProjects] = useState<number | null>(null)
   const [nearby, setNearby] = useState<{ places: number; alerts: number } | null>(null)
@@ -33,13 +39,6 @@ export const useCounts = ({ status, controls, locked, suggestions, unread }: { s
 
   useEffect(() => {
     if (!ready) return
-    const loadTasks = () =>
-      safe(window.assistant.listTasks(), list => {
-        const now = Date.now()
-        setTasks({ open: list.length, overdue: list.filter(t => t.dueAt !== null && t.dueAt < now).length })
-      })
-    loadTasks()
-    const timer = setInterval(loadTasks, 60_000)
     const onCode = (s: { running: { endedAt?: number | null }[]; projects: unknown[] }) => {
       setRunning(s.running.filter(r => !r.endedAt).length)
       setProjects(s.projects.length)
@@ -59,7 +58,6 @@ export const useCounts = ({ status, controls, locked, suggestions, unread }: { s
     safe(window.news.list(false), r => setNews(r.headlines.length))
     const offNews = window.news.onChanged(r => setNews(r.headlines.length))
     return () => {
-      clearInterval(timer)
       offCode()
       offWorld()
       offFiles()

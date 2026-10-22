@@ -4,8 +4,9 @@
  * downloaded model files to the companion window. The renderer itself has
  * no network access.
  */
-import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
+import { Readable } from 'node:stream'
 
 import { app, net } from './host/index.ts'
 
@@ -70,7 +71,9 @@ export class WakeService {
     const base = join(app.getPath('userData'), 'models')
     const file = normalize(join(base, url.hostname === 'models' ? rel : '__none__'))
     if (!file.startsWith(base + sep) || !existsSync(file)) return new Response('Not found', { status: 404 })
-    return new Response(readFileSync(file), { headers: { 'content-type': file.endsWith('.json') ? 'application/json' : 'application/octet-stream' } })
+    // Streamed: model files are megabytes, and reading one whole would hold up everything else.
+    const body = Readable.toWeb(createReadStream(file)) as ReadableStream<Uint8Array>
+    return new Response(body, { headers: { 'content-type': file.endsWith('.json') ? 'application/json' : 'application/octet-stream', 'content-length': String(statSync(file).size) } })
   }
 
   register() {

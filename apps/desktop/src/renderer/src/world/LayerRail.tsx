@@ -86,8 +86,13 @@ function NowTab({ id, ctx }: { id: LayerId; ctx: RailContext }) {
   const all = (ctx.sources[id]?.features ?? []).filter(f => passesFilter(id, f.properties, ctx.filters))
   const fc: FC = { type: 'FeatureCollection', features: all }
   const [cLon, cLat] = ctx.centre
+  // Each distance worked out once, not twice per comparison.
   const nearest = (n: number) =>
-    [...all].sort((a, b) => kmBetween({ lat: cLat, lon: cLon }, { lat: a.geometry.coordinates[1]!, lon: a.geometry.coordinates[0]! }) - kmBetween({ lat: cLat, lon: cLon }, { lat: b.geometry.coordinates[1]!, lon: b.geometry.coordinates[0]! })).slice(0, n)
+    all
+      .map(f => ({ f, km: kmBetween({ lat: cLat, lon: cLon }, { lat: f.geometry.coordinates[1]!, lon: f.geometry.coordinates[0]! }) }))
+      .sort((a, b) => a.km - b.km)
+      .slice(0, n)
+      .map(x => x.f)
   switch (id) {
     case 'news': {
       const mix = mixBy(fc, 'category')
@@ -418,6 +423,13 @@ function FiltersTab({ id, ctx }: { id: LayerId; ctx: RailContext }) {
 }
 
 export function LayerRail({ on, counts, onToggle, ctx }: { on: Record<LayerId, boolean>; counts: Partial<Record<LayerId, number>>; onToggle: (id: LayerId) => void; ctx: RailContext }) {
+  // How many of each pass the filters: counted when the data or the filters change, not on every render.
+  const shownCount = useMemo(
+    () => Object.fromEntries(RAIL.map(r => [r.id, (ctx.sources[r.id]?.features ?? []).filter(f => passesFilter(r.id, f.properties, ctx.filters)).length])) as Partial<Record<LayerId, number>>,
+    // ctx.sources is the map's live store: the counts change whenever its data does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [counts, ctx.filters, on],
+  )
   const [open, setOpen] = useState<LayerId | null>(null)
   const [pinned, setPinned] = useState(false)
   const [tab, setTab] = useState<'now' | 'filters'>('now')
@@ -445,7 +457,7 @@ export function LayerRail({ on, counts, onToggle, ctx }: { on: Record<LayerId, b
         {RAIL.map(r => {
           const Icon = r.icon
           const visible = on[r.id]
-          const n = (ctx.sources[r.id]?.features ?? []).filter(f => passesFilter(r.id, f.properties, ctx.filters)).length
+          const n = shownCount[r.id] ?? 0
           const count = counts[r.id] === undefined && !n ? null : n
           return (
             <button

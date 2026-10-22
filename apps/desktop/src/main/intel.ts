@@ -114,9 +114,20 @@ export class IntelFeed {
     this.polledAt = Date.now()
   }
 
+  /** When a page last asked: nobody looking for half an hour, and the feed rests until someone does. */
+  private askedAt = 0
+
   private ensure() {
+    this.askedAt = Date.now()
     if (!this.timer) {
-      this.timer = setInterval(() => void this.refresh(), FEED_EVERY)
+      this.timer = setInterval(() => {
+        if (Date.now() - this.askedAt > 30 * 60_000) {
+          clearInterval(this.timer!)
+          this.timer = null
+          return
+        }
+        void this.refresh()
+      }, FEED_EVERY)
       this.timer.unref?.()
     }
     if (Date.now() - this.polledAt > FEED_EVERY) return this.refresh()

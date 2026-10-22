@@ -257,7 +257,12 @@ export const BRT = {
 
 /** A picture of a tab's page, for the web interface (which cannot hold the page itself). */
 export interface TabPicture {
+  /** A JPEG as a data URL; empty when the picture is the same as the one the page already has. */
   url: string
+  /** Fingerprint of the picture, sent back to skip an unchanged one. */
+  hash?: string
+  /** The page has not changed since the picture with the given fingerprint. */
+  same?: boolean
   width: number
   height: number
   /** The page in it: address, title, still loading, and whether back or forward lead anywhere. */
@@ -293,6 +298,6 @@ export interface BrowserTabsBridge {
   /** A tab's page told its webContents id (on load), its address and title. */
   report(r: { id: string; wcId?: number | undefined; url?: string | undefined; title?: string | undefined }): void
   /** A picture of the tab's page at about this width, or null when the page is not open on the PC. */
-  picture(id: string, width: number): Promise<TabPicture | null>
+  picture(id: string, width: number, since?: string): Promise<TabPicture | null>
   input(id: string, input: RemoteInput): Promise<void>
 }

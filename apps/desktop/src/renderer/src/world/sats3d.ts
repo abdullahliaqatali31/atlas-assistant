@@ -11,6 +11,7 @@ import * as satellite from 'satellite.js'
 import { satGroup, SAT_GROUPS, type SatGroupId } from '../../../shared/space.ts'
 import type { SatelliteElements } from '../../../shared/world.ts'
 import { orbitFacts, type OrbitFacts } from './passes.ts'
+import type { SatWorkerIn, SatWorkerOut } from './sats3d.worker.ts'
 
 export interface Sat3D {
   i: number
@@ -24,6 +25,7 @@ export interface Sat3D {
 const ORBIT_STEPS = 180
 /** Satellites closer to the camera than this show as a 3D model (at most MAX_MODELS of them). */
 const MODEL_RANGE_M = 3_000_000
+const MODEL_RANGE_SQ = MODEL_RANGE_M * MODEL_RANGE_M
 const MAX_MODELS = 20
 
 export class Satellites3D {
@@ -37,15 +39,34 @@ export class Satellites3D {
   private loadingModels = new Set<number>()
   private readonly hpr = new Cesium.HeadingPitchRoll()
   private readonly at = new Cesium.Cartesian3()
+  private readonly moveAt = new Cesium.Cartesian3()
+  /** SGP4 for the whole catalogue runs here, off the page's thread (null where workers are missing: then on the page). */
+  private worker: Worker | null = null
+  private seq = 0
+  private waiting: { seq: number; since: number; done: (changed: boolean) => void } | null = null
 
   constructor(private readonly scene: Cesium.Scene) {
     this.points = scene.primitives.add(new Cesium.PointPrimitiveCollection()) as Cesium.PointPrimitiveCollection
     this.orbits = scene.primitives.add(new Cesium.PolylineCollection()) as Cesium.PolylineCollection
+    try {
+      this.worker = new Worker(new URL('./sats3d.worker.ts', import.meta.url), { type: 'module' })
+      this.worker.onmessage = (e: MessageEvent<SatWorkerOut>) => this.applyMoved(e.data)
+      this.worker.onerror = () => {
+        // The worker failed to start: propagate on the page instead.
+        this.worker?.terminate()
+        this.worker = null
+        this.waiting?.done(false)
+        this.waiting = null
+      }
+    } catch {
+      this.worker = null
+    }
   }
 
   load(elements: SatelliteElements[]) {
     this.points.removeAll()
     this.list.length = 0
+    const kept: SatelliteElements[] = []
     for (const s of elements) {
       try {
         const rec = satellite.json2satrec(s as unknown as satellite.OMMJsonObject)
@@ -54,11 +75,15 @@ export class Satellites3D {
         const iss = /ISS \(ZARYA\)/.test(name)
         const point = this.points.add({ pixelSize: iss ? 9 : group === 'stations' ? 6 : 4, color: Cesium.Color.fromCssColorString(satGroup(group).color), outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1, id: { kind: 'sat', i: this.list.length } })
         this.list.push({ i: this.list.length, name, norad: String(s.NORAD_CAT_ID ?? ''), group, rec, point })
+        kept.push(s)
       } catch {
         // A malformed element set: skip it.
       }
     }
-    this.move(new Date())
+    // The worker gets the same list, in the same order.
+    this.worker?.postMessage({ kind: 'load', elements: kept } satisfies SatWorkerIn)
+    // The first positions now, on the page, so the points appear at once.
+    this.moveHere(new Date())
   }
 
   /** How many are in each group, for the legend. */
@@ -81,15 +106,66 @@ export class Satellites3D {
     for (const [i, m] of this.models) m.show = !this.hidden.has(this.list[i]!.group)
   }
 
-  /** Propagates every shown satellite to now; the picked one's orbit ring is redrawn each minute. */
-  move(now: Date) {
-    if (!this.points.show) return
+  /**
+   * Propagates every shown satellite to now (hidden groups and modelled ones are skipped), in the
+   * worker when there is one; the picked one's orbit ring is redrawn each minute. Resolves true when
+   * any point moved, so the view draws only then.
+   */
+  move(now: Date): Promise<boolean> {
+    if (!this.points.show || !this.list.length) return Promise.resolve(false)
+    if (this.orbitOf && now.getTime() - this.orbitAt > 60_000) this.drawOrbit(this.orbitOf)
+    if (!this.worker) return Promise.resolve(this.moveHere(now))
+    // One request at a time (a stuck one is given up after 10 s).
+    if (this.waiting && now.getTime() - this.waiting.since < 10_000) return Promise.resolve(false)
+    this.waiting?.done(false)
+    const skip = new Uint8Array(this.list.length)
+    for (const s of this.list) if (!s.point.show || this.models.has(s.i)) skip[s.i] = 1
+    const seq = ++this.seq
+    return new Promise<boolean>(done => {
+      this.waiting = { seq, since: now.getTime(), done }
+      this.worker!.postMessage({ kind: 'move', seq, at: now.getTime(), skip } satisfies SatWorkerIn, [skip.buffer])
+    })
+  }
+
+  /** The worker's answer: x, y, z in metres per satellite (NaN where skipped). */
+  private applyMoved(m: SatWorkerOut) {
+    const w = this.waiting
+    if (!w || w.seq !== m.seq) return
+    this.waiting = null
+    let changed = false
+    const pos = m.pos
+    if (this.points.show && pos.length === this.list.length * 3)
+      for (const s of this.list) {
+        const x = pos[s.i * 3]!
+        // Shown or hidden may have changed while the worker ran.
+        if (Number.isNaN(x) || !s.point.show || this.models.has(s.i)) continue
+        this.moveAt.x = x
+        this.moveAt.y = pos[s.i * 3 + 1]!
+        this.moveAt.z = pos[s.i * 3 + 2]!
+        if (Cesium.Cartesian3.equals(s.point.position, this.moveAt)) continue
+        s.point.position = this.moveAt
+        changed = true
+      }
+    w.done(changed)
+  }
+
+  /** The same propagation on the page's thread (the first positions, or without a worker). */
+  private moveHere(now: Date) {
+    let changed = false
+    const gmst = satellite.gstime(now)
     for (const s of this.list) {
       if (!s.point.show || this.models.has(s.i)) continue
-      const f = orbitFacts(s.rec, now)
-      if (f) s.point.position = Cesium.Cartesian3.fromDegrees(f.lon, f.lat, f.altKm * 1000)
+      const pv = satellite.propagate(s.rec, now)
+      if (!pv || typeof pv.position !== 'object' || !pv.position) continue
+      const ecf = satellite.eciToEcf(pv.position, gmst)
+      this.moveAt.x = ecf.x * 1000
+      this.moveAt.y = ecf.y * 1000
+      this.moveAt.z = ecf.z * 1000
+      if (Cesium.Cartesian3.equals(s.point.position, this.moveAt)) continue
+      s.point.position = this.moveAt
+      changed = true
     }
-    if (this.orbitOf && now.getTime() - this.orbitAt > 60_000) this.drawOrbit(this.orbitOf)
+    return changed
   }
 
   /** How many satellites are showing as models: the view draws continuously while any do. */
@@ -99,25 +175,32 @@ export class Satellites3D {
 
   /**
    * Which satellites get a 3D model: those near the camera, plus the one
-   * picked or ridden. Called once a second; models come and go here.
+   * picked or ridden. Called once a second; models come and go here. True when one was removed (a frame is needed).
    */
-  pickModels(camera: { x: number; y: number; z: number }, keep: number | null) {
+  pickModels(camera: { x: number; y: number; z: number }, keep: number | null): boolean {
     const want = new Set<number>()
+    let removed = false
     // Models only when the camera is down among the low orbits (or for the one picked or ridden):
     // from high up they would be specks that keep the view drawing continuously.
     const low = Cesium.Cartesian3.magnitude(camera as never) - Cesium.Ellipsoid.WGS84.maximumRadius < 2_500_000
     if (this.points.show) {
-      const near = this.list
-        .filter(s => s.point.show && (s.i === keep || (low && Cesium.Cartesian3.distance(s.point.position, camera as never) < MODEL_RANGE_M)))
-        .sort((a, b) => Cesium.Cartesian3.distance(a.point.position, camera as never) - Cesium.Cartesian3.distance(b.point.position, camera as never))
-        .slice(0, MAX_MODELS)
-      for (const s of near) want.add(s.i)
+      // Squared distances: no square roots over the whole catalogue each second.
+      const near: { i: number; d: number }[] = []
+      for (const s of this.list) {
+        // Shown ones, and those already a model (their point is hidden then).
+        if (this.hidden.has(s.group) || (!s.point.show && !this.models.has(s.i))) continue
+        const d = Cesium.Cartesian3.distanceSquared(s.point.position, camera as never)
+        if (s.i === keep || (low && d < MODEL_RANGE_SQ)) near.push({ i: s.i, d })
+      }
+      near.sort((a, b) => a.d - b.d)
+      for (const n of near.slice(0, MAX_MODELS)) want.add(n.i)
       if (keep !== null) want.add(keep)
     }
     for (const [i, m] of this.models)
       if (!want.has(i)) {
         this.scene.primitives.remove(m)
         this.models.delete(i)
+        removed = true
         const s = this.list[i]
         if (s) s.point.show = !this.hidden.has(s.group)
       }
@@ -140,6 +223,7 @@ export class Satellites3D {
         () => this.loadingModels.delete(i),
       )
     }
+    return removed
   }
 
   /** Moves the modelled satellites to this very moment, wings across their path: every frame while any show. */
@@ -194,6 +278,10 @@ export class Satellites3D {
 
   destroy() {
     // The scene destroys its primitives with the widget.
+    this.worker?.terminate()
+    this.worker = null
+    this.waiting?.done(false)
+    this.waiting = null
     this.list.length = 0
   }
 }

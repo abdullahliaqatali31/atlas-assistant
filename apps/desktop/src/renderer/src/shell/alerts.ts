@@ -4,12 +4,13 @@
  * failures (connections, dev servers, actions) and what Atlas raised or held
  * back. Built from data the shell already has; nothing new is stored.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { CodeState } from '../../../shared/code.ts'
 import type { ActivityEntry, ControlState } from '../../../shared/control.ts'
 import type { ApprovalRequest, InitiativeItem, RuntimeStatus, TaskView } from '../../../shared/ipc.ts'
 import type { WorldSnapshot } from '../../../shared/world.ts'
+import { useTasks } from './tasksStore.ts'
 
 export type AlertKind = 'question' | 'world' | 'failure' | 'task' | 'notice'
 
@@ -89,14 +90,14 @@ export const useAlerts = ({ status, controls, active }: { status: RuntimeStatus 
   const [world, setWorld] = useState<WorldSnapshot | null>(null)
   const [activity, setActivity] = useState<ActivityEntry[]>([])
   const [code, setCode] = useState<CodeState | null>(null)
-  const [tasks, setTasks] = useState<TaskView[] | null>(null)
+  // Tasks come from the shared store: one poll for the whole window.
+  const tasks = useTasks(active, status?.later.length)
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!active) return
     const poll = () => {
       setNow(Date.now())
       void window.controls.activity().then(setActivity, () => undefined)
-      void window.assistant.listTasks().then(setTasks, () => undefined)
     }
     poll()
     const timer = setInterval(poll, 60_000)
@@ -110,6 +111,9 @@ export const useAlerts = ({ status, controls, active }: { status: RuntimeStatus 
       offCode()
     }
   }, [active, status?.later.length])
-  if (!status) return []
-  return buildAlerts({ now, approvals: status.approvals, later: status.later, world, activity, code, controls, tasks })
+  // Rebuilt only when one of its inputs changes, not on every app render.
+  return useMemo(
+    () => (status ? buildAlerts({ now, approvals: status.approvals, later: status.later, world, activity, code, controls, tasks }) : []),
+    [now, status?.approvals, status?.later, world, activity, code, controls, tasks],
+  )
 }

@@ -219,11 +219,11 @@ export function Brain(props: BrainProps) {
     let last = performance.now()
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame)
-      // Frame budget: full rate only while Atlas is busy or the owner handles the brain; a calm 30 fps
-      // otherwise, 15 when another app has the focus (halved again in Lite). A slow turn looks the same.
+      // Frame budget: full rate only while Atlas is busy or the owner handles the brain; a calm 20 fps
+      // otherwise, 10 when another app has the focus (halved again in Lite). A slow turn looks the same.
       const busy = held || drag !== null || ['thinking', 'speaking', 'listening'].includes(live.current.mood) || now - lastTouch < 1500
       const lite = document.documentElement.dataset.lite === 'true'
-      const fps = busy ? (lite ? 30 : 60) : document.hasFocus() ? (lite ? 20 : 30) : lite ? 8 : 15
+      const fps = busy ? (lite ? 30 : 60) : document.hasFocus() ? (lite ? 12 : 20) : lite ? 6 : 10
       if (now - last < 1000 / fps - 2) return
       const dt = Math.min(0.1, (now - last) / 1000)
       last = now

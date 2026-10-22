@@ -1,11 +1,12 @@
 import { Activity, AlertTriangle, CheckCircle2, Clock3, Cpu, ListTodo, PauseCircle, ShieldCheck, Sparkles, Zap } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import type { ActivityEntry, ControlState } from '../../shared/control.ts'
-import type { RuntimeStatus, TaskView } from '../../shared/ipc.ts'
+import type { RuntimeStatus } from '../../shared/ipc.ts'
 import { BrandIcon } from './ui/BrandIcon.tsx'
 import { Orb, type OrbState } from './ui/Orb.tsx'
 import { LiveOrb } from './ui/LiveOrb.tsx'
+import { useTasks } from './shell/tasksStore.ts'
 
 /**
  * The assistant's own canvas, as cards: what it is doing right now, what
@@ -93,15 +94,8 @@ export function PresenceCard({ status, controls, presence, ownerName, size = 200
 export function TodayCard({ status }: { status: RuntimeStatus }) {
   const now = useNow(30_000)
   const ready = status.phase === 'ready'
-  const [tasks, setTasks] = useState<TaskView[] | null>(null)
-  const load = useCallback(() => {
-    if (ready) void window.assistant.listTasks().then(setTasks, () => undefined)
-  }, [ready])
-  useEffect(() => {
-    load()
-    const t = setInterval(load, 60_000)
-    return () => clearInterval(t)
-  }, [load, status.later.length])
+  // Tasks come from the shared store: one poll for the whole window.
+  const tasks = useTasks(ready, status.later.length)
   const overdue = useMemo(() => (tasks ?? []).filter(t => t.dueAt !== null && t.dueAt < now), [tasks, now])
   const upcoming = useMemo(() => (tasks ?? []).filter(t => !overdue.includes(t)).slice(0, 6), [tasks, overdue])
   return (

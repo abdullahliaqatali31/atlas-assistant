@@ -112,6 +112,14 @@ const setMapWorkers = () => {
 }
 
 /** Sources whose points move every second or two (planes, ships, satellites). */
+/** Two cards with the same values (a shallow look: card fields are numbers and short text). */
+const sameFields = (a: Record<string, unknown>, b: Record<string, unknown>) => {
+  if (a === b) return true
+  const ka = Object.keys(a)
+  if (ka.length !== Object.keys(b).length) return false
+  return ka.every(k => a[k] === b[k])
+}
+
 const MOVING = new Set(['flights', 'ships', 'satellites'])
 /**
  * Moving points tile at low zoom only and keep a small buffer: each update
@@ -227,6 +235,8 @@ export function MapView({
   const [display, setDisplay] = useState<DisplayPrefs>(readDisplay)
   useEffect(() => saveDisplay(display), [display])
   const [counts, setCounts] = useState<Partial<Record<LayerId, number>>>({})
+  // A poll that finds the same numbers leaves the page alone.
+  const setCount = (patch: Partial<Record<LayerId, number>>) => setCounts(c => ((Object.keys(patch) as LayerId[]).every(k => c[k] === patch[k]) ? c : { ...c, ...patch }))
   const [flightNote, setFlightNote] = useState('')
   const [shipState, setShipState] = useState<{ status: ShipsResult['status']; message: string | null }>({ status: 'off', message: null })
   const [shipKey, setShipKey] = useState('')
@@ -422,7 +432,8 @@ export function MapView({
         routeSource()?.setData(routeFeatures(r, lngLat))
         props = { ...props, routeFrom: r.origin.iata || r.origin.icao, routeTo: r.destination.iata || r.destination.icao, routeFromCity: r.origin.city, routeToCity: r.destination.city, routeFromName: r.origin.name, routeToName: r.destination.name, airline: r.airline, routeProgress: at.fraction, routeKmLeft: at.kmLeft }
       }
-      if (lngLat[0] !== sel.lngLat[0] || lngLat[1] !== sel.lngLat[1] || props !== sel.props) selectRef.current({ kind, lngLat, props })
+      // Only a real change re-renders the page (a new object with the same values does not).
+      if (lngLat[0] !== sel.lngLat[0] || lngLat[1] !== sel.lngLat[1] || !sameFields(props, sel.props)) selectRef.current({ kind, lngLat, props })
       if (followNow.current) m.easeTo({ center: lngLat, duration: isLite() ? 0 : 800 })
     }
     tick()
@@ -438,6 +449,7 @@ export function MapView({
   // Intelligence on the flat map: countries shaded by how much happens there, Ukraine's oblasts under
   // an air-raid alert, and the events themselves (sized by severity). Kept across style changes.
   const shapes = useRef<{ countries: FC | null; ukraine: FC | null }>({ countries: null, ukraine: null })
+  const intelDrawn = useRef('')
   useEffect(() => {
     const m = map.current
     if (!m || !ready || !intel) return
@@ -447,8 +459,12 @@ export function MapView({
     for (const e of intel.events) if (e.country) counts.set(e.country, (counts.get(e.country) ?? 0) + 1)
     const top = Math.max(1, ...counts.values())
     const alertBy = new Map(intel.alerts.map(a => [a.name, a.level]))
-    const draw = () => {
+    // The same events and alerts as last time (a refresh that found nothing new): nothing to redraw.
+    const key = `${intelOnMap}|${intel.events.length}|${intel.events[0]?.id}|${intel.events.at(-1)?.id}|${intel.alerts.map(a => a.name + a.level).join(',')}`
+    const draw = (force = false) => {
       if (gone || !m.isStyleLoaded()) return
+      if (!force && intelDrawn.current === key && m.getSource('intel-events') && shapes.current.countries) return
+      intelDrawn.current = key
       const below = LAYERS.flatMap(l => l.draw.map(d => d.id)).find(id => m.getLayer(id))
       const source = (id: string, data: FC) => {
         const src = m.getSource(id) as GeoJSONSource | undefined
@@ -468,12 +484,17 @@ export function MapView({
     void Promise.all([
       shapes.current.countries ? null : window.world.intelCountries().then(c => (shapes.current.countries = c as unknown as FC)),
       shapes.current.ukraine ? null : window.world.intelUkraine().then(u => (shapes.current.ukraine = u as unknown as FC)),
-    ]).then(draw, draw)
+    ]).then(
+      () => draw(true),
+      () => draw(true),
+    )
     draw()
-    m.on('styledata', draw)
+    // A new base style drops every added layer: draw again once it has loaded (not on every style event).
+    const again = () => draw(true)
+    m.on('style.load', again)
     return () => {
       gone = true
-      m.off('styledata', draw)
+      m.off('style.load', again)
     }
   }, [ready, intel, intelOnMap])
 
@@ -506,12 +527,30 @@ export function MapView({
     })
   }, [selected, ready])
 
+  // While the map moves, decorations hold still (styles.css: data-map-moving), so every frame goes to the map.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const root = document.documentElement
+    const start = () => (root.dataset.mapMoving = '')
+    const end = () => delete root.dataset.mapMoving
+    m.on('movestart', start)
+    m.on('moveend', end)
+    return () => {
+      m.off('movestart', start)
+      m.off('moveend', end)
+      end()
+    }
+  }, [ready])
+
   // What else is on the map around the picked item, at the moment it was picked.
   const nearbyRef = useRef(onNearby)
   nearbyRef.current = onNearby
+  const pickedKey = selected ? `${selected.kind}:${String(selected.props.id ?? selected.lngLat.join(','))}` : ''
   useEffect(() => {
     nearbyRef.current(selected ? nearbyItems(selected.lngLat, latest.current, { radiusKm: selected.kind === 'places' ? 150 : 100, exclude: selected }) : [])
-  }, [selected])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per pick, not each time the picked plane moves
+  }, [pickedKey])
 
   // "Centre on map" and picking a place from the toolbar; the view before it is kept for Back.
   useEffect(() => {
@@ -776,8 +815,11 @@ export function MapView({
       [0, 3, 3, 1],
       [0, 3.5, 3, 0.5],
     ]
+    // The links march for a few seconds to draw the eye, then rest (each step repaints the whole map).
     let k = 0
+    const until = Date.now() + 8_000
     const timer = setInterval(() => {
+      if (Date.now() > until) return clearInterval(timer)
       if (idle() || !m.getLayer('story-links')) return
       k = (k + 1) % steps.length
       m.setPaintProperty('story-links', 'line-dasharray', steps[k])
@@ -816,7 +858,7 @@ export function MapView({
     put('events', data.events)
     put('disasters', data.disasters)
     put('places', data.places)
-    setCounts(c => ({ ...c, places: data.places.features.length, quakes: data.quakes.features.length, events: data.events.features.length, disasters: data.disasters.features.length }))
+    setCount({ places: data.places.features.length, quakes: data.quakes.features.length, events: data.events.features.length, disasters: data.disasters.features.length })
     if (!fitted.current && data.places.features.length) {
       fitted.current = true
       const b = new maplibregl.LngLatBounds()
@@ -910,7 +952,7 @@ export function MapView({
           if (stopped) return
           put('fires', fireFeatures(list))
           setFireList(list)
-          setCounts(c => ({ ...c, fires: list.length }))
+          setCount({ fires: list.length })
         },
         () => undefined,
       )
@@ -931,7 +973,7 @@ export function MapView({
         list => {
           if (stopped) return
           put('launches', launchFeatures(list, Date.now()))
-          setCounts(c => ({ ...c, launches: list.filter(l => l.at > Date.now()).length }))
+          setCount({ launches: list.filter(l => l.at > Date.now()).length })
         },
         () => undefined,
       )
@@ -951,7 +993,7 @@ export function MapView({
       list => {
         if (stopped) return
         put('radio', radioFeatures(list))
-        setCounts(c => ({ ...c, radio: list.length }))
+        setCount({ radio: list.length })
       },
       () => undefined,
     )
@@ -999,8 +1041,8 @@ export function MapView({
           trails.current.add(flights.map(f => ({ id: `f:${f.hex}`, lon: f.lon, lat: f.lat })))
           glide.current = { list: flights, at: Date.now() }
           smooth.keep(new Set(flights.map(f => f.hex)))
-          put('flights', flightFeatures(flights.map(f => smooth.place(f, Date.now(), f.seen))))
-          setCounts(x => ({ ...x, flights: flights.length }))
+          put('flights', flightFeatures(flights, f => smooth.place(f, Date.now(), f.seen)))
+          setCount({ flights: flights.length })
         }
         try {
           if (nm <= 1000 && m.getZoom() >= 3) {
@@ -1032,8 +1074,11 @@ export function MapView({
         tick++
         const g = glide.current
         if (!g || stopped || idle()) return
-        const close = m.getZoom() >= 5
+        const zoom = m.getZoom()
+        const close = zoom >= 5
         if (!close && (tick % (lite ? 30 : 10) || g.list.length > 6000)) return
+        // Ten moves a second only where a plane crosses pixels quickly (zoomed right in); about three at country zoom.
+        if (close && zoom < 9 && tick % 3) return
         const now = Date.now()
         const dt = (now - g.at) / 1000
         let list = g.list
@@ -1043,7 +1088,7 @@ export function MapView({
           const padLon = (b.getEast() - b.getWest()) * 0.3
           list = list.filter(f => f.lat > b.getSouth() - padLat && f.lat < b.getNorth() + padLat && f.lon > b.getWest() - padLon && f.lon < b.getEast() + padLon)
         }
-        put('flights', flightFeatures(list.map(f => smooth.place(f, now, f.seen + dt))))
+        put('flights', flightFeatures(list, f => smooth.place(f, now, f.seen + dt)))
       },
       lite ? 200 : 100,
     )
@@ -1067,6 +1112,7 @@ export function MapView({
     const m = map.current
     if (!m || !ready || !layers.ships) return
     let stopped = false
+    let drawn = ''
     const load = async () => {
       if (stopped || idle()) return
       const b = m.getBounds()
@@ -1075,9 +1121,13 @@ export function MapView({
         const r = await window.world.ships({ south: clamp(b.getSouth(), 90), north: clamp(b.getNorth(), 90), west: clamp(b.getWest(), 180), east: clamp(b.getEast(), 180) })
         if (stopped) return
         setShipState({ status: r.status, message: r.message })
+        // The same ships in the same places (most polls at sea): nothing to redraw.
+        const key = r.ships.map(v => `${v.mmsi}:${v.lat}:${v.lon}:${v.heading ?? ''}`).join('|')
+        if (key === drawn) return
+        drawn = key
         trails.current.add(r.ships.map(v => ({ id: `s:${v.mmsi}`, lon: v.lon, lat: v.lat })))
         put('ships', shipFeatures(r.ships))
-        setCounts(c => ({ ...c, ships: r.ships.length }))
+        setCount({ ships: r.ships.length })
       } catch {
         setShipState({ status: 'error', message: 'Ships unavailable right now.' })
       }
@@ -1118,7 +1168,7 @@ export function MapView({
       const types = filters.newsTypes
       const fc = newsFeatures(types.length ? r.headlines.filter(h => types.includes(h.category)) : r.headlines)
       put('news', fc)
-      setCounts(c => ({ ...c, news: fc.features.length }))
+      setCount({ news: fc.features.length })
     }
     // Locked: the feeds are the owner's, so the layer stays empty until they confirm it is them.
     void window.news.list().then(show, () => undefined)
@@ -1142,7 +1192,7 @@ export function MapView({
       const ids = new Set(official.map(c => c.id))
       const all = [...official, ...windy.filter(c => !ids.has(c.id))]
       put('cameras', { type: 'FeatureCollection', features: all.map(feature) })
-      setCounts(x => ({ ...x, cameras: all.length }))
+      setCount({ cameras: all.length })
     }
     void window.world.cameras().then(list => {
       official = list
@@ -1183,7 +1233,8 @@ export function MapView({
     if (!m || !ready || !layers.satellites) return
     let stopped = false
     let sats: { name: string; rec: satellite.SatRec }[] = []
-    // The whole sky every 2 s; zoomed in, the satellites near the view 4 times a second (they cross ~15 km in 2 s).
+    // The whole sky every 2 s; zoomed in, the satellites near the view more often (they cross ~15 km in 2 s):
+    // twice a second close up, once a second at country zoom.
     let all: FC | null = null
     let near: { name: string; rec: satellite.SatRec }[] = []
     const draw = () => {
@@ -1201,13 +1252,16 @@ export function MapView({
       }).map(f => String(f.properties?.norad)))
       near = sats.filter(s => ids.has(String(s.rec.satnum).trim())).slice(0, 300)
     }
+    let beat = 0
     const drawNear = () => {
+      beat++
       if (stopped || idle() || !all || !near.length || m.getZoom() < 4) return
+      if (m.getZoom() < 7 && beat % 2) return
       const fresh = new Map(satelliteFeatures(near, new Date()).features.map(f => [String(f.properties?.id), f]))
       all = { ...all, features: all.features.map(f => fresh.get(String(f.properties?.id)) ?? f) }
       put('satellites', all)
     }
-    const fast = setInterval(drawNear, 250)
+    const fast = setInterval(drawNear, 500)
     void window.world.satellites().then(list => {
       sats = list.flatMap(s => {
         try {
@@ -1217,7 +1271,7 @@ export function MapView({
         }
       })
       satsRef.current = sats
-      setCounts(c => ({ ...c, satellites: sats.length }))
+      setCount({ satellites: sats.length })
       draw()
     }, () => undefined)
     const timer = setInterval(draw, 2_000)

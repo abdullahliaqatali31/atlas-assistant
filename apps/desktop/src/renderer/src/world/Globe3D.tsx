@@ -21,7 +21,7 @@ import '@cesium/engine/Source/Widget/CesiumWidget.css'
 import * as Cesium from '@cesium/engine'
 import { Cartesian2, FixedFrameTransforms as Transforms } from '@cesium/core'
 import { ArrowLeftRight, Box, Cable, ChevronLeft, ChevronRight, Crosshair, Eye, Orbit, Plane, Satellite, Ship as ShipIcon, Sparkles, Video, Cctv, Newspaper, Radio, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 
 import { kmBetween, type FireSpot, type Flight, type FlightRoute, type RadioStation, type Ship } from '../../../shared/world.ts'
 import type { Map3dOp } from '../../../shared/map.ts'
@@ -42,7 +42,7 @@ import { MODE_FILTER, sunElevation, type DisplayPrefs } from './hud.ts'
 import type { WorldSnapshot } from '../../../shared/world.ts'
 import { CATEGORY_COLOR, type IntelEvent } from '../../../shared/intel.ts'
 import { MODEL_HEADING_OFFSET, headingTape, heightForZoom, modelFor, type ModelId } from './models3d.ts'
-import { Satellites3D } from './sats3d.ts'
+import { Satellites3D, type Sat3D } from './sats3d.ts'
 import { Traffic3D } from './traffic3d.ts'
 import { defaultLength, shipGltf, shipKind } from './ship3d.ts'
 import { IncidentCard, TrafficPill, type TrafficStatus } from './TrafficLayer2D.tsx'
@@ -61,6 +61,8 @@ const MAX_MODELS = 40
 const POLL_MS = 8_000
 /** Below this camera height planes move every frame (and the view draws continuously); above it, once every two seconds. */
 const NEAR_HEIGHT_M = 600_000
+/** Below this camera height satellites move every 2 s; above it every 5 s. */
+const SATS_NEAR_M = 10_000_000
 /** At most this many planes are moved every frame: the nearest in view. */
 const MAX_LIVE = 600
 
@@ -137,6 +139,225 @@ const shipNow = (s: Ship) => {
   return { lat: s.lat + (d * Math.cos(c)) / 111_320, lon: s.lon + (d * Math.sin(c)) / (111_320 * Math.max(0.2, Math.cos((s.lat * Math.PI) / 180))), course }
 }
 
+/** The page's panels and their lettering (shared by the readouts below). */
+const panel = 'rounded-2xl border border-accent/30 bg-[rgba(4,10,20,0.78)] text-white shadow-[0_0_18px_rgba(34,211,238,0.18)]'
+const mono = 'font-mono uppercase tracking-[0.12em]'
+
+/** Draws the calling readout again every `ms` while the window shows (only the readout, not the whole view). */
+const useTicker = (ms: number) => {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    let t: ReturnType<typeof setInterval> | undefined
+    const sync = () => {
+      clearInterval(t)
+      t = undefined
+      if (document.hidden) return
+      tick(n => n + 1)
+      t = setInterval(() => tick(n => n + 1), ms)
+    }
+    sync()
+    document.addEventListener('visibilitychange', sync)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', sync)
+    }
+  }, [ms])
+}
+
+/** The picked satellite's live facts, for its card. */
+function SatFacts({ sats, sat }: { sats: Satellites3D; sat: Sat3D }) {
+  useTicker(1000)
+  const f = sats.facts(sat)
+  if (!f) return null
+  return (
+    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+      <dt className="text-white/50">Altitude</dt>
+      <dd className="font-mono">{Math.round(f.altKm).toLocaleString()} km</dd>
+      <dt className="text-white/50">Speed</dt>
+      <dd className="font-mono">{f.speedKms.toFixed(2)} km/s</dd>
+      <dt className="text-white/50">Orbit</dt>
+      <dd className="font-mono">
+        {f.periodMin < 200 ? `${f.periodMin.toFixed(0)} min` : `${(f.periodMin / 60).toFixed(1)} h`} · {f.inclination.toFixed(1)}° tilt
+      </dd>
+      <dt className="text-white/50">Over</dt>
+      <dd className="font-mono">{latLonLabel(f)}</dd>
+      <dt className="text-white/50">Light</dt>
+      <dd className="font-mono">{sunElevation(f.lat, f.lon, new Date()) > -Cesium.Math.toDegrees(Math.acos(6371 / (6371 + f.altKm))) ? 'In sunlight' : 'In Earth’s shadow'}</dd>
+    </dl>
+  )
+}
+
+type FlightsRef = { current: { list: Flight[]; at: number; byHex: Map<string, Flight> } }
+
+/** The nearest few aircraft to a point: a cheap flat-earth prefilter over the whole list, then real distances for the few. */
+const nearestFlights = (at: Flight, list: readonly Flight[], n: number) => {
+  const k = Math.cos((at.lat * Math.PI) / 180)
+  const best: { f: Flight; d2: number }[] = []
+  const keep = n * 2
+  for (const f of list) {
+    if (f.hex === at.hex) continue
+    const dLon = ((((f.lon - at.lon) % 360) + 540) % 360) - 180
+    const d2 = (f.lat - at.lat) ** 2 + (dLon * k) ** 2
+    if (best.length === keep && d2 >= best[keep - 1]!.d2) continue
+    let i = best.length
+    while (i > 0 && best[i - 1]!.d2 > d2) i--
+    best.splice(i, 0, { f, d2 })
+    if (best.length > keep) best.pop()
+  }
+  return best
+    .map(b => ({ f: b.f, km: kmBetween(at, b.f) }))
+    .sort((a, b) => a.km - b.km)
+    .slice(0, n)
+}
+
+/** Flying with an aircraft: the heading tape, speed and height, its route, the aircraft around it, and the controls. */
+function FlightHud({ follow, flights, route, setFollow, stopFollow }: { follow: Follow; flights: FlightsRef; route: FlightRoute | null; setFollow: Dispatch<SetStateAction<Follow | null>>; stopFollow: () => void }) {
+  useTicker(500)
+  // The aircraft around it: sorted again at most once a second.
+  const around = useRef<{ at: number; hex: string; list: { f: Flight; km: number }[] }>({ at: 0, hex: '', list: [] })
+  const live = flights.current.byHex.get(follow.hex)
+  const now = live ? deadReckon(live, live.seen + (Date.now() - flights.current.at) / 1000) : null
+  if (!now) return null
+  if (around.current.hex !== now.hex || Date.now() - around.current.at >= 1000) around.current = { at: Date.now(), hex: now.hex, list: nearestFlights(now, flights.current.list, 6) }
+  const neighbours = around.current.list
+  const jump = (dir: 1 | -1) => {
+    const order = flights.current.list
+      .filter(f => f.altitude !== null)
+      .map(f => ({ f, km: kmBetween(now, f) }))
+      .sort((a, b) => a.km - b.km)
+    const i = order.findIndex(o => o.f.hex === now.hex)
+    const next = order[(i + dir + order.length) % order.length]
+    if (next) setFollow(fo => (fo ? { ...fo, hex: next.f.hex } : fo))
+  }
+  const progress = route ? kmBetween(route.origin, now) / Math.max(1, kmBetween(route.origin, now) + kmBetween(now, route.destination)) : null
+  return (
+    <>
+      <div className="pointer-events-none absolute inset-x-0 top-14 flex justify-center">
+        <div className="relative h-8 w-80 overflow-hidden rounded-full border border-accent/30 bg-black/40">
+          {headingTape(now.track).map(t => (
+            <span key={`${t.deg}-${t.offset}`} className={`absolute top-1.5 -translate-x-1/2 text-[11px] ${mono} ${/[NESW]/.test(t.label) ? 'text-accent' : 'text-white/70'}`} style={{ left: `${(t.offset + 0.5) * 100}%` }}>
+              {t.label}
+            </span>
+          ))}
+          <span className="absolute left-1/2 top-0 h-2 w-px bg-accent" />
+        </div>
+      </div>
+      <div className={`pointer-events-none absolute bottom-40 left-1/2 flex -translate-x-1/2 items-end gap-10 ${mono}`}>
+        <div className="text-center">
+          <p className="text-[10px] text-accent/70">Ground speed · kt</p>
+          <p className="text-4xl font-light text-white [text-shadow:0_0_12px_rgba(0,0,0,0.9)]">{Math.round(now.speed)}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-[10px] text-accent/70">{now.verticalRate && Math.abs(now.verticalRate) > 200 ? (now.verticalRate > 0 ? 'Climbing' : 'Descending') : 'Level'}</p>
+          <p className="text-2xl font-light text-white/80">{now.verticalRate ? `${now.verticalRate > 0 ? '+' : ''}${Math.round(now.verticalRate)}` : '0'}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-[10px] text-accent/70">Altitude · ft</p>
+          <p className="text-4xl font-light text-white [text-shadow:0_0_12px_rgba(0,0,0,0.9)]">{now.altitude === null ? 'GND' : Math.round(now.altitude).toLocaleString()}</p>
+        </div>
+      </div>
+      <div className={`absolute left-3 top-14 w-64 space-y-2 p-3 ${panel}`}>
+        <p className="text-sm font-semibold">{flightLabel(now)}</p>
+        <p className="text-[11px] text-white/60">{[aircraftName(now.type) || now.type, now.registration, now.military ? 'military' : ''].filter(Boolean).join(' · ')}</p>
+        {route ? (
+          <div className="space-y-1">
+            <div className={`flex items-center justify-between text-base ${mono}`}>
+              <span title={route.origin.name}>{route.origin.iata || route.origin.icao}</span>
+              <Plane className="size-3.5 text-accent" aria-hidden />
+              <span title={route.destination.name}>{route.destination.iata || route.destination.icao}</span>
+            </div>
+            {progress !== null && (
+              <div className="h-1 overflow-hidden rounded-full bg-white/10">
+                <div className="h-full rounded-full bg-accent" style={{ width: `${Math.round(progress * 100)}%` }} />
+              </div>
+            )}
+            <p className="text-[10px] text-white/55">
+              {route.origin.city} → {route.destination.city} · {Math.round(kmBetween(now, route.destination)).toLocaleString()} km to go
+            </p>
+          </div>
+        ) : (
+          <p className="text-[10px] text-white/45">No published route for this callsign.</p>
+        )}
+      </div>
+      <div className={`absolute right-3 top-14 w-60 p-3 ${panel}`}>
+        <p className={`mb-1.5 text-[10px] text-accent/80 ${mono}`}>Live signals · around it</p>
+        <ul className="space-y-1">
+          {neighbours.map(n => (
+            <li key={n.f.hex}>
+              <button type="button" onClick={() => setFollow(fo => (fo ? { ...fo, hex: n.f.hex } : fo))} className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-[11px] hover:bg-white/10">
+                <span className="size-1.5 rounded-full" style={{ background: colorOf(n.f) }} />
+                <span className="min-w-0 flex-1 truncate">{n.f.callsign || n.f.hex}</span>
+                <span className="text-white/50">{Math.round(n.km)} km</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="absolute bottom-24 left-1/2 flex -translate-x-1/2 items-center gap-1.5">
+        <button type="button" onClick={() => jump(-1)} className={`grid size-9 place-items-center rounded-full ${panel}`} title="Previous aircraft" aria-label="Previous aircraft">
+          <ChevronLeft className="size-4" aria-hidden />
+        </button>
+        <button type="button" onClick={() => setFollow(fo => (fo ? { ...fo, mode: fo.mode === 'chase' ? 'cockpit' : 'chase' } : fo))} className={`rounded-full px-3 py-2 text-xs ${panel}`}>
+          {follow.mode === 'chase' ? 'Cockpit view' : 'Orbit 360°'}
+        </button>
+        <button type="button" onClick={stopFollow} className={`rounded-full px-3 py-2 text-xs text-warm ${panel}`}>
+          Stop flying
+        </button>
+        <button type="button" onClick={() => jump(1)} className={`grid size-9 place-items-center rounded-full ${panel}`} title="Next aircraft" aria-label="Next aircraft">
+          <ChevronRight className="size-4" aria-hidden />
+        </button>
+      </div>
+    </>
+  )
+}
+
+/** Riding a ship: the bridge display. */
+function ShipBridge({ ride, ships, setRide }: { ride: ShipRide; ships: { current: Map<number, Ship> }; setRide: Dispatch<SetStateAction<ShipRide | null>> }) {
+  useTicker(1000)
+  const sh = ships.current.get(ride.mmsi)
+  if (!sh) return null
+  const p = shipNow(sh)
+  const kind = shipKind(sh.category, sh.type)
+  return (
+    <>
+      <div className="pointer-events-none absolute inset-x-0 top-14 flex justify-center">
+        <div className="relative h-8 w-80 overflow-hidden rounded-full border border-accent/30 bg-black/40">
+          {headingTape(p.course).map(t => (
+            <span key={`${t.deg}-${t.offset}`} className={`absolute top-1.5 -translate-x-1/2 text-[11px] ${mono} ${/[NESW]/.test(t.label) ? 'text-accent' : 'text-white/70'}`} style={{ left: `${(t.offset + 0.5) * 100}%` }}>
+              {t.label}
+            </span>
+          ))}
+          <span className="absolute left-1/2 top-0 h-2 w-px bg-accent" />
+        </div>
+      </div>
+      <div className={`pointer-events-none absolute bottom-40 left-1/2 flex -translate-x-1/2 items-end gap-10 ${mono}`}>
+        <div className="text-center">
+          <p className="text-[10px] text-accent/70">Speed · kn</p>
+          <p className="text-4xl font-light text-white [text-shadow:0_0_12px_rgba(0,0,0,0.9)]">{sh.speed > 60 ? '—' : sh.speed.toFixed(1)}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-[10px] text-accent/70">Course</p>
+          <p className="text-4xl font-light text-white [text-shadow:0_0_12px_rgba(0,0,0,0.9)]">{Math.round(p.course)}°</p>
+        </div>
+      </div>
+      <div className={`absolute left-3 top-14 w-64 space-y-1.5 p-3 ${panel}`}>
+        <p className="text-sm font-semibold">{sh.name || `MMSI ${sh.mmsi}`}</p>
+        <p className="text-[11px] capitalize text-white/60">{[sh.category || kind, sh.length ? `${Math.round(sh.length)} m` : '', `MMSI ${sh.mmsi}`].filter(Boolean).join(' · ')}</p>
+        <p className="text-[11px] text-white/80">{sh.destination ? `Bound for ${sh.destination}` : 'No destination given'}</p>
+        <p className={`text-[10px] text-white/45 ${mono}`}>{latLonLabel(p)} · seen {Math.max(0, Math.round((Date.now() - sh.at) / 60_000))} min ago</p>
+      </div>
+      <div className="absolute bottom-24 left-1/2 flex -translate-x-1/2 items-center gap-1.5">
+        <button type="button" onClick={() => setRide(r => (r ? { ...r, mode: r.mode === 'orbit' ? 'bridge' : 'orbit' } : r))} className={`rounded-full px-3 py-2 text-xs ${panel}`}>
+          {ride.mode === 'orbit' ? 'Bridge view' : 'Orbit 360°'}
+        </button>
+        <button type="button" onClick={() => setRide(null)} className={`rounded-full px-3 py-2 text-xs text-warm ${panel}`}>
+          Leave the ship
+        </button>
+      </div>
+    </>
+  )
+}
+
 export default function Globe3D({
   start,
   onClose,
@@ -186,7 +407,6 @@ export default function Globe3D({
   const [picked, setPicked] = useState<Flight | null>(null)
   const [follow, setFollow] = useState<Follow | null>(null)
   const [route, setRoute] = useState<FlightRoute | null>(null)
-  const [, tick] = useState(0)
   const [counts, setCounts] = useState<Counts>({ flights: 0, ships: 0, sats: 0, cables: 0, cameras: 0, news: 0, radio: 0 })
   followRef.current = follow
   const [shipRide, setShipRide] = useState<ShipRide | null>(null)
@@ -252,15 +472,17 @@ export default function Globe3D({
       // Cesium stops drawing after an error: say so in Atlas's own words.
       viewer.scene.renderError.addEventListener((_scene: unknown, e: unknown) => setError(`The 3D view stopped drawing (${e instanceof Error ? e.message.slice(0, 80) : 'error'}). Go back to 2D and open 3D again.`))
       viewerRef.current = viewer
+      // Smooth turning: keep more tiles (turning back reuses them instead of asking again), and on a
+      // modest GPU (Lite) ask for slightly coarser ground, far fewer tiles to request and draw.
+      const lite = document.documentElement.dataset.lite === 'true'
       {
-        // Smooth turning: keep more tiles (turning back reuses them instead of asking again), and on a
-        // modest GPU (Lite) ask for slightly coarser ground, far fewer tiles to request and draw.
-        const lite = document.documentElement.dataset.lite === 'true'
         const globe = viewer.scene.globe
-        globe.tileCacheSize = 400
+        globe.tileCacheSize = lite ? 200 : 300
         globe.maximumScreenSpaceError = lite ? 3 : 2
         if (lite) viewer.scene.msaaSamples = 1
       }
+      /** 3D tiles (Google cities, OSM buildings): coarser and with a smaller memory cap on Lite. */
+      const tileLimits = { maximumScreenSpaceError: lite ? 32 : 16, cacheBytes: (lite ? 128 : 256) * 1024 * 1024 }
       // The loader follows the ground's tiles until the first view is in.
       {
         // Where the camera looks, for the mini globe in the corner widget.
@@ -282,18 +504,15 @@ export default function Globe3D({
       }
       document.addEventListener('visibilitychange', onVisible)
       cleanups.push(() => document.removeEventListener('visibilitychange', onVisible))
-      // A handle for driving the view from the debugger, on the dev server only.
-      if (location.protocol === 'http:') (window as unknown as { __globe3d?: unknown }).__globe3d = { viewer, Cesium, parts: () => parts.current, ships: () => shipsRef.current, flights: () => flights.current.list, ride: { ship: (mmsi: number, mode: ShipRide['mode']) => setShipRide({ mmsi, mode }), flight: (hex: string, mode: Follow['mode']) => setFollow({ hex, mode }), sat: (i: number, mode: SatRide['mode']) => setSatRide({ i, mode }), stop: () => (setShipRide(null), setFollow(null), setSatRide(null)) }, pickShip: (mmsi: number) => setShipPick(mmsi), look: lookRef }
+      // A handle for driving the view from the debugger, on the dev server only (kept out of builds).
+      if ((import.meta as unknown as { env: { DEV: boolean } }).env.DEV) (window as unknown as { __globe3d?: unknown }).__globe3d = { viewer, Cesium, parts: () => parts.current, ships: () => shipsRef.current, flights: () => flights.current.list, ride: { ship: (mmsi: number, mode: ShipRide['mode']) => setShipRide({ mmsi, mode }), flight: (hex: string, mode: Follow['mode']) => setFollow({ hex, mode }), sat: (i: number, mode: SatRide['mode']) => setSatRide({ i, mode }), stop: () => (setShipRide(null), setFollow(null), setSatRide(null)) }, pickShip: (mmsi: number) => setShipPick(mmsi), look: lookRef }
       const scene = viewer.scene
       // No night side: the user looks at their own night too, and a black globe reads as broken.
       scene.globe.enableLighting = false
       scene.fog.enabled = true
-      // Loading: slightly coarser tiles (barely visible) and a larger cache, so moving around reloads less.
-      scene.globe.maximumScreenSpaceError = 2.5
-      scene.globe.tileCacheSize = 300
       try {
         if (keys.google) {
-          const tiles = await Cesium.createGooglePhotorealistic3DTileset({ key: keys.google, onlyUsingWithGoogleGeocoder: true })
+          const tiles = await Cesium.createGooglePhotorealistic3DTileset({ key: keys.google, onlyUsingWithGoogleGeocoder: true }, tileLimits)
           scene.primitives.add(tiles)
           scene.globe.show = false
           setTier('google')
@@ -309,7 +528,13 @@ export default function Globe3D({
             scene.setTerrain(ionTerrain)
             setTier('ion')
             void Cesium.createOsmBuildingsAsync().then(
-              b => !scene.isDestroyed() && (scene.primitives.add(b), scene.requestRender()),
+              b => {
+                if (scene.isDestroyed()) return void b.destroy()
+                b.maximumScreenSpaceError = tileLimits.maximumScreenSpaceError
+                b.cacheBytes = tileLimits.cacheBytes
+                scene.primitives.add(b)
+                scene.requestRender()
+              },
               e => console.warn('Cesium OSM buildings failed', e),
             )
           } else {
@@ -387,18 +612,22 @@ export default function Globe3D({
       /** Planes glide to each new fix instead of jumping when a poll lands (shared by the slow and fast passes). */
       const glide = createGlide()
       const slowPass = () => {
-        if (!viewer || viewer.isDestroyed()) return
+        // Nothing is drawn while the window is hidden: nothing to move either.
+        if (!viewer || viewer.isDestroyed() || document.hidden) return
         const cam = viewer.camera.positionCartographic
         const near = cam.height < NEAR_HEIGHT_M
         if (!near && Date.now() - slowAt < 1900) return
         slowAt = Date.now()
         if (!layersRef.current.flights) {
-          for (const m of models.values()) m.model.show = false
+          let was = nearHold.current
+          for (const m of models.values()) if (m.model.show) (m.model.show = false), (was = true)
           live = []
           nearHold.current = false
-          applyRender()
+          if (was) applyRender()
           return
         }
+        /** Whether anything on screen changed: only then is a frame asked for. */
+        let changed = false
         const { list, at } = flights.current
         const dt = (Date.now() - at) / 1000
         const camLat = Cesium.Math.toDegrees(cam.latitude)
@@ -417,7 +646,7 @@ export default function Globe3D({
           const facing = u[0] * cu[0] + u[1] * cu[1] + u[2] * cu[2] > horizon || raw.hex === followed
           let b = byHex.get(raw.hex)
           if (!facing) {
-            if (b) b.show = false
+            if (b?.show) (b.show = false), (changed = true)
             continue
           }
           const f = glide.place(raw, Date.now(), raw.seen + dt)
@@ -425,12 +654,15 @@ export default function Globe3D({
           if (!b) {
             b = bills.add({ position: scratch, image: planeImg, width: 22, height: 22, color: colorFor(colorOf(f)), alignedAxis: Cesium.Cartesian3.UNIT_Z, scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 3e6, 0.35), id: { kind: 'flight', hex: f.hex } })
             byHex.set(f.hex, b)
-          } else b.position = scratch
-          b.rotation = -Cesium.Math.toRadians(f.track)
-          b.show = !(followRef.current?.mode === 'cockpit' && followed === f.hex) && !models.has(f.hex)
+            changed = true
+          } else if (!Cesium.Cartesian3.equals(b.position, scratch)) (b.position = scratch), (changed = true)
+          const rotation = -Cesium.Math.toRadians(f.track)
+          if (b.rotation !== rotation) (b.rotation = rotation), (changed = true)
+          const show = !(followRef.current?.mode === 'cockpit' && followed === f.hex) && !models.has(f.hex)
+          if (b.show !== show) (b.show = show), (changed = true)
           if (near) nearList.push({ f, km: kmBetween({ lat: camLat, lon: camLon }, f), b })
         }
-        for (const [hex, b] of byHex) if (!seen.has(hex)) (bills.remove(b), byHex.delete(hex))
+        for (const [hex, b] of byHex) if (!seen.has(hex)) (bills.remove(b), byHex.delete(hex), (changed = true))
         glide.keep(seen)
         nearList.sort((a, b) => a.km - b.km)
         live = nearList.slice(0, MAX_LIVE).map(n => ({ hex: n.f.hex, b: n.b }))
@@ -440,13 +672,14 @@ export default function Globe3D({
         }
         // The nearest few get a real 3D model.
         const want = new Set(nearList.filter(n => n.km * 1000 < MODEL_RADIUS_M).slice(0, MAX_MODELS).map(n => n.f.hex))
-        for (const [hex, m] of models) if (!want.has(hex)) (scene.primitives.remove(m.model), models.delete(hex))
+        for (const [hex, m] of models) if (!want.has(hex)) (scene.primitives.remove(m.model), models.delete(hex), (changed = true))
         for (const n of nearList) {
           if (!want.has(n.f.hex)) continue
           const have = models.get(n.f.hex)
           if (have) {
             placeModel(n.f.hex, n.f)
             have.model.show = !(followRef.current?.mode === 'cockpit' && followed === n.f.hex)
+            changed = true
           } else if (!loading.has(n.f.hex)) {
             loading.add(n.f.hex)
             const id = modelFor(n.f.type, n.f.military)
@@ -465,17 +698,17 @@ export default function Globe3D({
           }
         }
         // City lights are coarse (NASA Black Marble): full from space, fading as the ground comes close.
-        if (nightLights.current) nightLights.current.nightAlpha = Math.min(1, Math.max(0.2, cam.height / 1_500_000))
+        const nightAlpha = Math.min(1, Math.max(0.2, cam.height / 1_500_000))
+        if (nightLights.current && nightLights.current.nightAlpha !== nightAlpha) (nightLights.current.nightAlpha = nightAlpha), (changed = true)
         // Satellites near the camera become 3D models.
         const pts = parts.current
-        pts?.sats.pickModels(viewer.camera.positionWC, satRideRef.current?.i ?? satPickRef.current)
+        if (pts?.sats.pickModels(viewer.camera.positionWC, satRideRef.current?.i ?? satPickRef.current)) changed = true
         // Draw continuously only while there are planes (or modelled satellites) close enough to see move.
         const hold = ((near && live.length > 0) || (pts?.sats.modelCount ?? 0) > 0) && !document.hidden
         if (hold !== nearHold.current) {
           nearHold.current = hold
           applyRender()
-        }
-        scene.requestRender()
+        } else if (changed) scene.requestRender()
       }
       const fastPass = () => {
         parts.current?.sats.frame()
@@ -649,16 +882,23 @@ export default function Globe3D({
         },
         () => undefined,
       )
+      cleanups.push(() => sats.destroy())
+      // Satellites move in a worker: every 2 s with the camera near the Earth, every 5 s from far out
+      // (where a dot barely moves on screen); a frame is asked for only when one moved.
+      let satsAt = 0
       const moveSats = () => {
-        if (!layersRef.current.sats || document.hidden) return
-        sats.move(new Date())
-        scene.requestRender()
+        if (!viewer || viewer.isDestroyed() || !layersRef.current.sats || document.hidden) return
+        const every = viewer.camera.positionCartographic.height < SATS_NEAR_M ? 2_000 : 5_000
+        if (Date.now() - satsAt < every - 100) return
+        satsAt = Date.now()
+        void sats.move(new Date()).then(moved => moved && !scene.isDestroyed() && scene.requestRender())
       }
 
       // ── fly with it: the camera rides the followed aircraft every frame ──
       const enu = new Cesium.Matrix4()
       const camScratch = new Cesium.Cartesian3()
       const offScratch = new Cesium.Cartesian3()
+      const satScratch = new Cesium.Cartesian3()
       /** Leave any frame the camera was riding in, so a first-person view is in world terms. */
       const unframe = () => {
         if (viewer && !Cesium.Matrix4.equals(viewer.camera.transform, Cesium.Matrix4.IDENTITY)) viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
@@ -706,7 +946,7 @@ export default function Globe3D({
         if (ride && rs && viewer) {
           const w = sats.where(rs)
           if (!w) return
-          const pos = Cesium.Cartesian3.fromDegrees(w.lon, w.lat, w.altM)
+          const pos = Cesium.Cartesian3.fromDegrees(w.lon, w.lat, w.altM, Cesium.Ellipsoid.WGS84, satScratch)
           rs.point.position = pos
           if (ride.mode === 'eye') {
             unframe()
@@ -750,6 +990,7 @@ export default function Globe3D({
 
       // ── picking ──
       const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas)
+      cleanups.push(() => handler.isDestroyed() || handler.destroy())
       const takeBack = () => {
         if (!orbitRef.current) return
         orbitRef.current = null
@@ -847,8 +1088,7 @@ export default function Globe3D({
       void poll()
       timers.push(setInterval(() => void poll(), POLL_MS))
       timers.push(setInterval(slowPass, 1000))
-      timers.push(setInterval(moveSats, 2_000))
-      timers.push(setInterval(() => tick(n => n + 1), 500))
+      timers.push(setInterval(moveSats, 1_000))
       viewer.camera.moveEnd.addEventListener(() => void poll())
     })()
     return () => {
@@ -856,7 +1096,12 @@ export default function Globe3D({
       for (const t of timers) clearInterval(t)
       for (const c of cleanups) c()
       parts.current = null
-      if (viewer && !viewer.isDestroyed()) viewer.destroy()
+      if (viewer && !viewer.isDestroyed()) {
+        // Give the WebGL context back now (opening 3D again would otherwise pile contexts up until the browser drops old ones).
+        const canvas = viewer.canvas
+        viewer.destroy()
+        ;(canvas.getContext('webgl2') ?? canvas.getContext('webgl'))?.getExtension('WEBGL_lose_context')?.loseContext()
+      }
       viewerRef.current = null
     }
     // The view is made once.
@@ -879,11 +1124,15 @@ export default function Globe3D({
     }
   }, [routeHex])
 
+  /** Removes the HUD's camera listener. */
+  const hudOff = useRef<(() => void) | null>(null)
   const hudSource = useMemo((): HudSource | null => {
     if (!widget) return null
     const fns = new Set<() => void>()
-    widget.camera.percentageChanged = 0.002
-    widget.camera.changed.addEventListener(() => fns.forEach(f => f()))
+    // The same 1% as the corner globe's listener (a finer step fired on every tiny move).
+    widget.camera.percentageChanged = 0.01
+    hudOff.current?.()
+    hudOff.current = widget.camera.changed.addEventListener(() => fns.forEach(f => f()))
     return {
       getCenter() {
         const c = widget.scene.canvas
@@ -899,6 +1148,13 @@ export default function Globe3D({
       off: (_t, fn) => fns.delete(fn),
     }
   }, [widget])
+  useEffect(
+    () => () => {
+      hudOff.current?.()
+      hudOff.current = null
+    },
+    [],
+  )
 
   // Layers: remembered on this PC, and applied to the scene.
   useEffect(() => {
@@ -1027,7 +1283,7 @@ export default function Globe3D({
     traffic3d.current?.destroy()
     traffic3d.current = null
     if (traffic) {
-      traffic3d.current = new Traffic3D(widget, Cesium, {
+      traffic3d.current = new Traffic3D(widget, {
         onStatus: s => {
           setTrafficStatus(s)
           onTrafficStatusRef.current?.(s)
@@ -1480,7 +1736,6 @@ export default function Globe3D({
     widget.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(s.lon, s.lat, Math.max(200_000, Math.min(3_000_000, c.height))), duration: 1.4 })
   }
   const sat = satPick !== null ? parts.current?.sats.list[satPick] : undefined
-  const satNow = sat ? parts.current?.sats.facts(sat) : null
 
   const startFollow = (hex: string, mode: Follow['mode']) => {
     setFollow({ hex, mode })
@@ -1494,31 +1749,6 @@ export default function Globe3D({
     v?.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
     if (v && f) v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(f.lon, f.lat - 0.25, altM(f) + 25_000), orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 }, duration: 1.2 })
   }
-
-  // The followed aircraft now, its neighbours, and the next / previous one to jump to.
-  const live = follow ? flights.current.byHex.get(follow.hex) : null
-  const now = live ? deadReckon(live, live.seen + (Date.now() - flights.current.at) / 1000) : null
-  const neighbours = now
-    ? flights.current.list
-        .filter(f => f.hex !== now.hex)
-        .map(f => ({ f, km: kmBetween(now, f) }))
-        .sort((a, b) => a.km - b.km)
-        .slice(0, 6)
-    : []
-  const jump = (dir: 1 | -1) => {
-    if (!now) return
-    const order = flights.current.list
-      .filter(f => f.altitude !== null)
-      .map(f => ({ f, km: kmBetween(now, f) }))
-      .sort((a, b) => a.km - b.km)
-    const i = order.findIndex(o => o.f.hex === now.hex)
-    const next = order[(i + dir + order.length) % order.length]
-    if (next) setFollow(fo => (fo ? { ...fo, hex: next.f.hex } : fo))
-  }
-  const progress = route && now ? kmBetween(route.origin, now) / Math.max(1, kmBetween(route.origin, now) + kmBetween(now, route.destination)) : null
-
-  const panel = 'rounded-2xl border border-accent/30 bg-[rgba(4,10,20,0.78)] text-white shadow-[0_0_18px_rgba(34,211,238,0.18)]'
-  const mono = 'font-mono uppercase tracking-[0.12em]'
 
   return (
     <div className="absolute inset-0 z-30 bg-black">
@@ -1601,22 +1831,7 @@ export default function Globe3D({
               <X className="size-4" aria-hidden />
             </button>
           </div>
-          {satNow && (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
-              <dt className="text-white/50">Altitude</dt>
-              <dd className="font-mono">{Math.round(satNow.altKm).toLocaleString()} km</dd>
-              <dt className="text-white/50">Speed</dt>
-              <dd className="font-mono">{satNow.speedKms.toFixed(2)} km/s</dd>
-              <dt className="text-white/50">Orbit</dt>
-              <dd className="font-mono">
-                {satNow.periodMin < 200 ? `${satNow.periodMin.toFixed(0)} min` : `${(satNow.periodMin / 60).toFixed(1)} h`} · {satNow.inclination.toFixed(1)}° tilt
-              </dd>
-              <dt className="text-white/50">Over</dt>
-              <dd className="font-mono">{latLonLabel(satNow)}</dd>
-              <dt className="text-white/50">Light</dt>
-              <dd className="font-mono">{sunElevation(satNow.lat, satNow.lon, new Date()) > -Cesium.Math.toDegrees(Math.acos(6371 / (6371 + satNow.altKm))) ? 'In sunlight' : 'In Earth’s shadow'}</dd>
-            </dl>
-          )}
+          {parts.current && <SatFacts sats={parts.current.sats} sat={sat} />}
           <div className="flex gap-1.5">
             <button type="button" onClick={() => setSatRide(r => (r?.mode === 'follow' ? null : { i: sat.i, mode: 'follow' }))} aria-pressed={satRide?.mode === 'follow'} className={`flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs ${satRide?.mode === 'follow' ? 'bg-accent/90 text-accent-fg' : 'border border-accent/50 text-accent hover:bg-accent/10'}`}>
               <Orbit className="size-3.5" aria-hidden /> {satRide?.mode === 'follow' ? 'Orbiting it' : 'Orbit 360°'}
@@ -1693,85 +1908,7 @@ export default function Globe3D({
       {landing && !cable && !sat && !follow && <p className={`absolute bottom-24 left-3 px-3 py-1.5 text-[11px] ${panel}`}>Cable landing · {landing}</p>}
 
       {/* Flying with an aircraft: the HUD. */}
-      {follow && now && (
-        <>
-          <div className="pointer-events-none absolute inset-x-0 top-14 flex justify-center">
-            <div className="relative h-8 w-80 overflow-hidden rounded-full border border-accent/30 bg-black/40">
-              {headingTape(now.track).map(t => (
-                <span key={`${t.deg}-${t.offset}`} className={`absolute top-1.5 -translate-x-1/2 text-[11px] ${mono} ${/[NESW]/.test(t.label) ? 'text-accent' : 'text-white/70'}`} style={{ left: `${(t.offset + 0.5) * 100}%` }}>
-                  {t.label}
-                </span>
-              ))}
-              <span className="absolute left-1/2 top-0 h-2 w-px bg-accent" />
-            </div>
-          </div>
-          <div className={`pointer-events-none absolute bottom-40 left-1/2 flex -translate-x-1/2 items-end gap-10 ${mono}`}>
-            <div className="text-center">
-              <p className="text-[10px] text-accent/70">Ground speed · kt</p>
-              <p className="text-4xl font-light text-white [text-shadow:0_0_12px_rgba(0,0,0,0.9)]">{Math.round(now.speed)}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-[10px] text-accent/70">{now.verticalRate && Math.abs(now.verticalRate) > 200 ? (now.verticalRate > 0 ? 'Climbing' : 'Descending') : 'Level'}</p>
-              <p className="text-2xl font-light text-white/80">{now.verticalRate ? `${now.verticalRate > 0 ? '+' : ''}${Math.round(now.verticalRate)}` : '0'}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-[10px] text-accent/70">Altitude · ft</p>
-              <p className="text-4xl font-light text-white [text-shadow:0_0_12px_rgba(0,0,0,0.9)]">{now.altitude === null ? 'GND' : Math.round(now.altitude).toLocaleString()}</p>
-            </div>
-          </div>
-          <div className={`absolute left-3 top-14 w-64 space-y-2 p-3 ${panel}`}>
-            <p className="text-sm font-semibold">{flightLabel(now)}</p>
-            <p className="text-[11px] text-white/60">{[aircraftName(now.type) || now.type, now.registration, now.military ? 'military' : ''].filter(Boolean).join(' · ')}</p>
-            {route ? (
-              <div className="space-y-1">
-                <div className={`flex items-center justify-between text-base ${mono}`}>
-                  <span title={route.origin.name}>{route.origin.iata || route.origin.icao}</span>
-                  <Plane className="size-3.5 text-accent" aria-hidden />
-                  <span title={route.destination.name}>{route.destination.iata || route.destination.icao}</span>
-                </div>
-                {progress !== null && (
-                  <div className="h-1 overflow-hidden rounded-full bg-white/10">
-                    <div className="h-full rounded-full bg-accent" style={{ width: `${Math.round(progress * 100)}%` }} />
-                  </div>
-                )}
-                <p className="text-[10px] text-white/55">
-                  {route.origin.city} → {route.destination.city} · {Math.round(kmBetween(now, route.destination)).toLocaleString()} km to go
-                </p>
-              </div>
-            ) : (
-              <p className="text-[10px] text-white/45">No published route for this callsign.</p>
-            )}
-          </div>
-          <div className={`absolute right-3 top-14 w-60 p-3 ${panel}`}>
-            <p className={`mb-1.5 text-[10px] text-accent/80 ${mono}`}>Live signals · around it</p>
-            <ul className="space-y-1">
-              {neighbours.map(n => (
-                <li key={n.f.hex}>
-                  <button type="button" onClick={() => setFollow(fo => (fo ? { ...fo, hex: n.f.hex } : fo))} className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-[11px] hover:bg-white/10">
-                    <span className="size-1.5 rounded-full" style={{ background: colorOf(n.f) }} />
-                    <span className="min-w-0 flex-1 truncate">{n.f.callsign || n.f.hex}</span>
-                    <span className="text-white/50">{Math.round(n.km)} km</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="absolute bottom-24 left-1/2 flex -translate-x-1/2 items-center gap-1.5">
-            <button type="button" onClick={() => jump(-1)} className={`grid size-9 place-items-center rounded-full ${panel}`} title="Previous aircraft" aria-label="Previous aircraft">
-              <ChevronLeft className="size-4" aria-hidden />
-            </button>
-            <button type="button" onClick={() => setFollow(fo => (fo ? { ...fo, mode: fo.mode === 'chase' ? 'cockpit' : 'chase' } : fo))} className={`rounded-full px-3 py-2 text-xs ${panel}`}>
-              {follow.mode === 'chase' ? 'Cockpit view' : 'Orbit 360°'}
-            </button>
-            <button type="button" onClick={stopFollow} className={`rounded-full px-3 py-2 text-xs text-warm ${panel}`}>
-              Stop flying
-            </button>
-            <button type="button" onClick={() => jump(1)} className={`grid size-9 place-items-center rounded-full ${panel}`} title="Next aircraft" aria-label="Next aircraft">
-              <ChevronRight className="size-4" aria-hidden />
-            </button>
-          </div>
-        </>
-      )}
+      {follow && <FlightHud follow={follow} flights={flights} route={route} setFollow={setFollow} stopFollow={stopFollow} />}
       {/* Riding hint for any vehicle. */}
       {(follow || satRide || shipRide) && (
         <p className={`pointer-events-none absolute bottom-[4.6rem] left-1/2 -translate-x-1/2 rounded-full bg-black/45 px-3 py-1 text-[10px] text-white/70 ${mono}`}>
@@ -1822,51 +1959,7 @@ export default function Globe3D({
         })()}
 
       {/* Riding a ship: the bridge display. */}
-      {shipRide &&
-        (() => {
-          const sh = shipsRef.current.get(shipRide.mmsi)
-          if (!sh) return null
-          const p = shipNow(sh)
-          const kind = shipKind(sh.category, sh.type)
-          return (
-            <>
-              <div className="pointer-events-none absolute inset-x-0 top-14 flex justify-center">
-                <div className="relative h-8 w-80 overflow-hidden rounded-full border border-accent/30 bg-black/40">
-                  {headingTape(p.course).map(t => (
-                    <span key={`${t.deg}-${t.offset}`} className={`absolute top-1.5 -translate-x-1/2 text-[11px] ${mono} ${/[NESW]/.test(t.label) ? 'text-accent' : 'text-white/70'}`} style={{ left: `${(t.offset + 0.5) * 100}%` }}>
-                      {t.label}
-                    </span>
-                  ))}
-                  <span className="absolute left-1/2 top-0 h-2 w-px bg-accent" />
-                </div>
-              </div>
-              <div className={`pointer-events-none absolute bottom-40 left-1/2 flex -translate-x-1/2 items-end gap-10 ${mono}`}>
-                <div className="text-center">
-                  <p className="text-[10px] text-accent/70">Speed · kn</p>
-                  <p className="text-4xl font-light text-white [text-shadow:0_0_12px_rgba(0,0,0,0.9)]">{sh.speed > 60 ? '—' : sh.speed.toFixed(1)}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[10px] text-accent/70">Course</p>
-                  <p className="text-4xl font-light text-white [text-shadow:0_0_12px_rgba(0,0,0,0.9)]">{Math.round(p.course)}°</p>
-                </div>
-              </div>
-              <div className={`absolute left-3 top-14 w-64 space-y-1.5 p-3 ${panel}`}>
-                <p className="text-sm font-semibold">{sh.name || `MMSI ${sh.mmsi}`}</p>
-                <p className="text-[11px] capitalize text-white/60">{[sh.category || kind, sh.length ? `${Math.round(sh.length)} m` : '', `MMSI ${sh.mmsi}`].filter(Boolean).join(' · ')}</p>
-                <p className="text-[11px] text-white/80">{sh.destination ? `Bound for ${sh.destination}` : 'No destination given'}</p>
-                <p className={`text-[10px] text-white/45 ${mono}`}>{latLonLabel(p)} · seen {Math.max(0, Math.round((Date.now() - sh.at) / 60_000))} min ago</p>
-              </div>
-              <div className="absolute bottom-24 left-1/2 flex -translate-x-1/2 items-center gap-1.5">
-                <button type="button" onClick={() => setShipRide(r => (r ? { ...r, mode: r.mode === 'orbit' ? 'bridge' : 'orbit' } : r))} className={`rounded-full px-3 py-2 text-xs ${panel}`}>
-                  {shipRide.mode === 'orbit' ? 'Bridge view' : 'Orbit 360°'}
-                </button>
-                <button type="button" onClick={() => setShipRide(null)} className={`rounded-full px-3 py-2 text-xs text-warm ${panel}`}>
-                  Leave the ship
-                </button>
-              </div>
-            </>
-          )
-        })()}
+      {shipRide && <ShipBridge ride={shipRide} ships={shipsRef} setRide={setShipRide} />}
       <p className="pointer-events-none absolute bottom-1 right-2 text-[9px] text-white/40">
         {tier === 'google' ? 'Google Map Tiles' : tier === 'ion' ? 'Cesium ion · Esri World Imagery' : 'Esri World Imagery · Re:Earth terrain'} · CesiumJS · aircraft models CC BY 4.0 (see credits){layers.sats ? ' · CelesTrak' : ''}
         {layers.cables ? ' · Submarine Cable Map © TeleGeography' : ''}

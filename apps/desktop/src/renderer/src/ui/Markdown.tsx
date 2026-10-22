@@ -4,7 +4,7 @@
  * cannot inject markup. Each paragraph picks its own direction, so Urdu
  * lines read right to left next to English ones.
  */
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, memo, type ReactNode } from 'react'
 
 type Block = { type: 'p' | 'h'; text: string } | { type: 'ul' | 'ol'; items: string[] } | { type: 'code'; text: string }
 
@@ -71,7 +71,8 @@ export const inline = (text: string): ReactNode[] =>
     return <em key={i}>{inline(part.slice(1, -1))}</em>
   })
 
-export function Markdown({ text }: { text: string }) {
+/** Memoized by its text: a line that did not change is not parsed again. */
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
     <>
       {parseBlocks(text).map((b, i) => {
@@ -115,4 +116,4 @@ export function Markdown({ text }: { text: string }) {
       })}
     </>
   )
-}
+})

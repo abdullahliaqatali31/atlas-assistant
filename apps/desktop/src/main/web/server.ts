@@ -10,6 +10,7 @@ import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } f
 import { createServer, request, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
 import { extname, join, normalize, sep } from 'node:path'
+import { Readable } from 'node:stream'
 
 import { CH, type ReplyEvent } from '../../shared/ipc.ts'
 import { allowedHost, CODE_TTL_MS, DEFAULT_WEB_PORT, DEVICE_COOKIE, deviceName, PairGuard, parseWebChange, readCookie, sameOrigin, TICKET_TTL_MS, WA, WEB_BLOCKED, type WebAccessView } from '../../shared/web.ts'
@@ -82,6 +83,13 @@ const MIME: Record<string, string> = {
 }
 const SECURITY_HEADERS = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY' }
 const hash = (token: string) => createHash('sha256').update(token).digest('hex')
+const statOrNull = (file: string) => {
+  try {
+    return statSync(file)
+  } catch {
+    return null
+  }
+}
 const MAX_BODY = 4096
 
 export class WebAccess {
@@ -331,7 +339,7 @@ export class WebAccess {
       return this.scheme(path, res)
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return this.send(res, 405, 'Method not allowed')
-    return this.deps.devUrl ? this.proxy(req, res, this.deps.devUrl) : this.file(path, res)
+    return this.deps.devUrl ? this.proxy(req, res, this.deps.devUrl) : this.file(path, res, req)
   }
 
   private async pair(req: IncomingMessage, res: ServerResponse) {
@@ -369,24 +377,37 @@ export class WebAccess {
     if (!WEB_SCHEMES.includes(scheme as (typeof WEB_SCHEMES)[number]) || rest.some(p => p === '..')) return this.send(res, 404, 'Not found')
     try {
       const r = await this.deps.schemes[scheme as (typeof WEB_SCHEMES)[number]](new URL(`${scheme}://${rest.join('/')}`))
-      const body = Buffer.from(await r.arrayBuffer())
-      res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') ?? 'application/octet-stream', 'Cache-Control': 'max-age=86400', ...SECURITY_HEADERS })
-      res.end(body)
+      const length = r.headers.get('content-length')
+      res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') ?? 'application/octet-stream', 'Cache-Control': 'max-age=86400', ...(length ? { 'Content-Length': length } : {}), ...SECURITY_HEADERS })
+      if (!r.body) return res.end()
+      // Passed on as it comes, so a large file never sits whole in memory.
+      Readable.fromWeb(r.body as import('node:stream/web').ReadableStream<Uint8Array>).pipe(res)
     } catch {
       this.send(res, 502, 'Unavailable')
     }
   }
 
-  private file(path: string, res: ServerResponse) {
+  private file(path: string, res: ServerResponse, req?: IncomingMessage) {
     const base = normalize(this.deps.rendererDir)
     const rel = decodeURIComponent(path === '/' ? '/index.html' : path)
     const file = normalize(join(base, rel))
-    if (!file.startsWith(base + sep) || !existsSync(file) || statSync(file).isDirectory()) return this.send(res, 404, 'Not found')
+    const st = file.startsWith(base + sep) ? statOrNull(file) : null
+    if (!st || st.isDirectory()) return this.send(res, 404, 'Not found')
     const type = MIME[extname(file).toLowerCase()] ?? 'application/octet-stream'
-    // Built files carry a hash in their names; the page itself always comes fresh.
-    const cache = file.endsWith('.html') ? 'no-store' : 'max-age=31536000, immutable'
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': cache, ...SECURITY_HEADERS })
-    createReadStream(file).pipe(res)
+    // Built files under assets/ carry a hash in their names; the page itself always comes fresh;
+    // the rest (Cesium's files, models) may change with an update, so they are checked by ETag.
+    const cache = file.endsWith('.html') ? 'no-store' : rel.startsWith('/assets/') ? 'max-age=31536000, immutable' : 'max-age=86400'
+    const etag = `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`
+    if (req?.headers['if-none-match'] === etag) {
+      res.writeHead(304, { ETag: etag, 'Cache-Control': cache })
+      return res.end()
+    }
+    // Copies compressed at build time (scripts/compress.mjs), when the browser takes them.
+    const accepts = String(req?.headers['accept-encoding'] ?? '')
+    const packed = (['br', 'gzip'] as const).map(enc => ({ enc, at: `${file}.${enc === 'br' ? 'br' : 'gz'}` })).find(p => accepts.includes(p.enc) && statOrNull(p.at)?.isFile())
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': cache, ETag: etag, Vary: 'Accept-Encoding', ...(packed ? { 'Content-Encoding': packed.enc } : {}), ...SECURITY_HEADERS })
+    if (req?.method === 'HEAD') return res.end()
+    createReadStream(packed?.at ?? file).pipe(res)
   }
 
   /** Development: the page and its modules come from the Vite dev server. */

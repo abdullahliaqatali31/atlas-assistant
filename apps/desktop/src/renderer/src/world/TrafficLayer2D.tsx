@@ -124,9 +124,23 @@ export function TrafficLayer2D({ map, on, idle, onStatus }: { map: MapLibre | nu
     if (!el || !m || !on) return
     const ctx = el.getContext('2d')!
     let raf = 0
+    let rest: ReturnType<typeof setTimeout> | undefined
+    let blank = false
     let last = performance.now()
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame)
+      // No cars (or the map is out of sight): clear once, then look again twice a second instead of every frame.
+      if (!engine.current.cars.length || idleRef.current()) {
+        cancelAnimationFrame(raf)
+        if (!blank) ctx.clearRect(0, 0, el.width, el.height)
+        blank = true
+        rest = setTimeout(() => {
+          last = performance.now()
+          raf = requestAnimationFrame(frame)
+        }, 500)
+        return
+      }
+      blank = false
       const dt = Math.min(0.1, (now - last) / 1000)
       last = now
       const e = engine.current
@@ -137,7 +151,6 @@ export function TrafficLayer2D({ map, on, idle, onStatus }: { map: MapLibre | nu
       if (el.height !== Math.round(h * dpr)) el.height = Math.round(h * dpr)
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, w, h)
-      if (!e.cars.length || idleRef.current()) return
       const zoom = m.getZoom()
       const lat = m.getCenter().lat
       // Metres per pixel here: cars move about 22 px a second at 20 m/s, whatever the zoom.
@@ -177,7 +190,10 @@ export function TrafficLayer2D({ map, on, idle, onStatus }: { map: MapLibre | nu
       ctx.globalCompositeOperation = 'source-over'
     }
     raf = requestAnimationFrame(frame)
-    return () => cancelAnimationFrame(raf)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(rest)
+    }
   }, [map, on])
 
   if (!on) return null

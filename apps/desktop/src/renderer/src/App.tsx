@@ -39,7 +39,9 @@ import {
 } from "lucide-react";
 import {
   lazy,
+  memo,
   Suspense,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -67,7 +69,7 @@ import { AtlasBrowser, BrowserSlot } from "./browser/AtlasBrowser.tsx";
 import logo from "./assets/logo.svg";
 import { Companion } from "./Companion.tsx";
 import { PausedBanner } from "./Controls.tsx";
-import { Home } from "./Home.tsx";
+import { Home, type HomeTarget } from "./Home.tsx";
 import { ActivityCard, NowCard, TodayCard, type Presence } from "./Jarvis.tsx";
 import { LockScreen } from "./LockScreen.tsx";
 import { Setup } from "./Setup.tsx";
@@ -95,6 +97,9 @@ import {
   THEMES,
 } from "./theme.ts";
 import { nameOf, useAssistantName } from "./ui/assistantName.ts";
+
+// The browser re-renders only when its own props change, not with every app update.
+const AtlasBrowserMemo = memo(AtlasBrowser);
 
 // Pages load the first time they open: a lighter start.
 const HabitsPage = lazy(() =>
@@ -297,35 +302,51 @@ export function App() {
   const drawerRef = useRef(drawer);
   drawerRef.current = drawer;
 
-  const open = (d: DrawerId | null) => {
+  // These only set state, so they keep one identity: the memoized pages they are passed to skip unrelated renders.
+  const open = useCallback((d: DrawerId | null) => {
     setDrawer(d);
     store("drawer", d ?? "");
     if (d === "chat") setUnread(0);
-  };
-  const setLayout = (f: (l: StageLayout) => StageLayout) =>
-    setLayoutState((l) => {
-      const next = f(l);
-      store("layout", JSON.stringify(next));
-      return next;
-    });
+  }, []);
+  const setLayout = useCallback(
+    (f: (l: StageLayout) => StageLayout) =>
+      setLayoutState((l) => {
+        const next = f(l);
+        store("layout", JSON.stringify(next));
+        return next;
+      }),
+    [],
+  );
   const focusedRef = useRef(focusedPane);
   focusedRef.current = focusedPane;
   /** Show a surface (a tab): where it already shows, else in the focused pane. */
-  const goStage = (s: Surface) => {
-    setLayout((l) => showSurface(l, s, focusedRef.current));
-    if (s !== "browser") setBrowserFloat((f) => (f === "full" ? "mini" : f));
-  };
+  const goStage = useCallback(
+    (s: Surface) => {
+      setLayout((l) => showSurface(l, s, focusedRef.current));
+      if (s !== "browser") setBrowserFloat((f) => (f === "full" ? "mini" : f));
+    },
+    [setLayout],
+  );
   /** The browser's place: a pane, the corner, the whole window or away. */
-  const setBrowserMode = (m: BrowserMode) => {
-    if (m === "pane") {
-      setLayout((l) => (l.main === "browser" || l.side === "browser" ? l : setSide(l, "browser")));
-      setBrowserFloat("hidden");
-    } else if (m === "full") setBrowserFloat("full");
-    else {
-      setLayout((l) => dropSurface(l, "browser"));
-      setBrowserFloat(m);
-    }
-  };
+  const setBrowserMode = useCallback(
+    (m: BrowserMode) => {
+      if (m === "pane") {
+        setLayout((l) => (l.main === "browser" || l.side === "browser" ? l : setSide(l, "browser")));
+        setBrowserFloat("hidden");
+      } else if (m === "full") setBrowserFloat("full");
+      else {
+        setLayout((l) => dropSurface(l, "browser"));
+        setBrowserFloat(m);
+      }
+    },
+    [setLayout],
+  );
+  const openFromHome = useCallback(
+    (t: HomeTarget) => (t === "world" ? goStage("world") : open(t)),
+    [goStage, open],
+  );
+  const openSetup = useCallback(() => open("setup"), [open]);
+  const openControls = useCallback(() => open("controls"), [open]);
   const setBrowserModeRef = useRef(setBrowserMode);
   setBrowserModeRef.current = setBrowserMode;
   const openChat = (yes: boolean) => open(yes ? "chat" : null);
@@ -884,7 +905,7 @@ export function App() {
                               controls={controls}
                               presence={presence}
                               ownerName={status.setup.ownerName}
-                              open={(t) => (t === "world" ? goStage("world") : open(t))}
+                              open={openFromHome}
                             />
                           ) : x === "world" ? (
                             dormant ? null : <WorldPage />
@@ -924,7 +945,7 @@ export function App() {
 
             {/* Atlas's own browser: over its pane, in the corner, or over everything. */}
             {!compact && (
-              <AtlasBrowser
+              <AtlasBrowserMemo
                 mode={browserMode}
                 driving={driving}
                 panes={panesRef}
@@ -1146,8 +1167,8 @@ export function App() {
               >
                 <Companion
                   status={status}
-                  onOpenSetup={() => open("setup")}
-                  onOpenControls={() => open("controls")}
+                  onOpenSetup={openSetup}
+                  onOpenControls={openControls}
                   onPresence={setPresence}
                 />
               </div>

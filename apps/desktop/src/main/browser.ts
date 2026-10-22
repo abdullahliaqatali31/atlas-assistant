@@ -11,7 +11,7 @@
  * and grouped tabs included); a few pages stay awake, the rest load again
  * when shown, and the whole browser closes after minutes of nobody using it.
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
@@ -164,7 +164,7 @@ export class BrowserService {
       command: (c: PageCommand) => void
       mode: () => BrowserMode
       log: (level: 'info' | 'warn', message: string) => void
-      handle: <T>(channel: string, fn: (arg: unknown, arg2: unknown) => T | Promise<T>) => void
+      handle: <T>(channel: string, fn: (arg: unknown, arg2: unknown, arg3?: unknown) => T | Promise<T>) => void
       toRenderer: (channel: string, payload: unknown) => void
       /** Where the tab list is kept between runs. */
       file: string
@@ -181,7 +181,7 @@ export class BrowserService {
       const action = parseTabAction(a)
       if (action) return this.act(action)
     })
-    this.deps.handle(BRT.picture, (id, width) => this.picture(id, width))
+    this.deps.handle(BRT.picture, (id, width, since) => this.picture(id, width, since))
     this.deps.handle(BRT.input, (id, input) => this.remote(id, input))
   }
 
@@ -294,7 +294,7 @@ export class BrowserService {
 
   // ── the web interface's picture and hands ────────────────
 
-  private async picture(id: unknown, width: unknown): Promise<TabPicture | null> {
+  private async picture(id: unknown, width: unknown, since?: unknown): Promise<TabPicture | null> {
     if (typeof id !== 'string' || !this.tabs.tabs.some(t => t.id === id)) return null
     this.touch()
     const page = await this.pageFor(id).catch((e: unknown) => this.trouble(e))
@@ -306,8 +306,12 @@ export class BrowserService {
     if (!shot) return null
     const loading = await page.evaluate('document.readyState !== "complete"').catch(() => false)
     const hist = (await page.evaluate('history.length').catch(() => 1)) as number
+    // The same picture as the page already has: say so instead of sending it again.
+    const hash = createHash('sha1').update(shot).digest('base64')
     return {
-      url: `data:image/jpeg;base64,${shot.toString('base64')}`,
+      url: hash === since ? '' : `data:image/jpeg;base64,${shot.toString('base64')}`,
+      hash,
+      same: hash === since,
       width: VIEWPORT.width,
       height: VIEWPORT.height,
       page: { url: page.url(), title: await page.title().catch(() => ''), loading: loading === true, back: hist > 1, forward: false },

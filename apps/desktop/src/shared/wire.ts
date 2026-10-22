@@ -16,7 +16,11 @@ export type ServerMessage =
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
+/** Node's own encoder when there is one (the gateway); the page has no Buffer. */
+const NodeBuffer = (globalThis as { Buffer?: { from(b: ArrayBufferLike, offset: number, length: number): { toString(enc: 'base64'): string } } }).Buffer
+
 export const toBase64 = (bytes: Uint8Array): string => {
+  if (NodeBuffer) return NodeBuffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')
   let out = ''
   let i = 0
   for (; i + 2 < bytes.length; i += 3) {
@@ -66,14 +70,19 @@ export const encodeWire = (value: unknown): string =>
  * in: the browser turns Atlas's private addresses (assistant-news://…) into
  * ones its server answers.
  */
-export const decodeWire = (text: string, rewrite?: (s: string) => string): unknown =>
-  JSON.parse(text, (_k, v: unknown) => {
+export const decodeWire = (text: string, rewrite?: (s: string) => string): unknown => {
+  // Most messages hold neither bytes nor Atlas's addresses: plain parsing is several times faster.
+  const bytes = text.includes('"$u8"')
+  if (!bytes) rewrite = rewrite && WEB_SCHEMES.some(s => text.includes(`${s}://`)) ? rewrite : undefined
+  if (!bytes && !rewrite) return JSON.parse(text)
+  return JSON.parse(text, (_k, v: unknown) => {
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       const o = v as { $u8?: unknown }
       if (typeof o.$u8 === 'string' && Object.keys(o).length === 1) return fromBase64(o.$u8)
     }
     return rewrite && typeof v === 'string' ? rewrite(v) : v
   })
+}
 
 /** Atlas's own schemes, served to the browser under this path. */
 export const WEB_SCHEMES = ['assistant-news', 'assistant-model'] as const

@@ -123,7 +123,8 @@ function IntelPanel({ ctx }: { ctx: DockContext }) {
     // The map follows what the panel loaded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events, alerts])
-  const cut = Date.now() - hours * 3600_000
+  // To the minute, so the list below is not filtered again on every render.
+  const cut = Math.floor(Date.now() / 60_000) * 60_000 - hours * 3600_000
   const q = query.trim().toLowerCase()
   const shown = useMemo(
     () => (events ?? []).filter(e => e.at >= cut && e.severity >= minSev && (!cat || e.category === cat) && (!q || `${e.title} ${e.place} ${e.countryName} ${e.source}`.toLowerCase().includes(q)) && (!onlyView || ctx.inView(e.lat, e.lon))),

@@ -145,36 +145,44 @@ export const deadReckon = (f: Flight, seconds: number): Flight => {
   return { ...f, lat: Math.max(-85, Math.min(85, lat)), lon: ((lon + 540) % 360) - 180 }
 }
 
-export const flightFeatures = (flights: Flight[]): FC => ({
+/** A plane's card fields, worked out once per fix: between polls only its position moves. */
+const flightProps = new WeakMap<Flight, Record<string, string | number>>()
+
+/** Planes as map features; `at` places each one (gliding between polls), else its last fix. */
+export const flightFeatures = (flights: Flight[], at?: (f: Flight) => { lat: number; lon: number }): FC => ({
   type: 'FeatureCollection',
-  features: flights.map(f => ({
-    type: 'Feature',
-    geometry: { type: 'Point', coordinates: [f.lon, f.lat] },
-    properties: {
-      title: `${f.callsign || f.registration || f.hex}${f.type ? ` · ${f.type}` : ''}${f.military ? ' · military' : ''}`,
-      detail: `${f.altitude === null ? 'On the ground' : `${Math.round(f.altitude).toLocaleString()} ft`} · ${Math.round(f.speed)} kt${f.registration ? ` · ${f.registration}` : ''}`,
-      id: `f:${f.hex}`,
-      hex: f.hex,
-      callsign: f.callsign,
-      registration: f.registration,
-      type: f.type,
-      typeName: aircraftName(f.type),
-      military: f.military ? 1 : 0,
-      altitude: f.altitude ?? 0,
-      onGround: f.altitude === null ? 1 : 0,
-      speed: f.speed,
-      track: f.track,
-      squawk: f.squawk,
-      verticalRate: f.verticalRate ?? 0,
-      emergency: f.emergency !== 'none' ? f.emergency : squawkMeaning(f.squawk),
-      seen: f.seen,
-      label: flightLabel(f),
-      // Emergencies first, then military, then everyone else, when labels compete for room.
-      rank: f.emergency !== 'none' || squawkMeaning(f.squawk) ? 0 : f.military ? 1 : 2,
-      color: f.emergency !== 'none' || squawkMeaning(f.squawk) ? '#ef4444' : f.military ? '#fbbf24' : '#7dd3fc',
-    },
-  })),
+  features: flights.map(f => {
+    const p = at ? at(f) : f
+    let properties = flightProps.get(f)
+    if (!properties) flightProps.set(f, (properties = flightCard(f)))
+    return { type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [p.lon, p.lat] }, properties }
+  }),
 })
+
+const flightCard = (f: Flight) =>
+  ({
+    title: `${f.callsign || f.registration || f.hex}${f.type ? ` · ${f.type}` : ''}${f.military ? ' · military' : ''}`,
+    detail: `${f.altitude === null ? 'On the ground' : `${Math.round(f.altitude).toLocaleString()} ft`} · ${Math.round(f.speed)} kt${f.registration ? ` · ${f.registration}` : ''}`,
+    id: `f:${f.hex}`,
+    hex: f.hex,
+    callsign: f.callsign,
+    registration: f.registration,
+    type: f.type,
+    typeName: aircraftName(f.type),
+    military: f.military ? 1 : 0,
+    altitude: f.altitude ?? 0,
+    onGround: f.altitude === null ? 1 : 0,
+    speed: f.speed,
+    track: f.track,
+    squawk: f.squawk,
+    verticalRate: f.verticalRate ?? 0,
+    emergency: f.emergency !== 'none' ? f.emergency : squawkMeaning(f.squawk),
+    seen: f.seen,
+    label: flightLabel(f),
+    // Emergencies first, then military, then everyone else, when labels compete for room.
+    rank: f.emergency !== 'none' || squawkMeaning(f.squawk) ? 0 : f.military ? 1 : 2,
+    color: f.emergency !== 'none' || squawkMeaning(f.squawk) ? '#ef4444' : f.military ? '#fbbf24' : '#7dd3fc',
+  }) as Record<string, string | number>
 
 /** Satellite positions now, from their orbit elements. */
 export const satelliteFeatures = (sats: { name: string; rec: satellite.SatRec }[], at: Date): FC => {

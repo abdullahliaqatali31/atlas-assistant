@@ -118,25 +118,35 @@ const KEYS: Record<string, Extract<RemoteInput, { kind: 'key' }>['key']> = {
  * picture of the tab (a few times a second while it changes) and sends
  * clicks, scrolling and typing back to it.
  */
-function RemotePage({ tabId, onPage }: { tabId: string; onPage: (p: NonNullable<TabPicture['page']>) => void }) {
+function RemotePage({ tabId, live, onPage }: { tabId: string; live: boolean; onPage: (p: NonNullable<TabPicture['page']>) => void }) {
   const [pic, setPic] = useState<TabPicture | null | undefined>(undefined)
   const box = useRef<HTMLDivElement | null>(null)
   const soon = useRef<() => void>(() => undefined)
+  const last = useRef<string | undefined>(undefined)
   useEffect(() => {
+    // Put away: no pictures at all, so the PC's browser can rest and close when idle.
+    if (!live) return
     let alive = true
     let timer = 0
+    let still = 0
     const grab = async () => {
       window.clearTimeout(timer)
       if (!alive) return
       if (document.visibilityState === 'visible') {
         const width = Math.round((box.current?.clientWidth ?? 1024) * Math.min(2, devicePixelRatio))
-        const p = await window.atlasTabs.picture(tabId, width).catch(() => null)
+        const p = await window.atlasTabs.picture(tabId, width, last.current).catch(() => null)
         if (!alive) return
-        // While a page loads a picture can miss: keep the last one rather than flash a message.
-        setPic(prev => p ?? prev ?? null)
+        if (p?.same) still++
+        else {
+          still = 0
+          last.current = p?.hash
+          // While a page loads a picture can miss: keep the last one rather than flash a message.
+          setPic(prev => p ?? prev ?? null)
+        }
         if (p?.page) onPage(p.page)
       }
-      timer = window.setTimeout(() => void grab(), 900)
+      // A page that is not changing is looked at less often (up to every 2.5 s); any input looks again at once.
+      timer = window.setTimeout(() => void grab(), still > 3 ? 2500 : 900)
     }
     // After an input the page changes: look again shortly.
     soon.current = () => {
@@ -149,7 +159,7 @@ function RemotePage({ tabId, onPage }: { tabId: string; onPage: (p: NonNullable<
       window.clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onPage only reports; a new one each render must not restart the loop
-  }, [tabId])
+  }, [tabId, live])
 
   const send = (input: RemoteInput) => {
     void window.atlasTabs.input(tabId, input).catch(() => undefined)
@@ -440,8 +450,12 @@ export function AtlasBrowser({ mode, driving, panes, onMode }: { mode: BrowserMo
     }
     let raf = 0
     let last = ''
+    // Placed when something moves (a resize, a drag, the panel changing), not every frame.
+    const soon = () => {
+      if (!raf) raf = requestAnimationFrame(place)
+    }
     const place = () => {
-      raf = requestAnimationFrame(place)
+      raf = 0
       const parent = el.offsetParent?.getBoundingClientRect()
       const anchor = mode === 'pane' ? document.querySelector('[data-browser-slot]')?.getBoundingClientRect() : panes.current?.getBoundingClientRect()
       if (!parent || !anchor) return
@@ -458,7 +472,28 @@ export function AtlasBrowser({ mode, driving, panes, onMode }: { mode: BrowserMo
       Object.assign(el.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` })
     }
     place()
-    return () => cancelAnimationFrame(raf)
+    const ro = new ResizeObserver(soon)
+    if (el.offsetParent) ro.observe(el.offsetParent)
+    const anchor = mode === 'pane' ? document.querySelector('[data-browser-slot]') : panes.current
+    if (anchor) ro.observe(anchor)
+    const drag = (e: PointerEvent) => {
+      if (e.buttons) soon()
+    }
+    window.addEventListener('resize', soon)
+    window.addEventListener('pointermove', drag, { passive: true })
+    window.addEventListener('pointerup', soon)
+    document.addEventListener('transitionend', soon)
+    // A slot that moves without resizing (the layout changing around it) is caught within half a second.
+    const slow = window.setInterval(soon, 500)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+      window.removeEventListener('resize', soon)
+      window.removeEventListener('pointermove', drag)
+      window.removeEventListener('pointerup', soon)
+      document.removeEventListener('transitionend', soon)
+      window.clearInterval(slow)
+    }
   }, [mode, panes, born])
 
   // The shown tab's own events keep the toolbar current.
@@ -585,6 +620,7 @@ export function AtlasBrowser({ mode, driving, panes, onMode }: { mode: BrowserMo
               <RemotePage
                 key={state.active}
                 tabId={state.active}
+                live={mode !== 'hidden'}
                 onPage={p => {
                   setPage({ url: p.url, title: p.title, loading: p.loading, back: p.back, forward: p.forward || p.back })
                   if (!editing.current) setAddress(p.url)

@@ -40,6 +40,21 @@ export interface Transport {
   on<T>(channel: string, cb: (v: T) => void): () => void
 }
 
+/**
+ * A large list that changes slowly (all official cameras, the day's fires),
+ * asked once and shared by every panel for a while; a failed ask is not kept.
+ */
+const kept = <T>(ask: () => Promise<T>, ttlMs: number) => {
+  let hold: { at: number; value: Promise<T> } | null = null
+  return (): Promise<T> => {
+    if (hold && Date.now() - hold.at < ttlMs) return hold.value
+    const value = ask()
+    hold = { at: Date.now(), value }
+    value.catch(() => (hold = null))
+    return value
+  }
+}
+
 export const buildBridges = (t: Transport) => {
   const bridge: AssistantBridge = {
     status: () => t.invoke(CH.status),
@@ -290,7 +305,7 @@ export const buildBridges = (t: Transport) => {
     intelUkraine: () => t.invoke(WLD.intelUkraine),
     track: hex => t.invoke(WLD.track, hex),
     launches: () => t.invoke(WLD.launches),
-    fires: () => t.invoke(WLD.fires),
+    fires: kept(() => t.invoke(WLD.fires), 30 * 60_000),
     trafficFlow: (box, zoom) => t.invoke(WLD.trafficFlow, box, zoom),
     trafficIncidents: box => t.invoke(WLD.trafficIncidents, box),
     radio: () => t.invoke(WLD.radio),
@@ -301,7 +316,7 @@ export const buildBridges = (t: Transport) => {
     cable: (id: string) => t.invoke(WLD.cable, id),
     ships: box => t.invoke(WLD.ships, box),
     setShipsKey: key => t.invoke(WLD.shipsKey, key),
-    cameras: () => t.invoke(WLD.cameras),
+    cameras: kept(() => t.invoke(WLD.cameras), 60 * 60_000),
     cameraImage: id => t.invoke(WLD.cameraImage, id),
     webcams: (box, zoom) => t.invoke(WLD.webcams, box, zoom),
     setWebcamsKey: key => t.invoke(WLD.webcamsKey, key),
@@ -342,7 +357,7 @@ export const buildBridges = (t: Transport) => {
     onState: cb => t.on<BrowserTabsState>(BRT.state, cb),
     act: a => t.invoke(BRT.act, a),
     report: r => void t.invoke(BRT.report, r).catch(() => undefined),
-    picture: (id, width) => t.invoke(BRT.picture, id, width),
+    picture: (id, width, since) => t.invoke(BRT.picture, id, width, since),
     input: (id, input) => t.invoke(BRT.input, id, input),
   }
 

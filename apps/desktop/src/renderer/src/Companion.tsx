@@ -1,6 +1,6 @@
 import * as ToggleGroup from '@radix-ui/react-toggle-group'
 import { Ear, Mic, Square, SquarePen, Volume2, VolumeX } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 
 import { MODES, type ActionNotice, type ApprovalRequest, type InitiativeItem, type RuntimeStatus, type TaskView, type UiMode } from '../../shared/ipc.ts'
 import type { OnboardingStep, PersonalityView, PromptLanguage } from '../../shared/personality.ts'
@@ -23,6 +23,7 @@ import { Markdown } from './ui/Markdown.tsx'
 import { ASK_EVENT, MIC_EVENT, publishLive, STOP_EVENT } from './shell/live.ts'
 import { nameOf } from './ui/assistantName.ts'
 import { setLiveLevel } from './ui/liveLevel.ts'
+import { getMicLevel, setMicLevel, subscribeMicLevel, useMicLevel } from './shell/micLevel.ts'
 import { closeMic } from './voice/mic.ts'
 
 interface Line {
@@ -56,8 +57,11 @@ const END_PHRASE = /^\s*(bas|bas karo|bas kro|stop|that'?s all|that is all|thank
 
 const MIC_HELP = 'Microphone unavailable. Allow it in Windows Settings › Privacy & security › Microphone. You can still type.'
 
+/** The transcript shows this many of the newest lines; "Show earlier" reveals more (all stay in memory). */
+const LINE_WINDOW = 150
+
 /** Floating companion: type or talk, streamed text and speech out, mode switch and stop. */
-export function Companion({
+export const Companion = memo(function Companion({
   status,
   onOpenSetup,
   onOpenControls,
@@ -86,7 +90,8 @@ export function Companion({
   const [listening, setListening] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
   const [speaking, setSpeaking] = useState(false)
-  const [level, setLevel] = useState(0)
+  // The mic level lives in its own store (shell/micLevel.ts), not here: it changes ~25 times a second.
+  const [shown, setShown] = useState(LINE_WINDOW)
   const replyRef = useRef<string | null>(null)
   const recordingRef = useRef<Recording | null>(null)
   /** The "microphone is quiet" hint is given once a session. */
@@ -207,10 +212,6 @@ export function Companion({
     }
   }, [player, stopSpeech])
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' })
-  }, [lines, suggest])
-
 
   /** Stop talking and streaming: used by Stop, Esc, and whenever the owner starts a new turn. */
   const interrupt = useCallback(() => {
@@ -304,7 +305,7 @@ export function Companion({
     if (inConversation) setIdleUntil(Date.now() + IDLE_MS)
     try {
       recordingRef.current = await record({
-        onLevel: setLevel,
+        onLevel: setMicLevel,
         // Heard, but faintly: say once how to fix it (closer, or the microphone level / choice in Settings › Sound).
         onQuiet: () => {
           if (quietToldRef.current) return
@@ -354,11 +355,12 @@ export function Companion({
     }
   }, [])
 
-  // The latest reply and what the voice is doing, for the Ask bar's bubble.
+  // The latest reply and what the voice is doing, for the Ask bar's bubble. The level is not
+  // sent here (nothing there draws it; the orbs and bars read it from their own stores).
   useEffect(() => {
-    const last = [...lines].reverse().find(l => l.who === 'assistant')
-    publishLive({ replyId: last?.id ?? null, text: last?.text ?? '', replying: replyId !== null, listening, transcribing, speaking, level, error })
-  }, [lines, replyId, listening, transcribing, speaking, level, error])
+    const last = lines.findLast(l => l.who === 'assistant')
+    publishLive({ replyId: last?.id ?? null, text: last?.text ?? '', replying: replyId !== null, listening, transcribing, speaking, level: 0, error })
+  }, [lines, replyId, listening, transcribing, speaking, error])
 
   // ── voice conversation: keeps listening and answering until 30 s of silence ──
   const [conversation, setConversation] = useState(false)
@@ -435,6 +437,12 @@ export function Companion({
 
   // The mic button starts a conversation, or ends one.
   const toggleMic = () => (liveRef.current.active ? liveRef.current.stop() : conversationRef.current ? endConversation() : beginConversation())
+  /** Voice mode's Stop: cut the reply short and listen again. */
+  const bargeIn = useCallback(() => {
+    void window.assistant.interrupt().catch(() => undefined)
+    interrupt()
+    void startListeningRef.current()
+  }, [interrupt])
 
   // ── wake word: say the assistant's name to start talking ──
   const [ownerLocked, setOwnerLocked] = useState(false)
@@ -571,24 +579,37 @@ export function Companion({
   const presence: Presence['state'] = live.active ? (live.phase === 'speaking' ? 'speaking' : live.phase === 'listening' ? 'listening' : 'thinking') : listening ? 'listening' : speaking ? 'speaking' : replyId || transcribing ? 'thinking' : 'idle'
   // The app hears about state changes only; the level goes to the orbs directly (liveLevel), many times a second.
   useEffect(() => onPresence?.({ state: presence, level: 0 }), [onPresence, presence])
-  useEffect(() => setLiveLevel(listening ? level : live.active ? live.level : 0), [listening, level, live.active, live.level])
+  useEffect(() => {
+    // While listening, the mic level is passed straight from its store to the orbs, without a render here.
+    if (listening || live.active) {
+      setLiveLevel(getMicLevel())
+      return subscribeMicLevel(() => setLiveLevel(getMicLevel()))
+    }
+    setLiveLevel(0)
+  }, [listening, live.active])
 
   // The desktop widget mirrors this: what Atlas is doing and its newest words. Sent on each change (not on a
   // timer: a minimised window's timers slow to once a minute), the mic level at most about four times a second.
   const lastReply = lines.findLast(l => l.who === 'assistant')?.text ?? ''
   const widgetCaption = presence === 'idle' || presence === 'listening' ? '' : lastReply
-  const widgetLevel = Math.round((listening ? level : 0) * 10)
+  const widgetNow = useRef({ presence, caption: widgetCaption, listening })
+  widgetNow.current = { presence, caption: widgetCaption, listening }
   const widgetSent = useRef({ key: '', at: 0, shape: '' })
-  useEffect(() => {
-    const shape = `${presence}|${widgetCaption}`
-    const key = `${shape}|${widgetLevel}`
+  const sendWidget = useCallback(() => {
+    const { presence, caption, listening } = widgetNow.current
+    const level = Math.round((listening ? getMicLevel() : 0) * 10)
+    const shape = `${presence}|${caption}`
+    const key = `${shape}|${level}`
     const last = widgetSent.current
     if (key === last.key) return
     // Only the level moved, and very recently: skip this one.
     if (shape === last.shape && Date.now() - last.at < 240) return
     widgetSent.current = { key, at: Date.now(), shape }
-    void window.presenceHost.update({ activity: presence, caption: widgetCaption, level: widgetLevel / 10 }).catch(() => undefined)
-  }, [presence, widgetCaption, widgetLevel])
+    void window.presenceHost.update({ activity: presence, caption, level: level / 10 }).catch(() => undefined)
+  }, [])
+  useEffect(sendWidget, [presence, widgetCaption, listening, sendWidget])
+  // The level reaches the widget from its store while listening, not through renders.
+  useEffect(() => (listening ? subscribeMicLevel(sendWidget) : undefined), [listening, sendWidget])
 
   // The widget's Stop and Talk act here, where the microphone and the speech are.
   const widgetAsks = useRef<(c: PresenceCommand) => void>(() => undefined)
@@ -614,6 +635,15 @@ export function Companion({
     else interrupt()
   }
   useEffect(() => window.presenceHost.onCommand(c => widgetAsks.current(c)), [])
+
+  // Voice mode covers the transcript: it is not drawn meanwhile, and comes back at the newest line.
+  const transcriptHidden = conversation || live.active
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' })
+  }, [lines, suggest, transcriptHidden])
+  // Only the newest lines are drawn; the rest wait behind "Show earlier".
+  const firstShown = Math.max(0, lines.length - shown)
+  const lastId = lines.at(-1)?.id
   useEffect(() => {
     const stop = () => widgetAsks.current('stop')
     window.addEventListener(STOP_EVENT, stop)
@@ -694,7 +724,6 @@ export function Companion({
         <div className="min-h-0 flex-1">
           <VoiceMode
             phase={live.phase === 'connecting' ? 'thinking' : live.phase}
-            level={live.level}
             you={live.heard}
             assistant={live.said}
             idleUntil={0}
@@ -710,56 +739,41 @@ export function Companion({
         <div className="min-h-0 flex-1">
           <VoiceMode
             phase={voicePhase}
-            level={listening ? level : 0}
             you={captions.you}
             assistant={captions.assistant}
             idleUntil={listening ? idleUntil : 0}
             name={personality?.profile.assistantName ?? ''}
             onEnd={endConversation}
             onKeyboard={endConversation}
-            onStop={() => {
-              void window.assistant.interrupt().catch(() => undefined)
-              interrupt()
-              void startListeningRef.current()
-            }}
+            onStop={bargeIn}
           />
         </div>
       )}
-      <main className={`flex flex-1 flex-col gap-[var(--chat-gap)] overflow-y-auto px-3 py-3 @[480px]:px-4 ${conversation || live.active ? 'hidden' : ''}`} aria-live="polite">
-        {lines.length === 0 && (
+      <main className={`flex flex-1 flex-col gap-[var(--chat-gap)] overflow-y-auto px-3 py-3 @[480px]:px-4 ${transcriptHidden ? 'hidden' : ''}`} aria-live="polite">
+        {!transcriptHidden && lines.length === 0 && (
           <p className="pt-16 text-center text-sm text-muted">
             {!ready ? `${PHASE_TEXT[status.phase]}…` : voice ? 'Type, or tap the mic (Ctrl+Space) and talk.' : 'Type to start talking.'}
           </p>
         )}
-        {lines[0]?.earlier && <p className="hud-label text-center">Earlier today</p>}
-        {lines.map((l, i) => (
-          <div key={l.id} className={`rise-in ${l.who === 'owner' ? 'flex flex-wrap justify-end' : ''} ${l.earlier ? 'opacity-70' : ''}`}>
-            {!l.earlier && lines[i - 1]?.earlier && <p className="hud-label mb-2 w-full basis-full text-center">Now</p>}
-            <div
-              className={`text-[length:var(--chat-text)] leading-relaxed ${
-                l.who === 'owner'
-                  ? chatView.style === 'minimal'
-                    ? 'max-w-[var(--chat-max)] rounded-xl bg-accent-soft px-[var(--chat-pad-x)] py-[var(--chat-pad-y)] text-text'
-                    : 'max-w-[var(--chat-max)] rounded-2xl rounded-br-md bg-linear-to-br from-cyan-300 to-sky-500 px-[var(--chat-pad-x)] py-[var(--chat-pad-y)] text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.2)]'
-                  : chatView.style === 'minimal'
-                    ? 'max-w-full border-l-2 border-accent/50 py-0.5 pl-3'
-                    : 'tile max-w-[var(--chat-max)] rounded-2xl rounded-bl-md px-[var(--chat-pad-x)] py-[var(--chat-pad-y)]'
-              }`}
-            >
-              {l.actions?.map((a, i) => (
-                <span key={i} className="mb-1 flex items-center gap-1.5 font-mono text-[11px] text-muted">
-                  <span className={`size-1.5 rounded-full ${a.status === 'done' ? 'bg-ok' : a.status === 'running' ? 'thinking-dot bg-accent' : 'bg-danger'}`} aria-hidden />
-                  {a.tool}: {a.status}
-                  {a.detail && a.status !== 'done' ? ` (${a.detail})` : ''}
-                </span>
-              ))}
-              {l.text ? l.who === 'assistant' ? <Markdown text={l.text} /> : <span dir="auto" className="whitespace-pre-wrap">{l.text}</span> : l.id === replyId ? <span className="thinking-dot text-muted">…</span> : ''}
-              {l.note && <span className="mt-1 block text-xs text-muted">{l.note}</span>}
-              {l.item && <InitiativeControls item={l.item} speaking={l.id === replyId || (speaking && l === lines.at(-1))} onStop={interrupt} />}
-            </div>
-          </div>
-        ))}
-        {suggest && lines.at(-1)?.id === suggest.replyId && !replyId && (
+        {!transcriptHidden && firstShown > 0 && (
+          <button type="button" onClick={() => setShown(n => n + LINE_WINDOW)} className="btn mx-auto h-7 rounded-full px-3 text-xs">
+            Show earlier ({firstShown})
+          </button>
+        )}
+        {!transcriptHidden && lines[firstShown]?.earlier && <p className="hud-label text-center">Earlier today</p>}
+        {!transcriptHidden &&
+          lines.slice(firstShown).map((l, i) => (
+            <ChatLine
+              key={l.id}
+              line={l}
+              nowStarts={!l.earlier && Boolean(lines[firstShown + i - 1]?.earlier)}
+              minimal={chatView.style === 'minimal'}
+              current={l.id === replyId}
+              speaking={Boolean(l.item) && (l.id === replyId || (speaking && l.id === lastId))}
+              onStop={interrupt}
+            />
+          ))}
+        {!transcriptHidden && suggest && lines.at(-1)?.id === suggest.replyId && !replyId && (
           <div className="rise-in flex flex-wrap gap-1.5 pl-1" role="group" aria-label="Quick replies">
             {suggest.options.map(o => (
               <button
@@ -830,11 +844,7 @@ export function Companion({
               className="flex h-9 flex-1 items-center gap-2 rounded-[0.625rem] border border-warm/60 bg-warm/10 px-3 text-left text-sm text-warm"
               aria-label="Listening; tap to send now, Esc to cancel"
             >
-              <span className="flex h-4 items-end gap-0.5" aria-hidden>
-                {[0.6, 1, 0.8].map((k, i) => (
-                  <span key={i} className="w-1 rounded-sm bg-warm" style={{ height: `${Math.max(15, Math.min(100, level * 100 * k * 1.6))}%` }} />
-                ))}
-              </span>
+              <MicBars />
               Listening… tap to send, Esc to cancel
             </button>
           ) : (
@@ -877,7 +887,67 @@ export function Companion({
       )}
     </div>
   )
+})
+
+/** The three bars that move with the microphone: they read the level themselves, so nothing else re-renders. */
+function MicBars() {
+  const level = useMicLevel()
+  return (
+    <span className="flex h-4 items-end gap-0.5" aria-hidden>
+      {[0.6, 1, 0.8].map((k, i) => (
+        <span key={i} className="w-1 rounded-sm bg-warm" style={{ height: `${Math.max(15, Math.min(100, level * 100 * k * 1.6))}%` }} />
+      ))}
+    </span>
+  )
 }
+
+/** One message in the transcript. Memoized: while a reply streams, only its own line re-renders. */
+const ChatLine = memo(function ChatLine({
+  line: l,
+  nowStarts,
+  minimal,
+  current,
+  speaking,
+  onStop,
+}: {
+  line: Line
+  /** The first line of now, after the ones from earlier today. */
+  nowStarts: boolean
+  minimal: boolean
+  /** The reply being written right now. */
+  current: boolean
+  /** Its spoken-up item is being read aloud. */
+  speaking: boolean
+  onStop: () => void
+}) {
+  return (
+    <div className={`rise-in ${l.who === 'owner' ? 'flex flex-wrap justify-end' : ''} ${l.earlier ? 'opacity-70' : ''}`}>
+      {nowStarts && <p className="hud-label mb-2 w-full basis-full text-center">Now</p>}
+      <div
+        className={`text-[length:var(--chat-text)] leading-relaxed ${
+          l.who === 'owner'
+            ? minimal
+              ? 'max-w-[var(--chat-max)] rounded-xl bg-accent-soft px-[var(--chat-pad-x)] py-[var(--chat-pad-y)] text-text'
+              : 'max-w-[var(--chat-max)] rounded-2xl rounded-br-md bg-linear-to-br from-cyan-300 to-sky-500 px-[var(--chat-pad-x)] py-[var(--chat-pad-y)] text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.2)]'
+            : minimal
+              ? 'max-w-full border-l-2 border-accent/50 py-0.5 pl-3'
+              : 'tile max-w-[var(--chat-max)] rounded-2xl rounded-bl-md px-[var(--chat-pad-x)] py-[var(--chat-pad-y)]'
+        }`}
+      >
+        {l.actions?.map((a, i) => (
+          <span key={i} className="mb-1 flex items-center gap-1.5 font-mono text-[11px] text-muted">
+            <span className={`size-1.5 rounded-full ${a.status === 'done' ? 'bg-ok' : a.status === 'running' ? 'thinking-dot bg-accent' : 'bg-danger'}`} aria-hidden />
+            {a.tool}: {a.status}
+            {a.detail && a.status !== 'done' ? ` (${a.detail})` : ''}
+          </span>
+        ))}
+        {l.text ? l.who === 'assistant' ? <Markdown text={l.text} /> : <span dir="auto" className="whitespace-pre-wrap">{l.text}</span> : current ? <span className="thinking-dot text-muted">…</span> : ''}
+        {l.note && <span className="mt-1 block text-xs text-muted">{l.note}</span>}
+        {l.item && <InitiativeControls item={l.item} speaking={speaking} onStop={onStop} />}
+      </div>
+    </div>
+  )
+})
 
 /** Short, actionable wording for the common voice provider failures. */
 const voiceProblem = (message: string) => {

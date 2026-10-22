@@ -1,7 +1,8 @@
 import { Keyboard, Square, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 
-import { Orb, type OrbState } from './ui/Orb.tsx'
+import type { OrbState } from './ui/Orb.tsx'
+import { LiveOrb } from './ui/LiveOrb.tsx'
 
 const LABEL: Record<VoicePhase, string> = {
   listening: 'Listening…',
@@ -46,9 +47,8 @@ const useOrbSize = () => {
  * A live voice conversation: one big presence, what you said, what it is
  * saying, and how long it will keep listening. Feels like a call, not a chat.
  */
-export function VoiceMode({
+export const VoiceMode = memo(function VoiceMode({
   phase,
-  level,
   you,
   assistant,
   idleUntil,
@@ -59,7 +59,6 @@ export function VoiceMode({
   note,
 }: {
   phase: VoicePhase
-  level: number
   /** What the owner just said (empty until transcribed). */
   you: string
   /** The reply as it streams. */
@@ -76,12 +75,16 @@ export function VoiceMode({
 }) {
   const orb = useOrbSize()
   const [now, setNow] = useState(Date.now())
+  // The countdown ticks only while it shows (listening with a deadline) and the window is visible.
+  const counting = phase === 'listening' && idleUntil > 0
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 250)
+    if (!counting) return
+    setNow(Date.now())
+    const t = setInterval(() => !document.hidden && setNow(Date.now()), 250)
     return () => clearInterval(t)
-  }, [])
+  }, [counting, idleUntil])
   const left = Math.max(0, idleUntil - now)
-  const fraction = phase === 'listening' && idleUntil > 0 ? Math.min(1, left / 30_000) : 1
+  const fraction = counting ? Math.min(1, left / 30_000) : 1
   const R = 158
   const circumference = 2 * Math.PI * R
   const busy = phase === 'thinking' || phase === 'speaking'
@@ -109,7 +112,8 @@ export function VoiceMode({
               style={{ transition: 'stroke-dashoffset 250ms linear, stroke 300ms' }}
             />
           </svg>
-          <Orb state={ORB[phase]} level={level} size={orb.size} />
+          {/* The orb follows the live voice level on its own, so the level never re-renders this view. */}
+          <LiveOrb state={ORB[phase]} size={orb.size} />
         </div>
         <p role="status" className={`mt-1 text-base font-medium tracking-wide ${phase === 'listening' ? 'text-warm' : 'text-accent'}`}>
           {LABEL[phase]}
@@ -146,4 +150,4 @@ export function VoiceMode({
       {!note && orb.height > 260 && <p className="mt-1.5 shrink-0 text-center text-[11px] text-muted">Say “bas” or “that’s all” to finish · Esc ends · it stops after 30 s of silence</p>}
     </div>
   )
-}
+})
