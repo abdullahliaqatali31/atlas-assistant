@@ -51,20 +51,29 @@ Everything here is also plain Markdown you can edit, and an optional local model
 
 ## Install
 
-On Windows 10 or 11, in PowerShell:
+On Windows 10 or 11, with [Node.js](https://nodejs.org) 22.13 or newer:
+
+```powershell
+npm install -g atlas-ai-assistant
+atlas
+```
+
+`atlas` starts Atlas and opens it in your browser. If another tool already owns the `atlas` command, the same command is also called `atlas-ai-assistant`.
+
+No Node.js yet? This one line brings it (through winget), installs Atlas into `%LOCALAPPDATA%\Atlas` and starts it:
 
 ```powershell
 iwr -useb https://github.com/abdullahliaqatali31/atlas-assistant/releases/latest/download/install.ps1 | iex
 ```
 
-That brings Node.js if it is missing, installs Atlas into `%LOCALAPPDATA%\Atlas`, puts the `atlas` command on your PATH, and opens Atlas in your browser. Or download a release zip and run `install.ps1 -From .\atlas-<version>-win-x64.zip`.
+Or download a release zip and run `install.ps1 -From .\atlas-<version>-win-x64.zip`.
 
 ```text
 atlas            start Atlas and open it in your browser
 atlas stop       stop it
 atlas status     is it running, and where
 atlas logs       the last lines of its log
-atlas update     install the latest release (--check only tells you)
+atlas update     install the latest version, through npm or the release, however you installed (--check only tells you)
 ```
 
 **What you need:** an AI provider and a voice provider, with your own keys. Setup walks you through it and lists the models your key can use.

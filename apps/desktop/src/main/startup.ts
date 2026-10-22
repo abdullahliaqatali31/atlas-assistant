@@ -39,9 +39,12 @@ const register = (on: boolean, show: boolean) => {
 /** The installed app's first run: start with Windows, window open. Later runs leave the owner's choice alone. */
 export const ensureStartupDefault = () => {
   if (!app.isPackaged) return
+  // A copy run with its own data folder (a test, a portable copy) never takes over starting with Windows.
+  if (process.env.ATLAS_DATA_DIR) return
   const marker = join(app.getPath('userData'), 'startup-chosen-gateway')
   if (existsSync(marker)) return
-  register(true, true)
+  // Another install already starts with Windows: leave that choice alone.
+  if (!at([])) register(true, true)
   try {
     writeFileSync(marker, new Date().toISOString())
   } catch {

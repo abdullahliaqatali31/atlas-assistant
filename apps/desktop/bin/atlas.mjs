@@ -79,8 +79,30 @@ const newer = (a, b) => {
   return false
 }
 
+/** Installed with npm (npm install -g atlas-ai-assistant): updated by npm, from the npm registry. */
+const updateWithNpm = async ({ check, installed, name }) => {
+  const r = await fetch(`https://registry.npmjs.org/${name}/latest`, { signal: AbortSignal.timeout(15_000) })
+  if (!r.ok) throw new Error(`Could not ask npm for the latest ${name} (${r.status}).`)
+  const latest = String((await r.json()).version ?? '')
+  if (!latest || !newer(latest, installed)) return console.log(`Atlas ${installed} is up to date.`)
+  if (check) return console.log(`Atlas ${latest} is available (you have ${installed}). Run: atlas update`)
+  // npm replaces the files Atlas runs from: stop it first, start it again after.
+  const s = await running()
+  if (s) {
+    await control(s, 'quit')
+    for (let i = 0; i < 30 && (await running()); i++) await sleep(500)
+  }
+  console.log(`Updating Atlas ${installed} to ${latest}...`)
+  const child = spawn('npm', ['install', '-g', `${name}@${latest}`], { stdio: 'inherit', shell: true })
+  const code = await new Promise(res => child.on('exit', res))
+  if (code !== 0) throw new Error(`npm could not update Atlas. Try: npm install -g ${name}@latest`)
+  if (s) spawn(process.execPath, [fileURLToPath(import.meta.url), 'start', '--no-open'], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+}
+
 const update = async ({ check }) => {
-  const installed = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  const installed = pkg.version
+  if (root.split(/[\\/]/).includes('node_modules')) return updateWithNpm({ check, installed, name: pkg.name })
   const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(15_000) })
   if (!r.ok) throw new Error(`Could not ask GitHub for the latest release of ${REPO} (${r.status}).`)
   const release = await r.json()

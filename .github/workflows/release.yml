@@ -1,12 +1,15 @@
 name: Release
 
-# Push a tag like v0.4.0 to build the release zip and attach it to a draft release.
+# Push a tag like v0.4.0 to build the release zip, attach it to a draft release,
+# and publish the same package to npm (npm install -g atlas-ai-assistant).
 on:
   push:
     tags: ['v*']
 
 permissions:
   contents: write
+  # npm provenance: the package says publicly which repository and workflow built it.
+  id-token: write
 
 jobs:
   release:
@@ -19,6 +22,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm dist
@@ -30,3 +34,11 @@ jobs:
           $zip = Get-ChildItem apps/desktop/release/atlas-*-win-x64.zip | Select-Object -First 1
           Copy-Item $zip.FullName apps/desktop/release/atlas-win-x64.zip
           gh release create $env:GITHUB_REF_NAME --draft --generate-notes $zip.FullName apps/desktop/release/atlas-win-x64.zip install.ps1
+      - name: Publish to npm
+        shell: pwsh
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if (-not $env:NODE_AUTH_TOKEN) { Write-Host 'No NPM_TOKEN secret: skipping npm.'; exit 0 }
+          $dir = Get-ChildItem apps/desktop/release -Directory | Where-Object Name -like 'atlas-*-win-x64' | Select-Object -First 1
+          npm publish $dir.FullName --access public --provenance
