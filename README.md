@@ -1,88 +1,66 @@
-# Personal Assistant
+# Atlas
 
-An open source, proactive desktop assistant for Windows. It remembers your work across days, notices what matters, starts useful conversations at the right moment, talks with you by voice, and performs authorized work in your browser and on your computer.
+An open source, proactive personal assistant for Windows. Atlas remembers your work across days, notices what matters, speaks up at the right moment (and learns when not to), talks with you by voice in English and Roman Urdu, and does authorized work in your browser and on your PC.
 
-It's not another command listener. It's a working companion. It is honest about being an AI, and it never claims progress it can't show evidence for.
+It runs on your own computer as one small Node.js process and opens in your browser. You bring your own AI and voice keys: nothing is sent to this project and there is no account.
 
-> Status: early foundation (Phase 1). See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the full plan and [docs/roadmap.json](docs/roadmap.json) for progress.
+> Status: 0.4, before the first public release. See [docs/ROADMAP_V1.md](docs/ROADMAP_V1.md).
 
-## What you need
+## Install
 
-- Windows 11, Node.js 22.13+ and pnpm 9.
-- **An AI provider** (required): Claude, OpenAI, Google Gemini, OpenRouter, Groq, DeepSeek, Mistral, xAI, any OpenAI-compatible server, or a free local model through Ollama (it must support tool calls for Atlas to act). Setup lists the models your key can use.
-- **A voice provider API key** (required): ElevenLabs or Azure AI Speech.
+You need Windows 10 or 11. The installer brings Node.js 22 if it is missing.
 
-You bring your own keys. Nothing is sent to this project, and there is no account to create. No GPU is needed: heavy work runs on your providers, and local models are an optional extra for capable machines.
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -From .\atlas-<version>-win-x64.zip
+```
 
-## Quick start
+Then:
+
+```text
+atlas            start Atlas (if needed) and open it in your browser
+atlas stop       stop it
+atlas status     is it running, and where
+atlas logs       the last lines of its log
+atlas update     install the latest release, if newer (--check only says)
+```
+
+On first start Atlas walks you through setup: an **AI provider** (Claude, OpenAI, Gemini, OpenRouter, Groq, DeepSeek, Mistral, xAI, any OpenAI-compatible server, or a local model through Ollama), a **voice provider** (ElevenLabs, Azure AI Speech or OpenAI), your name, and how Atlas should talk. Keys are kept in Windows Credential Manager, never in files.
+
+Your data lives in `%APPDATA%\Personal Assistant`; the program in `%LOCALAPPDATA%\Atlas`. A tray icon gives quick access, notices and global shortcuts.
+
+## What it does
+
+- **Conversation and voice.** Type or talk; Atlas answers aloud, can be interrupted, and understands Roman Urdu and English. Optional wake word and live voice.
+- **Voice ID.** Knows the owner's voice from others (voice prints stay on the PC, encrypted). Personal answers only to the owner; never used as a lock.
+- **Memory.** Tasks, commitments, facts and preferences in a local SQLite database, mirrored to `MEMORY.md` that you can read and edit. Optional recall by meaning with a small multilingual model that runs on the PC.
+- **Speaking up.** Morning briefings, due reminders, welcome-backs, project nudges. Quiet hours, a daily limit and a minimum gap are yours to set, and Atlas learns which speak-ups you usually pass on and shows those quietly instead.
+- **Instant commands.** "What time is it", "stop", "focus mode", "louder", "open the news", "5 minute ka timer": answered at once without the model.
+- **Hands.** Its own browser (your Chrome or Edge through Playwright, with a live picture you can click), files in the folders you add, desktop apps through Windows UI Automation, Gmail and Calendar, timers and alarms, a look at the screen, Telegram on your phone, skills in the shared `SKILL.md` format, and any MCP connector (local or remote).
+- **World and news.** Weather, air quality, earthquakes and natural events for the places you care about; news from public feeds.
+- **Phone and other devices.** The same interface on any paired browser on your network, if you turn it on.
+
+## Safety
+
+- Every action passes a deterministic policy gate outside the model. Sending, paying, deleting and anything new asks you first; webpages, emails and messages are data, never instructions.
+- **Stop all** (tray, `Ctrl+Alt+P`, or a button) silences Atlas and cancels everything it is doing.
+- Memory is local, inspectable, correctable and deletable. No keystroke logging, no continuous screen recording.
+- The web interface listens on this PC only, unless you allow other devices; every device is paired by code.
+
+More in [SECURITY.md](SECURITY.md).
+
+## From source
 
 ```bash
 pnpm install
-pnpm keys set ANTHROPIC_API_KEY     # stored in Windows Credential Manager (hidden input)
-pnpm keys set ELEVENLABS_API_KEY
-cp .env.example .env                # set ELEVENLABS_VOICE_ID, your name and timezone (no keys needed here)
-pnpm doctor --live                  # checks keys, one real reply, and a voice round trip
-pnpm chat                           # developer text console
+pnpm dev            # builds, starts the gateway, reloads on changes, opens http://localhost:47800
+pnpm check          # typecheck and all tests
+pnpm dist           # license inventory, build and the release zip in apps/desktop/release
 ```
 
-You can put keys in `.env` instead; environment variables take precedence over the credential store.
+Developer tools: `pnpm chat` (text console), `pnpm doctor --live` (checks keys with one real reply and a voice round trip), `pnpm keys set <NAME>` (store a key). The `trial:*` and `eval:workflows` scripts use your real keys on throwaway data and cost a little.
 
-```bash
-pnpm desktop                        # the desktop app (development)
-pnpm check                          # typecheck and all tests
-pnpm learning:demo                  # learning and curiosity on a throwaway database, with your real key
-pnpm eval:workflows --full          # 20 browser + 10 file tasks, outcomes checked by code (a few cents of API use)
-pnpm trial:skills                   # teach a task in conversation, then run it on request and on schedule (real key, throwaway data)
-pnpm trial:provider ollama <model>  # try any LLM provider: a reply and a tool call, on throwaway data
-pnpm trial:files                    # list, organise, undo, recycle and a taught file task, on throwaway folders
-pnpm dist                           # license inventory + unsigned Windows installer in apps/desktop/release
-```
-
-The installer is not code-signed yet, so Windows SmartScreen warns on first run ("More info › Run anyway"). Connectors run through `npx`, so they need Node.js installed. Backups (Setup › Security & backups) are AES-256 encrypted with your passphrase and do not include API keys.
-
-Talk normally in the console ("Ahmed ko kal quote bhejna hai, yaad rakhna"). The assistant can add and complete tasks and save facts through tools, and it asks you `[y/N]` before anything outside its standing permissions. Shortcuts: `/task Send revised quote @2026-10-18T10:00`, `/tasks`, `/done 1 sent email #123`, `/promise revised quote to Ahmed @2026-10-18T17:00`, `/remember Ahmed prefers WhatsApp`, `/mode focus`, `/exit`.
-
-## The app
-
-The window has a rail on the left, the conversation as a side panel next to it, and a broad canvas on the right (Home, News, Projects, Learning, Controls, Setup). The panel can be hidden from the rail, and it opens by itself when Atlas speaks up. Home shows presence, today's tasks, your code projects, the news with pictures and recent actions.
-
-The layout adapts to the window: side panel when wide, a drawer over the canvas when narrower, and a bottom tab bar at phone width. Compact mode (rail button, or ask) shrinks Atlas to a small chat window in the corner, optionally kept on top; the full window comes back as it was. Atlas knows what its window shows and can change it when you ask (“compact ho jao”, “news dikhao”, “chat band karo”, “bari window kar do”, “upar rakho”).
-
-World: tell Atlas the places you care about (“Lahore aur Riyadh watch karo”) or add them on the World page. Every 15 minutes it checks weather and air quality (Open-Meteo), earthquakes (USGS) and natural events such as wildfires, storms, volcanoes and floods (NASA EONET); news per place hourly (GDELT, plus your own feeds). All free, no keys. It speaks up on its own, once each, about a strong earthquake nearby, a fire or storm close by, dangerous air (US AQI 200+) or extreme weather, and includes your places in the daily briefing. The World page shows them on an open map (MapLibre with OpenFreeMap tiles), with switchable layers: your places, live flights (adsb.lol, ADS-B; military aircraft in red), satellites and the ISS (CelesTrak orbits, positions computed live), earthquakes and natural events, and live ships (AIS via AISStream: paste your free key in the World map layer panel; it is kept in the Windows credential store). Public cameras come only from official open feeds that need no key: London (TfL), California (Caltrans), Finland (Fintraffic), Hong Kong (Transport Department) and Singapore (LTA); other countries, Pakistan included, have none. Clicking one shows its latest still frame, fetched by Atlas; nothing is recorded or analysed.
-
-News comes from public RSS feeds, refreshed every 30 minutes, with each story's own picture where the feed provides one. Pictures are fetched by the app and cached, so pages never load remote content. You can choose sources (News › Sources) and save stories for later (News › Saved). Sources on by default: Dawn, Express Tribune, BBC World, Dawn Business and The Verge. Optional: Geo News, BBC Technology and TechCrunch. Atlas can read the headlines to you ("aaj ki khabrein?").
-
-Files: Atlas looks after only the folders you add in Files, read-only until you allow organising. It can list and search, read Word, Excel, PowerPoint, PDF and text files (asking you first for every file: “Abdullah, kya main … parh loon?”), move, rename and copy, make folders, tidy loose files by type, month or year (plan first), and remove to the Recycle Bin (always asks). Nothing is overwritten or permanently deleted, and every change has Undo in Files. File routines are taught like any task ("every Friday tidy Downloads").
-
-Apps: Atlas uses desktop apps you add in Apps through Windows UI Automation (the accessibility interface screen readers use), driven by a small worker built from Windows PowerShell and a C# helper that ship with Windows. Per app you choose open, read the screen, or control (click, type, keys). Send, Delete, Pay, Call and similar buttons, Enter in chat apps and select-all wipes always ask; typing is read back and checked; password fields are never read or typed. Terminals, system tools, Windows security, password managers and browsers are never controllable. WhatsApp Desktop has its own tools: chat list and unread, read a chat, download a document someone sent into Downloads and review it (asks first), and send, which opens the chat by search, checks the message box names that person before typing, and asks you each time with the exact text. Questions Atlas needs a yes for are asked in the conversation, aloud when you are talking; a short “chalo kar lo / haan” or “nahi, main khud bata dunga”, typed or spoken, answers them (the buttons still work). Teach by showing: Watch me records your clicks and typing in the chosen apps (never passwords) and turns them into a task. Reading an app sends what it shows to your AI provider. Live check: `ATLAS_LIVE=1 pnpm vitest run apps/desktop/src/main/desktop/desktop.live.test.ts` (Notepad on a fresh tab, WhatsApp read-only).
-
-Improvements to Atlas: when Atlas keeps failing at something, or cannot do what you asked, it says so and suggests one fix. Only on your yes does it become a task plus a brief (problem, example, done-when, ground rules that keep permissions as they are), shown in Learning › Improvements and, if you choose a followed project, saved in its .atlas/improvements/ notes (kept out of git). You give the brief to your coding agent and review the change; Atlas never opens coding tools or edits code.
-
-## Layout
-
-```text
-packages/shared       typed events, ids, clock
-packages/policy       deterministic permission gate (outside the LLM)
-packages/initiative   when to speak: cooldowns, budgets, quiet hours, modes
-packages/memory       SQLite + FTS5 memory, tasks with evidence, corrections
-packages/providers    LLM and voice contracts + Claude and ElevenLabs adapters
-packages/mcp          MCP client host with policy mapping
-packages/runtime      conversation manager, persona, dev console
-apps/desktop          Electron shell (next)
-workers/              optional local voice and Windows accessibility workers
-```
-
-## Connectors (MCP)
-
-Copy `mcp.servers.example.json` to `mcp.servers.json` and enable the servers you authorize. Every tool goes through the policy gate. Tools without safety annotations are treated as external sends and need your confirmation.
-
-## Principles
-
-- Memory is local, inspectable, correctable and deletable.
-- Every action passes a deterministic policy gate; webpages, emails and messages are data, not instructions.
-- The assistant speaks up sparingly: one routine check-in per hour, five per day, and never during quiet hours, by default.
-- No keystroke logging, no continuous screen recording.
+How it fits together: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache-2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE) and [docs/THIRD_PARTY_LICENSES.md](docs/THIRD_PARTY_LICENSES.md).

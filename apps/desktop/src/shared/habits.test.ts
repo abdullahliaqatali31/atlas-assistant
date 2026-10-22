@@ -13,8 +13,8 @@ describe('browser habits', () => {
     expect(categorize('moviefox.pro')).toBe('video')
     expect(categorize('github.com')).toBe('work')
     expect(categorize('claude.ai')).toBe('ai')
-    expect(categorize('crm.growzen.app')).toBe('work')
-    expect(categorize('growzen.app', ['growzen'])).toBe('work')
+    expect(categorize('crm.brightpixel.app')).toBe('work')
+    expect(categorize('brightpixel.app', ['brightpixel'])).toBe('work')
     expect(categorize('example.org')).toBe('other')
     const spent = estimate([{ t: wed10, dur: 5 * MIN, url: 'https://lewdsite.com/x', title: 'secret' }])
     expect(spent[0]).toMatchObject({ host: PRIVATE_HOST, cat: 'video', url: '', title: '' })
@@ -22,10 +22,10 @@ describe('browser habits', () => {
 
   it('finds business words in profile names and company emails, not in people’s names', () => {
     expect(ownWords([
-      { name: 'GrowZen', account: 'x@gmail.com', person: 'Abdullah Ali' },
-      { name: 'Abdullah', account: 'a@quantxestimation.com', person: 'Abdullah Ali' },
+      { name: 'BrightPixel', account: 'x@gmail.com', person: 'Hamza Khan' },
+      { name: 'Hamza', account: 'a@acmeestimates.com', person: 'Hamza Khan' },
       { name: 'Profile 3', account: '', person: '' },
-    ]).sort()).toEqual(['growzen', 'quantxestimation'])
+    ]).sort()).toEqual(['acmeestimates', 'brightpixel'])
   })
 
   it('counts time until the next visit, capped, never overlapping', () => {
@@ -42,7 +42,7 @@ describe('browser habits', () => {
     const work = estimate(
       Array.from({ length: 30 }, (_, i) => ({ t: wed10 + i * 4 * MIN, dur: 4 * MIN, url: i % 5 === 4 ? 'https://youtube.com/watch?v=x' : 'https://github.com/x', title: 'x' })),
     )
-    const p = summarize(info('chrome:Profile 1', 'GrowZen'), work, wed10 - 3_600_000, wed10 + 6 * 3_600_000, { workHours: DEFAULT_WORK_HOURS, role: null, shared: true })
+    const p = summarize(info('chrome:Profile 1', 'BrightPixel'), work, wed10 - 3_600_000, wed10 + 6 * 3_600_000, { workHours: DEFAULT_WORK_HOURS, role: null, shared: true })
     expect(p.inferred.role).toBe('work')
     expect(p.workHoursMs).toBe(p.totalMs)
     expect(inferRole({ ...p.byCategory, work: 0, video: 100 }, 100, 0).role).toBe('personal')
@@ -52,7 +52,7 @@ describe('browser habits', () => {
     expect(guides[0]?.keepOut).toContain('youtube.com')
     // Atlas never gets the account (email) or pictures.
     const text = habitsForAtlas({ days: 1, profiles: [p], insights: ins, guides }, DEFAULT_WORK_HOURS)
-    expect(text).toContain('GrowZen')
+    expect(text).toContain('BrightPixel')
     expect(text).not.toContain('@gmail.com')
   })
 })

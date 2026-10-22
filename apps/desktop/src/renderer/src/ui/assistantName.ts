@@ -51,5 +51,5 @@ export const useAssistantName = () => {
   )
 }
 
-/** "Atlas's" or "Lala's". */
+/** "Atlas's" or "Zara's". */
 export const possessive = (n: string) => (/s$/i.test(n) ? `${n}’` : `${n}’s`)

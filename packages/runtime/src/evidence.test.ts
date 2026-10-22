@@ -106,7 +106,7 @@ describe('briefing with connected sources', () => {
       llm,
       memory,
       clock,
-      owner: { name: 'Abdullah' },
+      owner: { name: 'Hamza' },
       prefs: { ...DEFAULT_PREFS, utcOffsetMin: 300 },
       briefingSources: () => [source('gcal:list-events', 'Google Calendar', async () => '15:00 Revised quote review with client')],
     })

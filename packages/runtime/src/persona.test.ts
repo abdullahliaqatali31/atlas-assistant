@@ -46,7 +46,7 @@ const setup = () => {
     llm,
     memory,
     clock,
-    owner: { name: 'Abdullah' },
+    owner: { name: 'Hamza' },
     prefs: { ...DEFAULT_PREFS, utcOffsetMin: 300 },
     tools: localTools(memory, clock),
     rules: () => DEFAULT_RULES,
@@ -64,8 +64,8 @@ const profile = (p: Partial<PersonalityProfile>): PersonalityProfile => ({ ...DE
 
 describe('system prompt assembly', () => {
   it('puts the identity first, byte-identical whatever the profile', () => {
-    const a = systemPrompt(profile({}), 'Abdullah')
-    const b = systemPrompt(profile({ ownerNickname: 'Boss', assistantName: 'Zara', humour: false, language: 'ur-Arab', verbosity: 'detailed', disagreement: 'firm' }), 'Abdullah')
+    const a = systemPrompt(profile({}), 'Hamza')
+    const b = systemPrompt(profile({ ownerNickname: 'Boss', assistantName: 'Zara', humour: false, language: 'ur-Arab', verbosity: 'detailed', disagreement: 'firm' }), 'Hamza')
     expect(a[0]).toBe(PERSONA)
     expect(b[0]).toBe(PERSONA)
     expect(a[1]).not.toBe(b[1])
@@ -73,14 +73,14 @@ describe('system prompt assembly', () => {
 
   it('is deterministic for the same profile, so the profile block caches', () => {
     const p = profile({ ownerNickname: 'Boss', language: 'mix' })
-    expect(profileBlock(p, 'Abdullah')).toBe(profileBlock(structuredClone(p), 'Abdullah'))
-    expect(profileBlock(p, 'Abdullah')).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+    expect(profileBlock(p, 'Hamza')).toBe(profileBlock(structuredClone(p), 'Hamza'))
+    expect(profileBlock(p, 'Hamza')).not.toMatch(/\d{4}-\d{2}-\d{2}/)
   })
 
   it('carries nickname, assistant name, language and tone', () => {
-    const block = profileBlock(profile({ ownerNickname: 'Boss', assistantName: 'Zara', language: 'ur-Latn', humour: false, verbosity: 'detailed', disagreement: 'firm' }), 'Abdullah')
+    const block = profileBlock(profile({ ownerNickname: 'Boss', assistantName: 'Zara', language: 'ur-Latn', humour: false, verbosity: 'detailed', disagreement: 'firm' }), 'Hamza')
     expect(block).toContain('Address the owner as "Boss"')
-    expect(block).toContain('The owner\'s name is "Abdullah"')
+    expect(block).toContain('The owner\'s name is "Hamza"')
     expect(block).toContain('Your name is "Zara"')
     expect(block).toContain('you are still an AI')
     expect(block).toContain('Roman Urdu')
@@ -90,8 +90,8 @@ describe('system prompt assembly', () => {
   })
 
   it('falls back to the owner name, and states that tone never changes safety', () => {
-    const block = profileBlock(DEFAULT_PROFILE, 'Abdullah')
-    expect(block).toContain('Address the owner as "Abdullah"')
+    const block = profileBlock(DEFAULT_PROFILE, 'Hamza')
+    expect(block).toContain('Address the owner as "Hamza"')
     expect(block).toContain('You have no personal name')
     expect(block).toMatch(/do not change your honesty rules, safety rules, the approval gate or any limit/)
     expect(PERSONA).toMatch(/never changes Identity and honesty, Context and tools, or Safety/)
@@ -117,7 +117,7 @@ describe('Assistant with a profile', () => {
     await drain(assistant.reply('salam'))
     memory.updatePersonality({ ownerNickname: 'Boss', assistantName: 'Zara', language: 'ur-Latn' }, 'onboarding')
     await drain(assistant.reply('kaun ho tum?'))
-    expect(llm.requests[0]?.system[1]).toContain('Address the owner as "Abdullah"')
+    expect(llm.requests[0]?.system[1]).toContain('Address the owner as "Hamza"')
     expect(llm.requests[1]?.system[1]).toContain('Address the owner as "Boss"')
     expect(llm.requests[1]?.system[1]).toContain('Your name is "Zara"')
     expect(llm.requests[1]?.system[0]).toBe(PERSONA)

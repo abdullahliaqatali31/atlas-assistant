@@ -25,7 +25,7 @@ describe('readDocument', () => {
             new Table({
               rows: [
                 new TableRow({ children: [new TableCell({ children: [new Paragraph('Task')] }), new TableCell({ children: [new Paragraph('Owner')] })] }),
-                new TableRow({ children: [new TableCell({ children: [new Paragraph('Dark mode')] }), new TableCell({ children: [new Paragraph('Abdullah')] })] }),
+                new TableRow({ children: [new TableCell({ children: [new Paragraph('Dark mode')] }), new TableCell({ children: [new Paragraph('Hamza')] })] }),
               ],
             }),
           ],
@@ -38,7 +38,7 @@ describe('readDocument', () => {
     expect(text).toContain('Things to do on the app')
     expect(text).toContain('Fix the login page and add a pricing screen.')
     expect(text).toContain('Dark mode')
-    expect(text).toContain('Abdullah')
+    expect(text).toContain('Hamza')
   })
 
   it('reads every sheet of an Excel workbook, with formula results', async () => {

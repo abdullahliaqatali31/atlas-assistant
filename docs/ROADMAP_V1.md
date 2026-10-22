@@ -2,7 +2,7 @@
 
 Built from three studies: an audit of this repo, the architectures of
 OpenClaw and Hermes Agent, and current on-device voice and hybrid-AI
-practice. Each phase ships on its own, gated by `pnpm check`. Order of work: 1 (done), 6 (web interface, moved up by the owner), 2, 3, 4, 5, 7.
+practice. Each phase ships on its own, gated by `pnpm check`. Order of work: 1, 6 (web interface, moved up by the owner), 2, 3, 4, 5, 7; all done.
 
 ## Phase 1 — Voice you can hear, that hears you (done)
 
@@ -75,8 +75,16 @@ practice. Each phase ships on its own, gated by `pnpm check`. Order of work: 1 (
   Edge through Playwright. One-command install (install.ps1 + the atlas
   command), about 260 MB of memory instead of about 1 GB.
 
-## Phase 7 — Open-source ready
+## Phase 7 — Open-source ready (done, except code signing and the repo address)
 
-- No personal data in tests or code; locale defaults chosen at onboarding.
-- README, architecture, user and developer guides; CI on GitHub (check,
-  tests, lint); code signing and auto-update; skill and connector review.
+- Done: no personal data in code or tests (made-up names, places and
+  companies); time zone and language follow the PC and onboarding.
+- Done: README, docs/ARCHITECTURE.md, CONTRIBUTING.md, SECURITY.md; CI on
+  GitHub (typecheck, tests, build on Windows) and a release workflow (tag
+  v* → draft release with the zip and install.ps1); issue and PR templates;
+  licence inventory lists the downloaded models.
+- Done: `atlas update` (and `--check`) installs the latest release.
+- Left: the GitHub repo address (`OWNER/atlas` in install.ps1 and
+  bin/atlas.mjs, or ATLAS_REPO); code signing needs a certificate; the git
+  history still holds the old personal fixtures, so publish from a fresh
+  history or rewrite it first.

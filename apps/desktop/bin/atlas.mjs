@@ -6,9 +6,10 @@
 //   atlas stop       stop Atlas
 //   atlas status     is it running, where, which version
 //   atlas logs       the last lines of the background log
+//   atlas update     install the latest release if it is newer (--check: only say)
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -18,6 +19,8 @@ const dataDir = process.env.ATLAS_DATA_DIR ?? join(process.env.APPDATA ?? join(h
 const stateFile = join(dataDir, 'gateway.json')
 const logFile = join(dataDir, 'logs', 'gateway.log')
 const nodeArgs = ['--disable-warning=ExperimentalWarning', entry]
+// Where releases are published (owner/repo on GitHub).
+const REPO = process.env.ATLAS_REPO ?? 'OWNER/atlas'
 
 const state = () => {
   try {
@@ -68,6 +71,35 @@ const start = async ({ open }) => {
   throw new Error(`Atlas did not start; see ${logFile}`)
 }
 
+/** Is version a newer than b? ("0.10.0" > "0.4.1": numeric, part by part.) */
+const newer = (a, b) => {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0)
+  return false
+}
+
+const update = async ({ check }) => {
+  const installed = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+  const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(15_000) })
+  if (!r.ok) throw new Error(`Could not ask GitHub for the latest release of ${REPO} (${r.status}).`)
+  const release = await r.json()
+  const latest = String(release.tag_name ?? '').replace(/^v/, '')
+  const asset = (release.assets ?? []).find(a => a.name === 'atlas-win-x64.zip')
+  if (!latest || !asset) throw new Error('The latest release has no Atlas zip.')
+  if (!newer(latest, installed)) return console.log(`Atlas ${installed} is up to date.`)
+  if (check) return console.log(`Atlas ${latest} is available (you have ${installed}). Run: atlas update`)
+  const installer = join(root, 'install.ps1')
+  if (!existsSync(installer)) throw new Error('install.ps1 is missing here; download the release and run its install.ps1.')
+  // The installer replaces this folder, so it runs from a copy.
+  const copy = join(tmpdir(), `atlas-install-${process.pid}.ps1`)
+  copyFileSync(installer, copy)
+  console.log(`Updating Atlas ${installed} to ${latest}...`)
+  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', copy, '-From', asset.browser_download_url], { stdio: 'inherit' })
+  const code = await new Promise(res => child.on('exit', res))
+  if (code !== 0) throw new Error('The update did not finish. Run the release install.ps1 again to repair it.')
+}
+
 const [cmd = 'start'] = process.argv.slice(2)
 try {
   switch (cmd) {
@@ -101,11 +133,14 @@ try {
       console.log(s ? `Atlas ${s.version} is running at ${s.url} (pid ${s.pid}, since ${s.started}).` : 'Atlas is not running.')
       break
     }
+    case 'update':
+      await update({ check: process.argv.includes('--check') })
+      break
     case 'logs':
       console.log(existsSync(logFile) ? readFileSync(logFile, 'utf8').split('\n').slice(-60).join('\n') : 'No log yet.')
       break
     default:
-      console.log('Usage: atlas [start|run|open|stop|status|logs]')
+      console.log('Usage: atlas [start|run|open|stop|status|logs|update]')
       process.exitCode = 1
   }
 } catch (e) {

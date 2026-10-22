@@ -82,6 +82,6 @@ describe('Improvements', () => {
     const rules = [...DEFAULT_RULES, ...IMPROVEMENT_RULES]
     expect(evaluate({ tool: 'improvement_propose', actionClass: 'modify' }, rules, Date.now()).effect).toBe('ask')
     expect(evaluate({ tool: 'improvement_list', actionClass: 'observe' }, rules, Date.now()).effect).toBe('allow')
-    expect(approvalQuestion('improvement_propose', { title: 'Listen to voice notes' }, 'Abdullah', true)).toBe('Abdullah, kya main “Listen to voice notes” ko apni improvement list mein daal kar task aur brief bana doon?')
+    expect(approvalQuestion('improvement_propose', { title: 'Listen to voice notes' }, 'Hamza', true)).toBe('Hamza, kya main “Listen to voice notes” ko apni improvement list mein daal kar task aur brief bana doon?')
   })
 })

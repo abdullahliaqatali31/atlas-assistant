@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { quickAnswer } from './quick.ts'
 
 const now = new Date(2026, 9, 22, 15, 7).getTime()
-const q = (text: string, urdu = true) => quickAnswer(text, { now, names: ['Lala', 'Atlas'], urdu })
+const q = (text: string, urdu = true) => quickAnswer(text, { now, names: ['Zara', 'Atlas'], urdu })
 
 describe('instant answers', () => {
   it('tells the time and the date, in Roman Urdu or English', () => {
-    expect(q('Lala, kitne baje hain?')).toEqual({ reply: 'Abhi 3:07 PM baje hain.' })
+    expect(q('Zara, kitne baje hain?')).toEqual({ reply: 'Abhi 3:07 PM baje hain.' })
     expect(q('what time is it', false)).toEqual({ reply: "It's 3:07 PM." })
     expect(q('aaj kya date hai')?.reply).toBe('Aaj Thursday, 22 October 2026 hai.')
   })
@@ -24,7 +24,7 @@ describe('instant answers', () => {
 
   it('leaves everything else to the model', () => {
     expect(q('kitne baje meeting hai Bilal ke saath?')).toBeNull()
-    expect(q('stop the dev server for QuantX')).toBeNull()
+    expect(q('stop the dev server for Acme')).toBeNull()
     expect(q('what time does the bank close')).toBeNull()
     expect(q('bas, ab news sunao')).toBeNull()
   })

@@ -32,7 +32,7 @@ describe('Live voice', () => {
 
   it('mints a session with everything fixed in main, and hands back only the short-lived token', async () => {
     const { calls, fetchImpl } = fake()
-    const lv = new LiveVoice({ key: () => KEY, settings: () => ({ ...DEFAULT_LIVE_VOICE, enabled: true, tier: 'standard', voice: 'cedar' }), names: () => ({ assistant: 'Lala', owner: 'Abdullah' }), fetchImpl })
+    const lv = new LiveVoice({ key: () => KEY, settings: () => ({ ...DEFAULT_LIVE_VOICE, enabled: true, tier: 'standard', voice: 'cedar' }), names: () => ({ assistant: 'Zara', owner: 'Hamza' }), fetchImpl })
     const s = await lv.mint()
     expect(s).toEqual({ token: 'ek_ephemeral_123', expiresAt: 1_900_000_000, model: 'gpt-realtime-2', tier: 'standard', capUsd: 3 })
     expect(JSON.stringify(s)).not.toContain(KEY)
@@ -41,7 +41,7 @@ describe('Live voice', () => {
     const body = JSON.parse(String(calls[0]!.init.body)).session
     expect(body).toMatchObject({ type: 'realtime', model: 'gpt-realtime-2', audio: { output: { voice: 'cedar' }, input: { turn_detection: { type: 'semantic_vad', interrupt_response: false } } }, tool_choice: 'auto' })
     expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['ask_atlas', 'end_conversation'])
-    expect(body.instructions).toContain("You are Lala, Abdullah's personal assistant")
+    expect(body.instructions).toContain("You are Zara, Hamza's personal assistant")
   })
 
   it('refuses without a key, when off, too fast, and says why OpenAI said no', async () => {

@@ -3,7 +3,7 @@
  * used for, when, and what does not belong where. Main reads each profile's
  * own history file on this PC (once the owner turns it on) and this module
  * turns the visits into time per site, category, hour and day, a guess at
- * each profile's role, and plain advice ("keep YouTube out of GrowZen",
+ * each profile's role, and plain advice ("keep YouTube out of BrightPixel",
  * "your best work hours are 11-13"). Nothing is uploaded; Atlas sees a
  * summary, and only of the profiles the owner lets it see.
  */

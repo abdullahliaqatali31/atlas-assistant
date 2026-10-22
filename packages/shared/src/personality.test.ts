@@ -51,7 +51,7 @@ describe('extractName', () => {
     ['Boss', 'Boss'],
     ['Call me Boss.', 'Boss'],
     ['mujhe Boss bulao', 'Boss'],
-    ['mera naam Abdullah hai', 'Abdullah'],
+    ['mera naam Hamza hai', 'Hamza'],
     ['My name is Ali Raza', 'Ali Raza'],
     ['tumhara naam Zara hai', 'Zara'],
     ['(silence)', ''],

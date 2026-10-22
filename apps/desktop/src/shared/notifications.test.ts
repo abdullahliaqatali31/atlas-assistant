@@ -7,7 +7,7 @@ describe('Windows notifications', () => {
     expect(appName('5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App')).toBe('WhatsApp')
     expect(appName('MSTeams_8wekyb3d8bbwe!MSTeams')).toBe('Teams')
     expect(appName('Cisco.Webex')).toBe('Webex')
-    expect(appName('com.growzen.mailer')).toBe('mailer')
+    expect(appName('com.brightpixel.mailer')).toBe('mailer')
   })
 
   it('reads a toast: first line, the rest, entities decoded, attribution left out', () => {

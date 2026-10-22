@@ -27,7 +27,7 @@ const norm = (text: string, names: string[]) => {
     .replace(/[“”"'’.,!?؟]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  // "Atlas, what time is it" / "lala kitne baje hain": the name in front is just a call.
+  // "Atlas, what time is it" / "zara kitne baje hain": the name in front is just a call.
   for (const n of names) if (n && t.startsWith(`${n.toLowerCase()} `)) t = t.slice(n.length + 1).trim()
   return t.replace(/\s+(please|plz|jaldi|zara|na|yaar)$/, '').trim()
 }

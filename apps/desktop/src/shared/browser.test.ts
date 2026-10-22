@@ -7,7 +7,7 @@ describe('browser addresses', () => {
     expect(toUrl('https://example.com/a?b=1')).toBe('https://example.com/a?b=1')
     expect(toUrl('en.wikipedia.org')).toBe('https://en.wikipedia.org')
     expect(toUrl('daraz.pk/deals')).toBe('https://daraz.pk/deals')
-    expect(toUrl('Gujranwala weather today')).toBe('https://www.google.com/search?q=Gujranwala%20weather%20today')
+    expect(toUrl('Multan weather today')).toBe('https://www.google.com/search?q=Multan%20weather%20today')
     expect(toUrl('javascript:alert(1)')).toBeNull()
     expect(toUrl('file:///C:/Windows')).toBeNull()
     expect(toUrl('   ')).toBeNull()

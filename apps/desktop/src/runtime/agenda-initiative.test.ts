@@ -40,7 +40,7 @@ const setup = () => {
   const memory = new MemoryStore(join(dir, 'a.db'), clock)
   stores.push(memory)
   const llm = new FakeLlm()
-  const assistant = new Assistant({ llm, memory, clock, owner: { name: 'Abdullah' }, prefs: { ...DEFAULT_PREFS, utcOffsetMin: 300 } })
+  const assistant = new Assistant({ llm, memory, clock, owner: { name: 'Hamza' }, prefs: { ...DEFAULT_PREFS, utcOffsetMin: 300 } })
   const spoken: InitiativeItem[] = []
   const later: InitiativeItem[][] = []
   const service = new InitiativeService({

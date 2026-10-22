@@ -1,7 +1,7 @@
 /**
  * Recall by meaning, on this PC: a small multilingual model (multilingual-e5
  * small, 118 MB, downloaded once when the owner turns it on) gives every
- * memory a vector, so "meri behan ki shadi kab hai" finds "Abdullah's sister
+ * memory a vector, so "meri behan ki shadi kab hai" finds "Hamza's sister
  * is getting married in December". It never replaces keyword search: the two
  * lists are blended, recently and often used memories weigh a little more,
  * and the brain's strongest neighbours of the best hits come along.

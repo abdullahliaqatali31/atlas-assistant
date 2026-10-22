@@ -45,7 +45,7 @@ const assistant = new Assistant({
   llm: meterLlm(llm, { purpose: 'chat', memory, clock: systemClock, utcOffsetMin: 300 }),
   memory,
   clock: systemClock,
-  owner: { name: 'Abdullah' },
+  owner: { name: 'Hamza' },
   prefs: { ...DEFAULT_PREFS, utcOffsetMin: 300 },
   tools: localTools(memory, systemClock),
   rules: () => DEFAULT_RULES,

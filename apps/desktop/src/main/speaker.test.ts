@@ -39,12 +39,12 @@ describe('voice ID service', () => {
   it('enrols the owner, keeps only an encrypted print, and knows the owner again after a restart', () => {
     const { make, secrets } = setup()
     const a = make()
-    a.enrol('Abdullah', true, [voice(1), voice(1), voice(1)])
+    a.enrol('Hamza', true, [voice(1), voice(1), voice(1)])
     expect(secrets.get('SPEAKER_PROFILE_KEY')).toBeTruthy()
     // The file holds no readable name or numbers.
-    expect(readFileSync(join(dir, 'voices.enc')).toString('latin1')).not.toContain('Abdullah')
+    expect(readFileSync(join(dir, 'voices.enc')).toString('latin1')).not.toContain('Hamza')
     const b = make()
-    expect(b.identify(voice(1))).toMatchObject({ name: 'Abdullah', verdict: 'owner' })
+    expect(b.identify(voice(1))).toMatchObject({ name: 'Hamza', verdict: 'owner' })
     expect(b.identify(voice(-1)).verdict).toBe('guest')
     expect(b.enabled).toBe(true)
   })
@@ -52,19 +52,19 @@ describe('voice ID service', () => {
   it('refuses phrases that do not sound like one voice, and too-short ones', () => {
     const { make } = setup()
     const s = make()
-    expect(() => s.enrol('Abdullah', true, [voice(1), voice(-1), voice(1)])).toThrow(/one voice/)
+    expect(() => s.enrol('Hamza', true, [voice(1), voice(-1), voice(1)])).toThrow(/one voice/)
     expect(() => s.print(new Float32Array(8_000))).toThrow(/too short/)
   })
 
   it('has one owner: enrolling the owner again replaces the old print', () => {
     const { make } = setup()
     const s = make()
-    s.enrol('Abdullah', true, [voice(1), voice(1), voice(1)])
+    s.enrol('Hamza', true, [voice(1), voice(1), voice(1)])
     s.enrol('Sara', false, [voice(-1), voice(-1), voice(-1)])
-    s.enrol('Abdullah', true, [voice(1), voice(1), voice(1)])
+    s.enrol('Hamza', true, [voice(1), voice(1), voice(1)])
     expect(s.view().people.map(p => [p.name, p.owner])).toEqual([
       ['Sara', false],
-      ['Abdullah', true],
+      ['Hamza', true],
     ])
     expect(s.identify(voice(-1))).toMatchObject({ name: 'Sara', verdict: 'known' })
   })

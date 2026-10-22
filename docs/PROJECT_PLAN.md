@@ -44,7 +44,7 @@ These are implementation choices for this plan. Provider quality, voice language
 
 ## 2 Users and success
 
-Primary user: a person handling multiple projects, client communications and computer tasks who wants an assistant with memory and initiative. Abdullah is the initial test owner, not a hardcoded identity. A fresh installation must learn any owner's name, language, work preferences and authorized sources through setup.
+Primary user: a person handling multiple projects, client communications and computer tasks who wants an assistant with memory and initiative. The first owner, not a hardcoded identity. A fresh installation must learn any owner's name, language, work preferences and authorized sources through setup.
 
 The assistant succeeds when it remembers verified commitments, retrieves the right context, makes useful interventions and completes bounded tasks without inventing progress. A pleasant voice alone is insufficient.
 
@@ -58,7 +58,7 @@ The assistant succeeds when it remembers verified commitments, retrieves the rig
 6. It saves appropriate corrections, queues useful work and executes within configured permissions.
 7. It verifies results and records unresolved items for the next session.
 
-Example: “Abdullah, do important items hain. Revised quote pending hai, aur client ki update request ayi hai. Pehle kis ko clear karein?” If access is incomplete, it says so rather than presenting a notification preview as the complete conversation.
+Example: “Hamza, do important items hain. Revised quote pending hai, aur client ki update request ayi hai. Pehle kis ko clear karein?” If access is incomplete, it says so rather than presenting a notification preview as the complete conversation.
 
 ## 3 Release boundaries
 

@@ -87,7 +87,7 @@ export interface ApprovalRequest {
   /** Truncated JSON of the call input, for display only. */
   input: string
   reason: string
-  /** The question as Atlas asks it in the conversation ("Abdullah, kya main … parh loon?"). */
+  /** The question as Atlas asks it in the conversation ("Hamza, kya main … parh loon?"). */
   question?: string | undefined
 }
 

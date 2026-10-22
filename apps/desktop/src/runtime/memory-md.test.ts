@@ -15,7 +15,7 @@ const src = { kind: 'owner' as const, origin: 'test', retrievedAt: 0 }
 
 describe('memory as Markdown', () => {
   it('renders by kind with marks, and reads its own output back', () => {
-    const md = renderMemory([{ id: 'aaaaaaaa-1', kind: 'fact', statement: 'Works on Atlas', source: src, confidence: 1, projectId: null, createdAt: 0 }], 'Abdullah')
+    const md = renderMemory([{ id: 'aaaaaaaa-1', kind: 'fact', statement: 'Works on Atlas', source: src, confidence: 1, projectId: null, createdAt: 0 }], 'Hamza')
     expect(md).toContain('## Facts\n\n- Works on Atlas <!-- m:aaaaaaaa -->')
     expect(parseMemory(md)).toEqual([{ kind: 'fact', text: 'Works on Atlas', id: 'aaaaaaaa' }])
   })
@@ -33,15 +33,15 @@ describe('memory as Markdown', () => {
   it('syncs both ways with the real store', async () => {
     let now = Date.now()
     const store = new MemoryStore(join(dir, 'db.sqlite'), { now: () => now })
-    const keep = store.remember({ kind: 'fact', statement: 'Lives in Gujranwala', source: src })
+    const keep = store.remember({ kind: 'fact', statement: 'Lives in Multan', source: src })
     store.remember({ kind: 'preference', statement: 'Likes green tea', source: src })
-    const mirror = new MemoryMirror(store, join(dir, 'md'), { owner: () => 'Abdullah', now: () => now, log: () => undefined })
+    const mirror = new MemoryMirror(store, join(dir, 'md'), { owner: () => 'Hamza', now: () => now, log: () => undefined })
     mirror.sync()
     const text = readFileSync(mirror.file, 'utf8')
     expect(text).toContain('Likes green tea')
     // The owner edits the file a moment later.
     await new Promise(r => setTimeout(r, 30))
-    writeFileSync(mirror.file, text.replace('Lives in Gujranwala', 'Lives in Lahore').replace(/- Likes green tea.*\n/, '').replace('## Lessons\n', '## Lessons\n- Prefers voice notes to calls\n'))
+    writeFileSync(mirror.file, text.replace('Lives in Multan', 'Lives in Lahore').replace(/- Likes green tea.*\n/, '').replace('## Lessons\n', '## Lessons\n- Prefers voice notes to calls\n'))
     now += 1000
     mirror.sync()
     const after = store.allMemories().map(m => [m.kind, m.statement])

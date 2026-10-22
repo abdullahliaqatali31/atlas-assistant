@@ -14,8 +14,8 @@ describe('asking in conversation', () => {
   })
 
   it('asks in the owner’s words before reading or downloading', () => {
-    expect(approvalQuestion('files_read', { path: 'Downloads/Things to do on app.docx' }, 'Abdullah', true)).toBe('Abdullah, kya main “Things to do on app.docx” parh loon?')
-    expect(approvalQuestion('whatsapp_download', { chat: 'Manager', file: 'Things to do' }, 'Abdullah', true)).toContain('download karke parh loon?')
+    expect(approvalQuestion('files_read', { path: 'Downloads/Things to do on app.docx' }, 'Hamza', true)).toBe('Hamza, kya main “Things to do on app.docx” parh loon?')
+    expect(approvalQuestion('whatsapp_download', { chat: 'Manager', file: 'Things to do' }, 'Hamza', true)).toContain('download karke parh loon?')
     expect(approvalQuestion('files_read', { path: 'C:\\a\\b.pdf' }, '', false)).toBe('may I read “b.pdf”?')
   })
 

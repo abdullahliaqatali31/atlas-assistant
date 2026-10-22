@@ -51,7 +51,7 @@ const setup = (script?: Script, extra: Partial<AssistantDeps> = {}, addTools: Ru
     llm,
     memory,
     clock,
-    owner: { name: 'Abdullah' },
+    owner: { name: 'Hamza' },
     prefs: { ...DEFAULT_PREFS, utcOffsetMin: 300 },
     tools: [...localTools(memory, clock), ...addTools],
     rules: () => DEFAULT_RULES,
@@ -172,7 +172,7 @@ describe('Assistant', () => {
     const { assistant, memory, clock, llm } = setup()
     await drain(assistant.reply('salam'))
     clock.advance(5 * 60_000)
-    const again = new Assistant({ llm, memory, clock, owner: { name: 'Abdullah' }, prefs: { ...DEFAULT_PREFS, utcOffsetMin: 300 } })
+    const again = new Assistant({ llm, memory, clock, owner: { name: 'Hamza' }, prefs: { ...DEFAULT_PREFS, utcOffsetMin: 300 } })
     expect(again.conversationId).toBe(assistant.conversationId)
     expect(again.session.history.map(t => t.content)).toEqual(['salam', 'Theek hai.'])
     memory.close()
@@ -365,9 +365,9 @@ describe('Assistant', () => {
 
   it('starts a new paragraph for text after a tool step, never gluing sentences', async () => {
     const { assistant, memory } = setup((_, n) =>
-      n === 0 ? [{ type: 'text', text: 'Pending: 265,000.' }, ...use('t1', 'tasks_list', {})] : say('Abdullah, aaj 2 quotes Pending hain.'),
+      n === 0 ? [{ type: 'text', text: 'Pending: 265,000.' }, ...use('t1', 'tasks_list', {})] : say('Hamza, aaj 2 quotes Pending hain.'),
     )
-    expect(await drain(assistant.reply('quotes check karo'))).toBe('Pending: 265,000.\n\nAbdullah, aaj 2 quotes Pending hain.')
+    expect(await drain(assistant.reply('quotes check karo'))).toBe('Pending: 265,000.\n\nHamza, aaj 2 quotes Pending hain.')
     memory.close()
   })
 
@@ -449,7 +449,7 @@ describe('day context', () => {
   it('a restarted assistant still has today’s conversation', async () => {
     const { assistant, memory, llm, clock } = setup()
     await drain(assistant.reply('Mera client Ahmed hai, quote kal tak bhejna hai'))
-    const again = new Assistant({ llm, memory, clock, owner: { name: 'Abdullah' }, prefs: { ...DEFAULT_PREFS, utcOffsetMin: 300 } })
+    const again = new Assistant({ llm, memory, clock, owner: { name: 'Hamza' }, prefs: { ...DEFAULT_PREFS, utcOffsetMin: 300 } })
     await drain(again.reply('kis client ka quote tha?'))
     const turns = llm.requests.at(-1)!.turns
     expect(turns[0]).toEqual({ role: 'user', content: 'Mera client Ahmed hai, quote kal tak bhejna hai' })

@@ -16,10 +16,10 @@ describe('voice ID', () => {
 
   it('tells the owner, a known person, a guest and an unsure match apart', () => {
     const people = [
-      { name: 'Abdullah', owner: true, print: v(1, 0, 0) },
+      { name: 'Hamza', owner: true, print: v(1, 0, 0) },
       { name: 'Sara', owner: false, print: v(0, 1, 0) },
     ]
-    expect(judge(v(0.95, 0.1, 0), people)).toMatchObject({ name: 'Abdullah', verdict: 'owner' })
+    expect(judge(v(0.95, 0.1, 0), people)).toMatchObject({ name: 'Hamza', verdict: 'owner' })
     expect(judge(v(0.1, 0.95, 0), people)).toMatchObject({ name: 'Sara', verdict: 'known' })
     expect(judge(v(0, 0.1, 1), people)).toMatchObject({ name: null, verdict: 'guest' })
     expect(judge(v(0.3, 0, 0.7), people).verdict).toBe('unsure')
@@ -27,10 +27,10 @@ describe('voice ID', () => {
   })
 
   it('warns Atlas only about someone else, never about the owner or an unsure voice', () => {
-    expect(speakerNote({ name: 'Abdullah', verdict: 'owner', score: 0.8 }, 'Abdullah')).toBe('')
-    expect(speakerNote({ name: null, verdict: 'unsure', score: 0.4 }, 'Abdullah')).toBe('')
-    expect(speakerNote({ name: null, verdict: 'guest', score: 0.1 }, 'Abdullah')).toMatch(/not Abdullah’s/)
-    expect(speakerNote({ name: 'Sara', verdict: 'known', score: 0.7 }, 'Abdullah')).toMatch(/Sara/)
+    expect(speakerNote({ name: 'Hamza', verdict: 'owner', score: 0.8 }, 'Hamza')).toBe('')
+    expect(speakerNote({ name: null, verdict: 'unsure', score: 0.4 }, 'Hamza')).toBe('')
+    expect(speakerNote({ name: null, verdict: 'guest', score: 0.1 }, 'Hamza')).toMatch(/not Hamza’s/)
+    expect(speakerNote({ name: 'Sara', verdict: 'known', score: 0.7 }, 'Hamza')).toMatch(/Sara/)
   })
 
   it('carries samples as bytes and back', () => {

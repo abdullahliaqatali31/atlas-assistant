@@ -21,7 +21,7 @@ export const FILE_RULES: Rule[] = [
   ...READS.map((tool): Rule => ({ id: `default-${tool}`, tool, actionClass: 'observe', effect: 'allow' })),
   // Reversible (and undoable from Files), inside folders the owner made organisable.
   ...CHANGES.map((tool): Rule => ({ id: `default-${tool}`, tool, actionClass: 'modify', effect: 'allow' })),
-  // Opening a file's contents is the owner's call, every time ("Abdullah, parh loon?").
+  // Opening a file's contents is the owner's call, every time ("Hamza, parh loon?").
   { id: 'default-files_read', tool: 'files_read', actionClass: 'observe', effect: 'ask' },
   // Restorable from the Recycle Bin, but still worth a yes every time.
   { id: 'default-files_trash', tool: 'files_trash', actionClass: 'modify', effect: 'ask' },

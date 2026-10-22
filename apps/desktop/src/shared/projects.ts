@@ -34,7 +34,7 @@ export interface ProjectTaskView {
 
 export interface ProjectCommitmentView {
   id: string
-  /** Who promised ("Abdullah", "client"). */
+  /** Who promised ("Hamza", "client"). */
   who: string
   what: string
   toWhom: string

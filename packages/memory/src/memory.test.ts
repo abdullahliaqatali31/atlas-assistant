@@ -170,8 +170,8 @@ describe('conversations', () => {
 describe('the brain: connections between memories', () => {
   it('links a new memory to the ones it shares meaning with, and strengthens links used together', () => {
     const { store } = open()
-    const tea = store.remember({ kind: 'preference', statement: 'Abdullah prefers green tea in the evening', source: owner() })
-    const coffee = store.remember({ kind: 'fact', statement: 'Abdullah drinks green tea after dinner', source: owner() })
+    const tea = store.remember({ kind: 'preference', statement: 'Hamza prefers green tea in the evening', source: owner() })
+    const coffee = store.remember({ kind: 'fact', statement: 'Hamza drinks green tea after dinner', source: owner() })
     const cricket = store.remember({ kind: 'fact', statement: 'Plays cricket on Sundays', source: owner() })
     let b = store.brain()
     expect(b.memories).toHaveLength(3)

@@ -358,7 +358,7 @@ export class Assistant {
       let raw: unknown
       let stop = 'end'
 
-      // Text after a tool step starts a new paragraph, so it never runs into what came before ("265,000.Abdullah").
+      // Text after a tool step starts a new paragraph, so it never runs into what came before ("265,000.Hamza").
       let first = step > 0 && spoken !== '' && !/\s$/.test(spoken)
       let held = ''
       let escalate = false

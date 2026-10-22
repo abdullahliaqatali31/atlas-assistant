@@ -1,0 +1,32 @@
+name: Release
+
+# Push a tag like v0.4.0 to build the release zip and attach it to a draft release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm dist
+      - name: Draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = Get-ChildItem apps/desktop/release/atlas-*-win-x64.zip | Select-Object -First 1
+          Copy-Item $zip.FullName apps/desktop/release/atlas-win-x64.zip
+          gh release create $env:GITHUB_REF_NAME --draft --generate-notes $zip.FullName apps/desktop/release/atlas-win-x64.zip install.ps1

@@ -5,8 +5,8 @@ import { sentenceChunker } from './voice.ts'
 describe('sentenceChunker', () => {
   it('emits sentences as soon as they end, across chunks', () => {
     const c = sentenceChunker()
-    expect(c.push('Abdullah, do important items ')).toEqual([])
-    expect(c.push('hain. Revised quote pending hai! Pehle')).toEqual(['Abdullah, do important items hain.', 'Revised quote pending hai!'])
+    expect(c.push('Hamza, do important items ')).toEqual([])
+    expect(c.push('hain. Revised quote pending hai! Pehle')).toEqual(['Hamza, do important items hain.', 'Revised quote pending hai!'])
     expect(c.push(' kis ko clear karein?')).toEqual(['Pehle kis ko clear karein?'])
     expect(c.flush()).toEqual([])
   })

@@ -1,6 +1,6 @@
 /**
  * Asking the owner in conversation: the question Atlas says before an action
- * that needs a yes ("Abdullah, kya main “Things to do.docx” parh loon?"), and
+ * that needs a yes ("Hamza, kya main “Things to do.docx” parh loon?"), and
  * reading a short typed or spoken answer as yes or no. Anything longer or
  * unclear is not an answer; it goes to the conversation as a new message.
  */

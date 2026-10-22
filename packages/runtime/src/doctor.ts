@@ -90,7 +90,7 @@ if (config) {
     if (vh.ok && live) {
       try {
         // Azure's ur-PK voices read Urdu script; ElevenLabs handles Roman Urdu.
-        const phrase = config.voice.provider === 'azure' ? 'السلام علیکم، آج دو ضروری کام ہیں۔' : 'Assalam o alaikum Abdullah, aaj do zaroori kaam hain.'
+        const phrase = config.voice.provider === 'azure' ? 'السلام علیکم، آج دو ضروری کام ہیں۔' : 'Assalam o alaikum Hamza, aaj do zaroori kaam hain.'
         const chunks: Uint8Array[] = []
         const started = Date.now()
         let firstAudioMs = -1

@@ -99,7 +99,7 @@ describe('Projects IPC', () => {
 
   it('creates a project and keeps its tasks and commitments together', () => {
     const { memory, clock } = store()
-    const run = (o: ProjectOp) => runProjectsOp(memory, clock, 'Abdullah', o)
+    const run = (o: ProjectOp) => runProjectsOp(memory, clock, 'Hamza', o)
 
     const created = run(op(PJ.create, { name: 'Client quote', goals: 'Send revised quote' }))
     const project = created.result as ProjectDetailView
@@ -109,7 +109,7 @@ describe('Projects IPC', () => {
     let d = run(op(PJ.addTask, project.id, { title: 'Review drawings', dueAt: clock.now() + 3_600_000 })).result as ProjectDetailView
     d = run(op(PJ.addCommitment, project.id, { what: 'Send revised quote', toWhom: 'client', dueAt: clock.now() + 86_400_000 })).result as ProjectDetailView
     expect(d.tasks.map(t => [t.title, t.status])).toEqual([['Review drawings', 'ready']])
-    expect(d.commitments).toMatchObject([{ who: 'Abdullah', what: 'Send revised quote', toWhom: 'client', source: 'owner', resolvedAt: null }])
+    expect(d.commitments).toMatchObject([{ who: 'Hamza', what: 'Send revised quote', toWhom: 'client', source: 'owner', resolvedAt: null }])
 
     // A task from elsewhere can be moved in.
     const loose = memory.addTask('Call supplier')

@@ -16,7 +16,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$LatestRelease = 'https://github.com/OWNER/atlas/releases/latest/download/atlas-win-x64.zip'
+# Where releases are published (owner/repo on GitHub); ATLAS_REPO overrides it.
+$Repo = if ($env:ATLAS_REPO) { $env:ATLAS_REPO } else { 'OWNER/atlas' }
+$LatestRelease = "https://github.com/$Repo/releases/latest/download/atlas-win-x64.zip"
 
 function Say($text) { Write-Host "  $text" -ForegroundColor Cyan }
 
