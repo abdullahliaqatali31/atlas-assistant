@@ -1,7 +1,7 @@
 # Bundled 3D Model Attribution
 
 The model files in this directory are third-party visual assets. They are not
-covered by the repository's MIT source-code license; each remains available
+covered by the repository's Apache-2.0 source-code license; each remains available
 under the license listed below.
 
 | File | Original work and creator | Source | License | Project modifications |
