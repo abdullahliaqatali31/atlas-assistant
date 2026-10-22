@@ -84,7 +84,6 @@ practice. Each phase ships on its own, gated by `pnpm check`. Order of work: 1, 
   v* → draft release with the zip and install.ps1); issue and PR templates;
   licence inventory lists the downloaded models.
 - Done: `atlas update` (and `--check`) installs the latest release.
-- Left: the GitHub repo address (`OWNER/atlas` in install.ps1 and
-  bin/atlas.mjs, or ATLAS_REPO); code signing needs a certificate; the git
-  history still holds the old personal fixtures, so publish from a fresh
-  history or rewrite it first.
+- Published at github.com/abdullahliaqatali31/atlas-assistant from a fresh
+  history (the old commits with personal test data stay private). Left: code
+  signing needs a certificate.

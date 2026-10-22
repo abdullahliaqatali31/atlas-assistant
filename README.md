@@ -7,6 +7,7 @@
 Talk to it in English or Roman Urdu. It keeps your tasks and promises, watches the world for you,<br>
 drives a browser and your apps when you allow it, and opens in any browser on your home network.
 
+[![CI](https://github.com/abdullahliaqatali31/atlas-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/abdullahliaqatali31/atlas-assistant/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-0ea5e9)](LICENSE)
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0ea5e9)
 ![Node.js 22](https://img.shields.io/badge/Node.js-22.13%2B-22c55e)
@@ -53,7 +54,7 @@ Everything here is also plain Markdown you can edit, and an optional local model
 On Windows 10 or 11, in PowerShell:
 
 ```powershell
-iwr -useb https://github.com/OWNER/atlas/releases/latest/download/install.ps1 | iex
+iwr -useb https://github.com/abdullahliaqatali31/atlas-assistant/releases/latest/download/install.ps1 | iex
 ```
 
 That brings Node.js if it is missing, installs Atlas into `%LOCALAPPDATA%\Atlas`, puts the `atlas` command on your PATH, and opens Atlas in your browser. Or download a release zip and run `install.ps1 -From .\atlas-<version>-win-x64.zip`.

@@ -20,7 +20,7 @@ const stateFile = join(dataDir, 'gateway.json')
 const logFile = join(dataDir, 'logs', 'gateway.log')
 const nodeArgs = ['--disable-warning=ExperimentalWarning', entry]
 // Where releases are published (owner/repo on GitHub).
-const REPO = process.env.ATLAS_REPO ?? 'OWNER/atlas'
+const REPO = process.env.ATLAS_REPO ?? 'abdullahliaqatali31/atlas-assistant'
 
 const state = () => {
   try {
