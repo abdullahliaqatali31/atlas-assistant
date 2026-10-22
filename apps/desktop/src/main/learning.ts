@@ -68,6 +68,7 @@ export const registerLearningIpc = (deps: LearningIpcDeps) => {
   deps.handle(LC.runNow, () => ask({ kind: 'run' }, 120_000))
   deps.handle(LC.improvementDone, v => ask({ kind: 'improvement-done', id: id(v) }))
   deps.handle(LC.improvementRemove, v => ask({ kind: 'improvement-remove', id: id(v) }))
+  deps.handle(LC.welcomeReset, () => ask({ kind: 'welcome-reset' }))
   deps.handle(LC.semantic, on => {
     if (typeof on !== 'boolean') throw new Error('On or off.')
     // The first time downloads the model: allow for it.

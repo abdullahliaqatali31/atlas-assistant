@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { DEFAULT_PREFS } from '@assistant/initiative'
+import { DEFAULT_PREFS, describeWelcome } from '@assistant/initiative'
 import { MemoryStore } from '@assistant/memory'
 import { createLlm, isLlmProvider, listLlmModels, LLM_PROVIDERS, modelFor, type LlmProvider, type VoiceProvider } from '@assistant/providers'
 import {
@@ -57,6 +57,7 @@ import { suggestReplies } from './suggest.ts'
 import { VISION_RULES, visionTool } from './vision.ts'
 import { speakerNote, type SpeakerResult } from '../shared/speaker.ts'
 import { MemoryMirror } from './memory-md.ts'
+import { quickAnswer } from '../shared/quick.ts'
 import { SemanticMemory, semanticSettingsFile } from './semantic.ts'
 import { HostSkillsMd, SKILLMD_RULES } from './skillmd.ts'
 import { SkillLibrary } from '../main/skill-library.ts'
@@ -293,6 +294,8 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   learning = new HostLearning({
     memoryView: () => ({ file: mirror?.file ?? '', folder: join(config.dataDir, 'memory-files'), semantic: semantic?.view() ?? { on: false, state: 'off', progress: 0, indexed: 0, total: 0, error: null } }),
     setSemantic: on => semantic?.setOn(on),
+    speakUp: () => describeWelcome(initiative?.welcome() ?? {}, systemClock.now()),
+    resetWelcome: () => memory?.setSetting('initiative.welcome', '{}'),
     improvements,
     projects: () => code.projectNames(),
     memory,
@@ -325,6 +328,8 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
   assistant = new Assistant({
     // Keywords and meaning together, when the owner turned recall by meaning on.
     recall: blended,
+    // What the owner's reactions taught about when speaking up is welcome.
+    welcome: () => initiative?.welcome() ?? {},
     // Every reply is metered (tokens and cost per day and model).
     llm: meterLlm(llm, { purpose: 'chat', memory, clock: systemClock, utcOffsetMin: offset, onRecord: () => schedulePush() }),
     // Short, simple messages go to a cheaper quick model (when it differs from the main one).
@@ -339,7 +344,14 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
     learning: { observeOwner: text => learning?.observeOwner(text), contextLines: () => [...(learning?.contextLines() ?? []), ...ui.contextLines(), ...system.contextLines(), ...notifications.contextLines(), ...habits.contextLines(), ...(skillsMd?.contextLines() ?? [])] },
     clock: systemClock,
     owner: config.owner,
-    prefs: { ...DEFAULT_PREFS, utcOffsetMin: config.owner.utcOffsetMin, quietHours: parseQuietHours(merged.ASSISTANT_QUIET_HOURS) },
+    prefs: {
+      ...DEFAULT_PREFS,
+      utcOffsetMin: config.owner.utcOffsetMin,
+      quietHours: parseQuietHours(merged.ASSISTANT_QUIET_HOURS),
+      // The owner's own limits on routine speak-ups (Settings › Personality).
+      ...(merged.ASSISTANT_SPEAK_BUDGET && Number(merged.ASSISTANT_SPEAK_BUDGET) >= 0 ? { dailyRoutineBudget: Math.min(50, Number(merged.ASSISTANT_SPEAK_BUDGET)) } : {}),
+      ...(Number(merged.ASSISTANT_SPEAK_GAP_MIN) > 0 ? { routineCooldownMs: Math.min(24 * 60, Number(merged.ASSISTANT_SPEAK_GAP_MIN)) * 60_000 } : {}),
+    },
     tools: [],
     rules: controls.rules,
     fullControl: () => controls.fullControl.on && !controls.paused,
@@ -362,6 +374,7 @@ const init = async (env: Record<string, string>, cwd: string, away?: 'lock' | 's
       assistant,
       memory,
       clock: systemClock,
+      utcOffsetMin: config.owner.utcOffsetMin,
       speak: speakUp,
       later: (items, notify) => post({ type: 'later', items, notify }),
       silence: () => current?.abort.abort(),
@@ -403,6 +416,15 @@ const begin = (replyId: string) => {
 /** `spoken`: the owner talked, so the reply is spoken too; a typed message gets a text reply only. */
 const send = async (replyId: string, text: string, abort = begin(replyId), spoken = false) => {
   if (!assistant) return post({ type: 'done', replyId, stopped: false, error: 'The assistant is not ready yet.' })
+  // Instant answers (the time, stop, modes, louder…): no model, no wait. A note from Voice ID means it was not the owner: the model decides then.
+  const quick = text.startsWith('[Voice ID') ? null : quickAnswer(text, { now: Date.now(), names: [memory?.personality().profile.assistantName ?? '', 'Atlas'], urdu: asking.urdu })
+  if (quick) {
+    if (quick.action) post({ type: 'quick', action: quick.action })
+    if (!quick.reply) return post({ type: 'done', replyId, stopped: false })
+    lastOwnerText = text
+    const said = quick.reply
+    return stream(replyId, abort, (async function* () { yield said })(), spoken)
+  }
   lastOwnerText = text
   await stream(replyId, abort, assistant.reply(text, abort.signal), spoken)
 }
@@ -578,11 +600,13 @@ port.on('message', ({ data }: { data: HostRequest }) => {
       break
     case 'send':
       lastOwnerTurnAt = Date.now()
+      initiative?.ownerTurn()
       if (answerPending(data.replyId, data.text)) break
       void send(data.replyId, data.text)
       break
     case 'voice':
       lastOwnerTurnAt = Date.now()
+      initiative?.ownerTurn()
       void sendVoice(data.replyId, data.audio, data.mime, data.speaker)
       break
     case 'set-speech':
@@ -592,6 +616,7 @@ port.on('message', ({ data }: { data: HostRequest }) => {
       current?.abort.abort()
       break
     case 'interrupt':
+      initiative?.interrupted()
       // Barge-in: aborting the token drops queued sentences and cancels the TTS request in flight.
       if (current) {
         const started = performance.now()

@@ -3,7 +3,7 @@
  * through the policy gate, streams replies, applies session-level adaptations
  * and hands initiative events to the attention policy before any model call.
  */
-import { decide, type InitiativeDecision, type InitiativePrefs } from '@assistant/initiative'
+import { decide, type InitiativeDecision, type InitiativePrefs, type WelcomeTable } from '@assistant/initiative'
 import type { MemoryRecord, MemoryStore, Task } from '@assistant/memory'
 import { evaluate, type Decision, type Rule } from '@assistant/policy'
 import type { ChatTurn, ContentPart, LlmProvider } from '@assistant/providers'
@@ -63,6 +63,8 @@ export interface AssistantDeps {
   clock: Clock
   owner: { name: string }
   prefs: InitiativePrefs
+  /** What the owner's reactions taught about when speaking up is welcome (routine speak-ups only). */
+  welcome?: () => WelcomeTable
   tools?: RuntimeTool[]
   rules?: () => readonly Rule[]
   /** The owner turned Full control on: commands run without asking (policy keeps its hard limits). */
@@ -248,6 +250,7 @@ export class Assistant {
       this.session.mode,
       { handled, routineDeliveredAt: this.session.routineDeliveredAt, lastBriefingDay: lastBriefing?.slice('briefing:'.length) },
       prefs,
+      this.deps.welcome?.(),
     )
 
     if (decision.channel !== 'suppress') memory.recordInitiative(decision.dedupKey, decision.channel, decision.reason)
@@ -269,6 +272,7 @@ export class Assistant {
       this.session.mode,
       { handled, routineDeliveredAt: this.session.routineDeliveredAt, lastBriefingDay: lastBriefing?.slice('briefing:'.length) },
       prefs,
+      this.deps.welcome?.(),
     )
   }
 

@@ -105,6 +105,7 @@ export function PersonalitySettings({ onRunIntro }: { onRunIntro: () => void }) 
       </header>
 
       <QuietHours />
+      <SpeakLimits />
 
       <TextField id="nick" label="What it calls you" value={form.ownerNickname} placeholder="Your name, or e.g. Boss" onChange={v => set('ownerNickname', v)} />
       <TextField id="aname" label="Assistant’s name" value={form.assistantName} placeholder="No name" onChange={v => set('assistantName', v)} />
@@ -288,6 +289,42 @@ function QuietHours() {
           </button>
         </div>
       )}
+      {note && <p className="text-xs text-muted">{note}</p>}
+    </section>
+  )
+}
+
+/** How often the assistant may speak up on its own about routine things. */
+function SpeakLimits() {
+  const [saved, setSaved] = useState<{ perDay: number; gapMin: number } | null>(null)
+  const [perDay, setPerDay] = useState(5)
+  const [gapMin, setGapMin] = useState(60)
+  const [note, setNote] = useState('')
+  useEffect(() => {
+    void window.assistant.speakLimits().then(l => (setSaved(l), setPerDay(l.perDay), setGapMin(l.gapMin)), () => undefined)
+  }, [])
+  const save = () =>
+    void window.assistant.setSpeakLimits(perDay, gapMin).then(
+      l => (setSaved(l), setNote('Saved; it applies in a few seconds.')),
+      err => setNote(cleanError(err, 'Could not save.')),
+    )
+  if (!saved) return null
+  return (
+    <section className="tile space-y-2 p-3">
+      <p className="text-sm font-medium">Speaking up</p>
+      <p className="text-xs text-muted">
+        How often {nameOf()} may bring up routine things on its own (check-ins, project nudges). Urgent things and reminders you set are not counted. {nameOf()} also learns from how you react and keeps quiet about what you usually pass on.
+      </p>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted">At most</span>
+        <input type="number" min={0} max={50} value={perDay} onChange={e => setPerDay(Number(e.target.value))} className="field w-20" aria-label="Times a day" />
+        <span className="text-muted">a day, at least</span>
+        <input type="number" min={5} max={1440} value={gapMin} onChange={e => setGapMin(Number(e.target.value))} className="field w-20" aria-label="Minutes apart" />
+        <span className="text-muted">minutes apart</span>
+        <button type="button" className="btn" disabled={perDay === saved.perDay && gapMin === saved.gapMin} onClick={save}>
+          Save
+        </button>
+      </div>
       {note && <p className="text-xs text-muted">{note}</p>}
     </section>
   )

@@ -52,6 +52,9 @@ export class HostLearning {
       /** Memory as files, and recall by meaning (its switch). */
       memoryView?: () => LearningView['memory']
       setSemantic?: (on: boolean) => void
+      /** What was learned about speaking up, and forgetting it. */
+      speakUp?: () => LearningView['speakUp']
+      resetWelcome?: () => void
       log: (level: 'info' | 'warn', message: string) => void
     },
   ) {
@@ -100,6 +103,7 @@ export class HostLearning {
       improvements: this.deps.improvements?.list() ?? [],
       improvementProject: this.deps.improvements?.project ?? null,
       projects: this.deps.projects?.() ?? [],
+      speakUp: this.deps.speakUp?.() ?? [],
       memory: this.deps.memoryView?.() ?? { file: '', folder: '', semantic: { on: false, state: 'off', progress: 0, indexed: 0, total: 0, error: null } },
     }
   }
@@ -221,6 +225,9 @@ export class HostLearning {
           return ok()
         case 'semantic':
           this.deps.setSemantic?.(req.op.on)
+          return ok()
+        case 'welcome-reset':
+          this.deps.resetWelcome?.()
           return ok()
       }
     } catch (error) {

@@ -74,6 +74,7 @@ import { Setup } from "./Setup.tsx";
 import { useCounts, type CountKey } from "./shell/counts.ts";
 import { STRIP_W, usePanelLayout } from "./shell/panelLayout.ts";
 import { TimerRing, TimersCard } from "./shell/Timers.tsx";
+import { LOUDNESS, outputSettings, setOutputSettings } from "./voice/output.ts";
 import { ShortcutBoard } from "./shell/ShortcutBoard.tsx";
 import { Rail, type RailItem } from "./shell/Rail.tsx";
 import { useAlerts } from "./shell/alerts.ts";
@@ -370,6 +371,11 @@ export function App() {
       if (c.browser?.mode) setBrowserModeRef.current(c.browser.mode);
       if (c.browser?.driving !== undefined) setDriving(c.browser.driving);
       if (c.palette) setPalette(true);
+      if (c.volume) {
+        // One loudness step (Normal, Loud, Max), remembered like the setting.
+        const i = LOUDNESS.indexOf(outputSettings().loudness);
+        setOutputSettings({ loudness: LOUDNESS[Math.max(0, Math.min(LOUDNESS.length - 1, i + (c.volume === "up" ? 1 : -1)))]! });
+      }
       if (c.shortcuts) setBoard(true);
       if (c.news) {
         open("news");

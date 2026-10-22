@@ -5,6 +5,10 @@
  */
 import { DAY, HOUR, type ConversationMode, type InitiativeEvent } from '@assistant/shared'
 
+import { QUIET_BELOW, welcomeChance, welcomeContext, type WelcomeTable } from './welcome.ts'
+
+export * from './welcome.ts'
+
 export type Channel = 'speak' | 'notify' | 'queue' | 'suppress'
 
 export interface InitiativePrefs {
@@ -81,6 +85,8 @@ export const decide = (
   mode: ConversationMode,
   history: InitiativeHistory,
   prefs: InitiativePrefs = DEFAULT_PREFS,
+  /** What the owner's reactions taught about when speaking up is welcome. */
+  welcome?: WelcomeTable,
 ): InitiativeDecision => {
   const dedupKey = dedupKeyOf(e, prefs.utcOffsetMin)
   const urgent = isUrgent(e)
@@ -129,6 +135,12 @@ export const decide = (
   const last = history.routineDeliveredAt.at(-1)
   if (last !== undefined && e.at - last < prefs.routineCooldownMs) {
     return { ...base, channel: 'queue', reason: 'Within routine cooldown.' }
+  }
+
+  // Within the owner's rules, what their reactions taught: a speak-up they usually pass on is shown quietly.
+  const context = welcome ? welcomeContext(e, prefs.utcOffsetMin) : null
+  if (welcome && context && welcomeChance(welcome, context, e.at) < QUIET_BELOW) {
+    return { ...base, channel: 'notify', reason: 'You usually pass on these at this time of day, so it is shown quietly.' }
   }
 
   return { ...base, channel: 'speak', reason: 'Routine check-in allowed.' }

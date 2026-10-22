@@ -105,6 +105,8 @@ export interface PageCommand {
   palette?: boolean | undefined
   /** Open the shortcut board. */
   shortcuts?: boolean | undefined
+  /** Speak louder or softer (an instant command): one loudness step. */
+  volume?: 'up' | 'down' | undefined
 }
 
 export const UC = {

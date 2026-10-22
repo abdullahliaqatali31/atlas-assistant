@@ -66,6 +66,8 @@ export const buildBridges = (t: Transport) => {
     setBudget: usd => t.invoke(CH.setBudget, usd),
     quietHours: () => t.invoke(CH.quietHours),
     setQuietHours: range => t.invoke(CH.setQuietHours, range),
+    speakLimits: () => t.invoke(CH.speakLimits),
+    setSpeakLimits: (perDay, gapMin) => t.invoke(CH.setSpeakLimits, perDay, gapMin),
     startup: () => t.invoke(CH.startup),
     setStartup: (on, show) => t.invoke(CH.setStartup, on, show),
     setPrice: (model, price) => t.invoke(CH.setPrice, model, price),
@@ -192,6 +194,7 @@ export const buildBridges = (t: Transport) => {
     improvementRemove: id => t.invoke(LC.improvementRemove, id),
     improvementProject: name => t.invoke(LC.improvementProject, name),
     semantic: on => t.invoke(LC.semantic, on),
+    welcomeReset: () => t.invoke(LC.welcomeReset),
     openMemory: what => t.invoke(LC.openMemory, what),
     onChanged: cb => t.on<LearningView>(LC.changed, cb),
   }

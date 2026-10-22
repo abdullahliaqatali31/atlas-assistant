@@ -61,6 +61,38 @@ export function MemoryFiles({ view, run }: { view: LearningView; run: (fn: () =>
         </span>
       </label>
       {error && <p className="text-xs text-danger">{error}</p>}
+      <SpeakUp view={view} run={run} />
     </section>
+  )
+}
+
+const KIND: Record<string, string> = { 'welcome-back': 'Welcome back', project: 'Project nudges', message: 'New messages' }
+const label = (context: string) => {
+  const [kind = '', part = ''] = context.split('@')
+  const what = KIND[kind] ?? (kind.startsWith('agenda:') ? `Reminders about ${kind.slice('agenda:'.length)}` : kind)
+  return `${what}, ${part}`
+}
+
+/** What the owner's reactions taught about when speaking up is welcome. */
+function SpeakUp({ view, run }: { view: LearningView; run: (fn: () => Promise<LearningView>) => Promise<void> }) {
+  if (view.speakUp.length === 0) return null
+  return (
+    <div className="space-y-1.5 rounded-lg border border-border p-2.5">
+      <p className="text-sm font-medium">When speaking up is welcome</p>
+      <p className="text-xs text-muted">Learned from how you react. Where it is low, {nameOf()} shows it quietly instead of saying it.</p>
+      <ul className="space-y-1 text-xs">
+        {view.speakUp.map(r => (
+          <li key={r.context} className="flex justify-between gap-2">
+            <span>{label(r.context)}</span>
+            <span className={r.chance < 0.35 ? 'text-muted' : ''}>
+              {Math.round(r.chance * 100)}% · {r.reactions} {r.reactions === 1 ? 'reaction' : 'reactions'}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <button type="button" className="btn" onClick={() => void run(() => window.learning.welcomeReset())}>
+        Forget this
+      </button>
+    </div>
   )
 }

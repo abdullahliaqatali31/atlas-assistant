@@ -5,6 +5,7 @@
  */
 
 import type { SpeakerResult } from './speaker.ts'
+import type { QuickAction } from './quick.ts'
 import { isLlmProvider, type LlmProviderId } from '@assistant/providers/llm-presets'
 import type { PcNotification } from './notifications.ts'
 import type { HabitsForAtlas } from './habits.ts'
@@ -265,6 +266,8 @@ export const CH = {
   setBudget: 'assistant:set-budget',
   quietHours: 'assistant:quiet-hours',
   setQuietHours: 'assistant:set-quiet-hours',
+  speakLimits: 'assistant:speak-limits',
+  setSpeakLimits: 'assistant:set-speak-limits',
   setPrice: 'assistant:set-price',
   reply: 'assistant:reply',
   action: 'assistant:action',
@@ -315,6 +318,9 @@ export interface AssistantBridge {
   /** When Atlas keeps its own initiatives to itself (timers still ring): "22:00-07:00", or null for never. */
   quietHours(): Promise<string | null>
   setQuietHours(range: string | null): Promise<string | null>
+  /** Routine speak-ups: at most this many a day, at least this many minutes apart. */
+  speakLimits(): Promise<{ perDay: number; gapMin: number }>
+  setSpeakLimits(perDay: number, gapMin: number): Promise<{ perDay: number; gapMin: number }>
   /** Start with Windows (installed app only), in the tray. */
   startup(): Promise<StartupView>
   setStartup(on: boolean, show?: boolean): Promise<StartupView>
@@ -477,6 +483,8 @@ export type HostEvent =
   | { type: 'code-minutes'; minutes: Record<string, number> }
   /** A file tool asks main to list, search, read, move, organise, recycle or undo inside the chosen folders. */
   | { type: 'files'; requestId: string; op: FileOp }
+  /** An instant command (no model): the gateway carries it out (stop, mode, pause, volume). */
+  | { type: 'quick'; action: QuickAction }
   /** Atlas installed, wrote or removed a SKILL.md skill. */
   | { type: 'skills-changed' }
   /** The latest live-world snapshot, for the World page. */

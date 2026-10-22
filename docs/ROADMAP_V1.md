@@ -40,14 +40,18 @@ practice. Each phase ships on its own, gated by `pnpm check`. Order of work: 1 (
 - Memory flush before a long chat is compacted; a size cap on the always-on
   summary; an "edit what you learned" page.
 
-## Phase 4 — Decide fast, without asking the LLM every time
+## Phase 4 — Decide fast, without asking the LLM every time (done)
 
-- Tier 0: fixed phrases (stop, louder, what time) answered at once, offline.
-- Tier 1: a small local embedding router matches everyday commands to tools
-  in milliseconds; the LLM handles the rest.
-- A rules engine for hard limits (no interruptions in meetings, at most N an
-  hour); a small learner (contextual bandit) picks when to speak up within
-  those limits. "The LLM proposes, the rules decide."
+- Tier 0 (done): exact short phrases in English and Roman Urdu answered at once,
+  offline: time, date, stop, modes, pause/resume automation, louder/softer,
+  open a page, set a timer. Anything longer goes to the model.
+- Tier 1 (tried, not kept): an embedding router (e5-small) misrouted everyday
+  Roman Urdu ("mujhe map dikhao zara" went to tasks; "browser mein youtube
+  kholo" lost the site), so exact phrases plus the model win.
+- Rules and learner (done): quiet hours, a daily limit and a minimum gap set by
+  the owner (Settings > Personality); a Beta-Bernoulli learner per kind and
+  time of day (reactions fade over 14 days) turns unwelcome routine speak-ups
+  into quiet notices. Shown and resettable in Learning > Your memory.
 
 ## Phase 5 — More hands (done, except OAuth sign-in for remote connectors)
 

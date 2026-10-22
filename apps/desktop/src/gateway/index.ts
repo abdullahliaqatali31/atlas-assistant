@@ -49,7 +49,7 @@ import { WakeService } from '../main/wake.ts'
 import { registerDataIpc } from '../main/data.ts'
 import { registerPersonalityIpc } from '../main/personality.ts'
 import { watchSession } from '../main/session.ts'
-import { providerFor, readSetup, runtimeEnv, saveQuietHours, saveSetup, saveSpeakReplies, setupSummary as readSetupSummary, saveLiveVoice } from '../main/settings.ts'
+import { providerFor, readSetup, runtimeEnv, saveQuietHours, saveSpeakLimits, saveSetup, saveSpeakReplies, setupSummary as readSetupSummary, saveLiveVoice } from '../main/settings.ts'
 import { RuntimeSupervisor } from '../main/supervisor.ts'
 import { SystemService } from '../main/system/service.ts'
 import { PowerUp } from '../main/powerup.ts'
@@ -213,6 +213,19 @@ const supervisor: RuntimeSupervisor = new RuntimeSupervisor({
   },
   onWorld: e => world.onHostEvent(e),
   onSkillsChanged: () => toRenderer(SK.changed, skillLibrary().list()),
+  // An instant command the runtime recognised: carried out here, at once.
+  onQuick: action => {
+    if (action.kind === 'stop') {
+      audioGate.interrupt(supervisor.currentReply)
+      toRenderer(CH.silence, null)
+    } else if (action.kind === 'mode') {
+      supervisor.setMode(action.mode)
+      publish({ mode: action.mode })
+    } else if (action.kind === 'pause') controls.setPaused(action.on)
+    else if (action.kind === 'volume') ui.send({ volume: action.dir })
+    else if (action.kind === 'open') void ui.apply({ view: action.view }).catch(() => undefined)
+    else if (action.kind === 'timer') timers.handle({ kind: 'set', label: 'Timer', inMinutes: action.minutes })
+  },
   onUi: e => {
     // The model's screen tools.
     void ui.handleOp(e.op).then(
@@ -836,6 +849,20 @@ handle(CH.setQuietHours, range => {
   saveQuietHours(v ?? 'off')
   restartWhenIdle()
   return v
+})
+const speakLimits = () => {
+  const s = readSetup()
+  return { perDay: s.speakBudget < 0 ? 0 : s.speakBudget || 5, gapMin: s.speakGapMin > 0 ? s.speakGapMin : 60 }
+}
+handle(CH.speakLimits, () => speakLimits())
+handle(CH.setSpeakLimits, (perDay, gapMin) => {
+  requireOwner()
+  const d = Number(perDay)
+  const g = Number(gapMin)
+  if (!Number.isInteger(d) || d < 0 || d > 50 || !Number.isInteger(g) || g < 5 || g > 24 * 60) throw new Error('At most 0 to 50 a day, at least 5 minutes apart.')
+  saveSpeakLimits(d === 0 ? -1 : d, g)
+  restartWhenIdle()
+  return speakLimits()
 })
 handle(CH.usage, () => {
   requireOwner()

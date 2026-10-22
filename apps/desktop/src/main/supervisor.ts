@@ -9,6 +9,7 @@ import type { HabitsForAtlas } from '../shared/habits.ts'
 
 import type { LlmProviderId } from '@assistant/providers/llm-presets'
 import type { SpeakerResult } from '../shared/speaker.ts'
+import type { QuickAction } from '../shared/quick.ts'
 import { fork, type ChildProcess } from 'node:child_process'
 
 import type {
@@ -69,6 +70,7 @@ export interface SupervisorDeps {
   onUi?: (e: Extract<HostEvent, { type: 'ui' }>) => void
   onWorld?: (e: Extract<HostEvent, { type: 'world' | 'world-result' }>) => void
   onSkillsChanged?: () => void
+  onQuick?: (action: QuickAction) => void
 }
 
 const STABLE_MS = 60_000
@@ -512,6 +514,9 @@ export class RuntimeSupervisor {
         break
       case 'skills-changed':
         this.deps.onSkillsChanged?.()
+        break
+      case 'quick':
+        this.deps.onQuick?.(e.action)
         break
       case 'log':
         this.deps.log(e.level, e.message)

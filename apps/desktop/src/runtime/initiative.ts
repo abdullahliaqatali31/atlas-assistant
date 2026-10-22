@@ -5,7 +5,7 @@
  * cooldown, budget, quiet hours and modes) and hands the chosen channel to the
  * host. No Electron imports, so it is tested with a fake clock.
  */
-import { dedupKeyOf, type InitiativeDecision } from '@assistant/initiative'
+import { dedupKeyOf, recordWelcome, welcomeContext, type InitiativeDecision, type WelcomeTable } from '@assistant/initiative'
 import type { MemoryStore } from '@assistant/memory'
 import type { Assistant } from '@assistant/runtime'
 import { DAY, MINUTE, type Clock, type ConversationMode, type InitiativeEvent } from '@assistant/shared'
@@ -24,7 +24,9 @@ export const AGENDA_QUIET_MS = 10 * MINUTE
 
 export interface InitiativeDeps {
   assistant: Pick<Assistant, 'considerEvent' | 'previewEvent' | 'setMode'>
-  memory: Pick<MemoryStore, 'openTasks' | 'dueCommitments' | 'initiativeHandled' | 'initiativeEntry' | 'forgetInitiative' | 'recordInitiative'>
+  memory: Pick<MemoryStore, 'openTasks' | 'dueCommitments' | 'initiativeHandled' | 'initiativeEntry' | 'forgetInitiative' | 'recordInitiative' | 'getSetting' | 'setSetting'>
+  /** The owner's UTC offset, for the time of day a speak-up is judged in. */
+  utcOffsetMin?: number
   clock: Clock
   /** Speak an event through the companion; resolves when that reply ends. */
   speak: (event: InitiativeEvent, item: InitiativeItem) => Promise<void>
@@ -51,6 +53,8 @@ export class InitiativeService {
   private readonly events = new Map<string, InitiativeEvent>()
   private readonly snoozed = new Map<string, { event: InitiativeEvent; until: number }>()
   private speaking: string | null = null
+  /** The last thing said on Atlas's own initiative, to learn whether it was welcome. */
+  private lastSpoken: { event: InitiativeEvent; at: number } | null = null
   private draining: Promise<void> = Promise.resolve()
 
   constructor(
@@ -152,20 +156,24 @@ export class InitiativeService {
     this.drop(id)
     switch (action) {
       case 'snooze':
+        this.react(event, false)
         if (!event) return
         this.deps.memory.forgetInitiative(id)
         this.deps.memory.recordInitiative(`snooze:${id}`, 'snooze', 'Owner said not now.')
         this.snoozed.set(id, { event, until: this.deps.clock.now() + SNOOZE_MS })
         return
       case 'mute':
+        this.react(event, false, 2)
         // The task or commitment stays; only this reminder is silenced for good.
         this.deps.memory.recordInitiative(`mute:${id}`, 'mute', 'Owner said not to remind again.')
         this.events.delete(id)
         return
       case 'dismiss':
+        this.react(event, false, 0.5)
         this.events.delete(id)
         return
       case 'tell':
+        this.react(event, true)
         // The owner asked to hear it, so this is their turn, not an unsolicited one.
         if (event) await this.say(event, { ...(item ?? toItem(event, id, 'speak', '')), channel: 'speak', reason: 'You asked to hear it from the later list.' })
     }
@@ -262,7 +270,40 @@ export class InitiativeService {
       await this.deps.speak(event, item)
     } finally {
       if (this.speaking === item.id) this.speaking = null
+      this.lastSpoken = { event, at: this.deps.clock.now() }
     }
+  }
+
+  // ── learning when speaking up is welcome ──────────────────
+
+  /** What the owner's reactions taught so far (kept in the database's settings). */
+  welcome(): WelcomeTable {
+    try {
+      return JSON.parse(this.deps.memory.getSetting('initiative.welcome') ?? '{}') as WelcomeTable
+    } catch {
+      return {}
+    }
+  }
+
+  private react(event: InitiativeEvent | undefined, welcome: boolean, weight = 1) {
+    if (!event) return
+    const context = welcomeContext(event, this.deps.utcOffsetMin ?? 0)
+    if (!context) return
+    this.deps.memory.setSetting('initiative.welcome', JSON.stringify(recordWelcome(this.welcome(), context, welcome, this.deps.clock.now(), weight)))
+  }
+
+  /** The owner said something: a reply soon after Atlas spoke up means it was welcome. */
+  ownerTurn() {
+    const s = this.lastSpoken
+    this.lastSpoken = null
+    if (s && this.deps.clock.now() - s.at < 3 * MINUTE) this.react(s.event, true)
+  }
+
+  /** The owner talked over Atlas while it spoke up on its own. */
+  interrupted() {
+    if (!this.speaking) return
+    this.react(this.events.get(this.speaking), false)
+    this.lastSpoken = null
   }
 
   private drop(id: string) {
