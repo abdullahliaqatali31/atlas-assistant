@@ -1,0 +1,277 @@
+{
+  "$comment": "Source of truth for delivery progress. The project's Claude Code mod reads this file to draw the Roadmap pane and status line. Status: todo | doing | done.",
+  "phases": [
+    {
+      "id": "0",
+      "name": "Technical validation",
+      "items": [
+        {
+          "title": "Cloud voice bake-off on real Urdu-English sentences",
+          "status": "todo"
+        },
+        {
+          "title": "Resource baseline on Base-tier and GPU-tier machines",
+          "status": "todo"
+        },
+        {
+          "title": "Windows unlock/login session events",
+          "status": "doing"
+        },
+        {
+          "title": "Notification listener with package identity",
+          "status": "todo"
+        },
+        {
+          "title": "One MCP server end to end",
+          "status": "done"
+        },
+        {
+          "title": "One Playwright browser action",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "1",
+      "name": "Foundation",
+      "items": [
+        {
+          "title": "Monorepo, strict TypeScript, test runner",
+          "status": "done"
+        },
+        {
+          "title": "Policy gate with MCP annotation mapping",
+          "status": "done"
+        },
+        {
+          "title": "Initiative manager (cooldown, budget, quiet hours, modes)",
+          "status": "done"
+        },
+        {
+          "title": "SQLite memory, FTS5 recall, task state machine",
+          "status": "done"
+        },
+        {
+          "title": "LLM provider contract + Claude adapter",
+          "status": "done"
+        },
+        {
+          "title": "Voice provider contract + ElevenLabs adapter",
+          "status": "done"
+        },
+        {
+          "title": "Azure Speech adapter (free F0 tier, ur-PK Uzma/Asad voices)",
+          "status": "done"
+        },
+        {
+          "title": "MCP client host wired into the tool loop",
+          "status": "done"
+        },
+        {
+          "title": "Developer text console",
+          "status": "done"
+        },
+        {
+          "title": "Tool-use loop through the policy gate with owner confirmation",
+          "status": "done"
+        },
+        {
+          "title": "pnpm doctor: live LLM and voice round-trip check",
+          "status": "done"
+        },
+        {
+          "title": "Electron shell, preload bridge, tray",
+          "status": "done"
+        },
+        {
+          "title": "OS credential store adapter (Windows Credential Manager)",
+          "status": "done"
+        },
+        {
+          "title": "Setup wizard (LLM + voice required) and first-run onboarding",
+          "status": "done"
+        },
+        {
+          "title": "Glass UI system: acrylic window, custom dropdowns, scrollbars, checkboxes, app icon",
+          "status": "done"
+        },
+        {
+          "title": "Any LLM provider: Claude, OpenAI, Gemini, OpenRouter, Groq, DeepSeek, Mistral, xAI, Ollama, custom OpenAI-compatible",
+          "status": "done"
+        },
+        {
+          "title": "Cost meter, monthly budget and a cheaper background model",
+          "status": "done"
+        },
+        {
+          "title": "Start with Windows, in the tray",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "name": "Continuity",
+      "items": [
+        {
+          "title": "Commitments store and due reminders",
+          "status": "done"
+        },
+        {
+          "title": "Projects and commitments store + IPC",
+          "status": "done"
+        },
+        {
+          "title": "Projects and commitments UI",
+          "status": "done"
+        },
+        {
+          "title": "Evidence-backed daily briefing",
+          "status": "done"
+        },
+        {
+          "title": "Corrections and forget flow",
+          "status": "done"
+        },
+        {
+          "title": "Restart recovery of interrupted tasks",
+          "status": "done"
+        },
+        {
+          "title": "Calendar/email connectors via MCP (read-only, cited in briefing)",
+          "status": "done"
+        },
+        {
+          "title": "Opt-in active-window tracking (data + IPC; UI pending)",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "name": "Initiative and voice",
+      "items": [
+        {
+          "title": "Session service (lock, unlock, idle, sleep)",
+          "status": "done"
+        },
+        {
+          "title": "VAD, push-to-talk, streaming sentence TTS",
+          "status": "done"
+        },
+        {
+          "title": "Interruption cancels speech under 250 ms",
+          "status": "done"
+        },
+        {
+          "title": "Personality versioning and reset",
+          "status": "done"
+        },
+        {
+          "title": "Jarvis panel: presence orb, today, activity, connections, headlines",
+          "status": "done"
+        },
+        {
+          "title": "Security code and owner check (lock screen, held briefing)",
+          "status": "done"
+        },
+        {
+          "title": "Wake word (local Moonshine), double clap, whistle",
+          "status": "done"
+        },
+        {
+          "title": "Voice conversation mode (auto re-listen, barge-in, 30 s idle end)",
+          "status": "done"
+        },
+        {
+          "title": "Day memory across restarts (verbatim window + digest)",
+          "status": "done"
+        },
+        {
+          "title": "Personality adapter: learn tone preferences from feedback",
+          "status": "done"
+        },
+        {
+          "title": "Memory manager: extraction, consolidation, contradictions, retention",
+          "status": "done"
+        },
+        {
+          "title": "Learning service: lessons and workflow proposals with owner review",
+          "status": "done"
+        },
+        {
+          "title": "Initiative engine: agenda questions, deadline nudges, end-of-day wrap-up, two-way voice",
+          "status": "done"
+        },
+        {
+          "title": "Curiosity: follow-ups, opinions on stuck tasks, get-to-know questions",
+          "status": "done"
+        },
+        {
+          "title": "Formatted replies (Markdown, right-to-left Urdu)",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "name": "Useful action",
+      "items": [
+        {
+          "title": "Bounded browser workflow (20/20 verified, pnpm eval:workflows --full)",
+          "status": "done"
+        },
+        {
+          "title": "File workflows in selected folders (10/10 verified)",
+          "status": "done"
+        },
+        {
+          "title": "Permission editor and activity UI",
+          "status": "done"
+        },
+        {
+          "title": "Teachable skills: teach by telling or doing together; run on request, on a schedule or when the situation comes up (pnpm trial:skills)",
+          "status": "done"
+        },
+        {
+          "title": "Teach by showing: record the owner's own clicks in the browser",
+          "status": "todo"
+        },
+        {
+          "title": "Code projects: approved folders, measured activity (git, files, Claude Code, VS Code), run manager, STATUS.md kept by coding agents",
+          "status": "done"
+        },
+        {
+          "title": "Hand a task to Claude Code in a project folder, with approval",
+          "status": "todo"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "name": "Public beta preparation",
+      "items": [
+        {
+          "title": "Scoped desktop automation",
+          "status": "todo"
+        },
+        {
+          "title": "Encrypted backups and restore",
+          "status": "done"
+        },
+        {
+          "title": "Windows installer (unsigned) and license inventory",
+          "status": "done"
+        },
+        {
+          "title": "Code signing certificate for the installer",
+          "status": "todo"
+        },
+        {
+          "title": "Seven-day scenario suite on a second machine",
+          "status": "todo"
+        }
+      ]
+    }
+  ]
+}

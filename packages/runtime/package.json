@@ -1,0 +1,9 @@
+{
+  "name": "@assistant/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": { ".": "./src/index.ts", "./activity-defaults": "./src/activity-defaults.ts", "./credentials": "./src/credentials.ts" },
+  "dependencies": { "@assistant/shared": "workspace:*", "@assistant/policy": "workspace:*", "@assistant/initiative": "workspace:*", "@assistant/memory": "workspace:*", "@assistant/providers": "workspace:*", "@assistant/mcp": "workspace:*", "@napi-rs/keyring": "^2.1.1" }
+}

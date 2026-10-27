@@ -1,0 +1,23 @@
+# Atlas's brain behind a proxy that already does the domain and HTTPS: Dokploy, Coolify, Traefik, Caddy.
+# Dokploy: Create Service › Compose › this repository, Compose Path ./docker/compose.dokploy.yaml;
+# Environment: ATLAS_DOMAIN=atlas.example.com and ATLAS_SECRET_KEY=<openssl rand -base64 32>;
+# Domains: your domain → service atlas, port 47800, HTTPS on (Let's Encrypt). Deploy, then open the
+# Logs for the pairing code (or run `atlas pair` in the container's terminal).
+services:
+  atlas:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # No ports on the host: the proxy reaches Atlas on 47800 inside its network.
+    expose:
+      - "47800"
+    volumes:
+      - atlas-data:/data
+    environment:
+      # Atlas is reached at this domain and the proxy does HTTPS (Settings › Address & HTTPS shows it so).
+      ATLAS_DOMAIN: ${ATLAS_DOMAIN:-}
+      ATLAS_HTTPS: proxy
+      ATLAS_SECRET_KEY: ${ATLAS_SECRET_KEY:-}
+volumes:
+  atlas-data:

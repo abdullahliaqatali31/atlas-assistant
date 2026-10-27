@@ -1,0 +1,260 @@
+/**
+ * The PC's own state for Atlas: Wi-Fi, Bluetooth, battery, VPN. One
+ * long-lived Windows PowerShell process answers JSON lines (probe.ps1,
+ * read-only), polled every 45 s and at once when Electron sees the network,
+ * power or lock change. Each reading goes to the runtime with what changed.
+ */
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { createInterface } from 'node:readline'
+
+import { net, powerMonitor, shell } from '../host/index.ts'
+
+import { diffSnapshots, interpretProbe, MAC_SETTINGS_PAGES, SETTINGS_PAGES, describeSystem, type SystemChange, type SystemOp, type SystemSnapshot } from '../../shared/system.ts'
+import PROBE_PS1 from './probe.ps1?raw'
+import { searchMac } from './spotlight.ts'
+
+const POLL_MS = 45_000
+/** While Atlas is away (minimised or in the tray). */
+const AWAY_POLL_MS = 5 * 60_000
+const ONLINE_CHECK_MS = 5_000
+const REQUEST_TIMEOUT_MS = 60_000
+
+type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
+
+/** A PowerShell script answering one JSON request per line. */
+export class PsWorker {
+  private child: ChildProcessWithoutNullStreams | null = null
+  /** Exits after this long with nothing asked (0: stays); the next request starts it again. */
+  idleMs = 0
+  private idleTimer: NodeJS.Timeout | null = null
+  private starting: Promise<void> | null = null
+  private readonly pending = new Map<number, Pending>()
+  private nextId = 1
+
+  constructor(
+    private readonly dir: string,
+    private readonly name: string,
+    private readonly script: string,
+    private readonly log: (level: 'info' | 'warn', message: string) => void,
+  ) {}
+
+  private start(): Promise<void> {
+    if (this.child) return Promise.resolve()
+    this.starting ??= new Promise<void>((resolve, reject) => {
+      if (process.platform !== 'win32') return reject(new Error('This works on Windows only.'))
+      mkdirSync(this.dir, { recursive: true })
+      const file = join(this.dir, `${this.name}-${createHash('sha256').update(this.script).digest('hex').slice(0, 12)}.ps1`)
+      if (!existsSync(file)) writeFileSync(file, this.script)
+      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { windowsHide: true })
+      // A write to a worker that just exited is dropped, never an unhandled error that stops Atlas.
+      child.stdin.on('error', () => undefined)
+      const timer = setTimeout(() => {
+        child.kill()
+        reject(new Error(`${this.name} did not start in time.`))
+      }, 30_000)
+      let ready = false
+      createInterface({ input: child.stdout }).on('line', line => {
+        let msg: { ready?: boolean; id?: number | null; ok?: boolean; result?: unknown; error?: string }
+        try {
+          msg = JSON.parse(line)
+        } catch {
+          return
+        }
+        if (!ready && msg.ready) {
+          ready = true
+          clearTimeout(timer)
+          this.child = child
+          return resolve()
+        }
+        const p = typeof msg.id === 'number' ? this.pending.get(msg.id) : undefined
+        if (!p) return
+        this.pending.delete(msg.id as number)
+        clearTimeout(p.timer)
+        if (msg.ok) p.resolve(msg.result)
+        else p.reject(new Error(msg.error ?? `${this.name} failed.`))
+      })
+      child.stderr.on('data', (d: Buffer) => this.log('warn', `${this.name}: ${d.toString().trim().slice(0, 200)}`))
+      child.on('exit', code => {
+        clearTimeout(timer)
+        this.child = null
+        for (const [, p] of this.pending) {
+          clearTimeout(p.timer)
+          p.reject(new Error(`${this.name} stopped.`))
+        }
+        this.pending.clear()
+        if (!ready) reject(new Error(`${this.name} exited (${code}).`))
+      })
+    }).finally(() => {
+      this.starting = null
+    })
+    return this.starting
+  }
+
+  async request<T>(cmd: string, timeoutMs = REQUEST_TIMEOUT_MS, arg?: unknown): Promise<T> {
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = null
+    await this.start()
+    const child = this.child
+    if (!child) throw new Error(`${this.name} is not running.`)
+    const id = this.nextId++
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`${this.name} did not answer in time.`))
+      }, timeoutMs)
+      this.pending.set(id, { resolve: v => resolve(v as T), reject, timer })
+      child.stdin.write(`${JSON.stringify({ id, cmd, arg })}\n`)
+    }).finally(() => this.releaseWhenIdle())
+  }
+
+  /** With nothing pending, exit after idleMs: a PowerShell process holds ~100 MB while it waits. */
+  releaseWhenIdle() {
+    if (!this.idleMs || this.pending.size) return
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null
+      if (!this.pending.size) this.stop()
+    }, this.idleMs)
+    this.idleTimer.unref?.()
+  }
+
+  stop() {
+    this.child?.kill()
+    this.child = null
+  }
+}
+
+export class SystemService {
+  private readonly worker: PsWorker
+  /** Search and "what is in front" answer at once: their own process, never queued behind a status reading. */
+  private readonly quick: PsWorker
+  private snapshot: SystemSnapshot | null = null
+  private recent: SystemChange[] = []
+  private timer: NodeJS.Timeout | null = null
+  private onlineTimer: NodeJS.Timeout | null = null
+  private busy: Promise<void> | null = null
+  private wasOnline = true
+  private active = true
+
+  constructor(
+    private readonly deps: {
+      dir: string
+      log: (level: 'info' | 'warn', message: string) => void
+      /** Each new reading and what changed since the last one. */
+      onSnapshot: (s: SystemSnapshot, changes: SystemChange[]) => void
+    },
+  ) {
+    this.worker = new PsWorker(deps.dir, 'system-probe', PROBE_PS1, deps.log)
+    this.quick = new PsWorker(deps.dir, 'system-quick', PROBE_PS1, deps.log)
+  }
+
+  get current() {
+    return this.snapshot
+  }
+
+  get changes() {
+    return this.recent
+  }
+
+  /** Reads everything now (one at a time; a reading already running is shared). */
+  refresh(): Promise<void> {
+    this.busy ??= (async () => {
+      try {
+        const raw = await this.worker.request<unknown>('status')
+        const next = interpretProbe(raw, Date.now())
+        const changes = diffSnapshots(this.snapshot, next)
+        this.snapshot = next
+        if (changes.length) this.recent = [...this.recent, ...changes].slice(-30)
+        this.deps.onSnapshot(next, changes)
+      } catch (e) {
+        this.deps.log('warn', `System status: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    })().finally(() => {
+      this.busy = null
+    })
+    return this.busy
+  }
+
+  /**
+   * Atlas on screen: a reading every 45 s with the helper kept warm. Away (minimised, in the tray):
+   * every 5 minutes, and the helpers exit between readings, so nothing waits in memory.
+   */
+  setActive(active: boolean) {
+    if (active === this.active) return
+    this.active = active
+    this.worker.idleMs = this.quick.idleMs = active ? 0 : 30_000
+    if (!active) {
+      // Nothing pending now: let them go soon.
+      this.worker.releaseWhenIdle()
+      this.quick.releaseWhenIdle()
+    }
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = setInterval(() => void this.refresh(), active ? POLL_MS : AWAY_POLL_MS)
+      this.timer.unref?.()
+    }
+    if (active) void this.refresh()
+  }
+
+  start() {
+    if (process.platform !== 'win32') return
+    void this.refresh()
+    this.timer = setInterval(() => void this.refresh(), this.active ? POLL_MS : AWAY_POLL_MS)
+    this.timer.unref?.()
+    // Cheap signals between readings: the network coming and going, power and lock.
+    this.onlineTimer = setInterval(() => {
+      const online = net.isOnline()
+      if (online !== this.wasOnline) {
+        this.wasOnline = online
+        void this.refresh()
+      }
+    }, ONLINE_CHECK_MS)
+    this.onlineTimer.unref?.()
+    for (const ev of ['on-ac', 'on-battery', 'resume', 'unlock-screen'] as const) powerMonitor.on(ev as 'resume', () => void this.refresh())
+  }
+
+  /** Every Start-menu app (Win32 and Store) with its launch id. */
+  apps(): Promise<{ name: string; id: string }[]> {
+    return this.worker.request<{ name: string; id: string }[] | { name: string; id: string } | null>('apps').then(r => (Array.isArray(r) ? r : r ? [r] : []))
+  }
+
+  /** The Windows Search index (file names and text inside documents), newest first. */
+  async search(words: string[], kind: string | null, since: string | null): Promise<{ path: string; name: string; modified: string; size: number; kind: string }[]> {
+    // A Mac: Spotlight.
+    if (process.platform === 'darwin') return searchMac(words, kind, since)
+    const r =await this.quick.request<unknown>('search', 30_000, { words, kind, since })
+    return (Array.isArray(r) ? r : r ? [r] : []) as { path: string; name: string; modified: string; size: number; kind: string }[]
+  }
+
+  /** The window in front: its title and program ("this project" is usually in the title). */
+  foreground(): Promise<{ title: string; process: string }> {
+    return this.quick.request<{ title: string; process: string }>('foreground', 10_000)
+  }
+
+  /** The runtime's PC requests. */
+  async handle(op: SystemOp): Promise<string> {
+    switch (op.kind) {
+      case 'status':
+        await this.refresh()
+        return this.snapshot ? describeSystem(this.snapshot) : 'The PC status is not available right now.'
+      case 'settings': {
+        const url = (process.platform === 'darwin' ? MAC_SETTINGS_PAGES : SETTINGS_PAGES)[op.page]
+        if (!url) throw new Error('Unknown Settings page.')
+        await shell.openExternal(url)
+        return `Opened ${process.platform === 'darwin' ? 'System Settings' : 'Windows Settings'} › ${op.page}.`
+      }
+      default:
+        throw new Error('Not a status request.')
+    }
+  }
+
+  stop() {
+    if (this.timer) clearInterval(this.timer)
+    if (this.onlineTimer) clearInterval(this.onlineTimer)
+    this.worker.stop()
+    this.quick.stop()
+  }
+}

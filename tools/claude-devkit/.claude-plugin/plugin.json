@@ -1,0 +1,7 @@
+{
+  "name": "assistant-devkit",
+  "version": "0.1.0",
+  "description": "Roadmap pane, phase status line and API-key guard for the Personal Assistant project",
+  "author": { "name": "Abdullah Liaqat Ali" },
+  "types": "./types/index.d.ts"
+}

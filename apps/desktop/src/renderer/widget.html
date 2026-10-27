@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: assistant-news: https://api.tomtom.com https://flagcdn.com https://commons.wikimedia.org https://upload.wikimedia.org https://image.airport-data.com https://airport-data.com https://gibs.earthdata.nasa.gov https://services.arcgisonline.com https://*.virtualearth.net https://tile.googleapis.com https://assets.ion.cesium.com; media-src 'self' blob: https:; frame-src https://webcams.windy.com https://*.windy.com; connect-src 'self' ws://localhost:* assistant-model: https://api.openai.com https://tiles.openfreemap.org https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://services.arcgisonline.com https://terrain.reearth.land https://tile.googleapis.com https://api.cesium.com https://assets.ion.cesium.com https://*.virtualearth.net https://wzmedia.dot.ca.gov https://video.deldot.gov:443 https://video.deldot.gov https://kamera.vegvesen.no https://api.tomtom.com"
+    />
+    <title>Atlas widget</title>
+  </head>
+  <body class="widget">
+    <div id="root"></div>
+    <script type="module" src="./src/widget/main.tsx"></script>
+  </body>
+</html>

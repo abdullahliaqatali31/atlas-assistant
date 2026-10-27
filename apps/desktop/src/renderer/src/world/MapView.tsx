@@ -1,0 +1,1638 @@
+/**
+ * The World map, full-bleed: the basemap style (satellite by default), flat
+ * or globe, every registered layer, a floating toolbar, the layer switches
+ * and a view history for "Back". A click picks an item for the Inspector.
+ */
+import 'maplibre-gl/dist/maplibre-gl.css'
+
+import { ArrowLeft, Box, CarFront, Globe2, Layers, Map as MapIcon, ScanEye } from 'lucide-react'
+import maplibregl, { type FilterSpecification, type GeoJSONSource, type LayerSpecification, type Map as MapLibre, type RasterTileSource, type StyleSpecification } from 'maplibre-gl'
+import * as satellite from 'satellite.js'
+import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+
+import { MAX_PINS, type MapOp, type Pin, type Story } from '../../../shared/map.ts'
+import type { NewsResult } from '../../../shared/news.ts'
+import { CAMERA_COVERAGE, kmBetween, type FireSpot, type Camera, type Flight, type FlightRoute, type ShipsResult, type WorldSnapshot } from '../../../shared/world.ts'
+import { cameraFeatures, createGlide, cleanError, deadReckon, fireFeatures, flightFeatures, launchFeatures, radioFeatures, rainTiles, planeIcon, satelliteFeatures, shipFeatures, shipIcon, toFeatures, type FC } from './geo.ts'
+import { nearbyItems, type NearbyItem } from './hover.ts'
+import { HoverCard } from './HoverCard.tsx'
+import { TrafficLayer2D, TrafficPill, type TrafficStatus } from './TrafficLayer2D.tsx'
+import type { Selected } from './Inspector.tsx'
+import { layerDef, LAYERS, OWN_SOURCES, PICKABLE, readLayers, ROUTE_LAYERS, SELECTED_LAYER, TRAIL_LAYER, type LayerId } from './layers.ts'
+import { groundTrack, horizonKm, nextPasses, orbitFacts, ring } from './passes.ts'
+import { Trails } from './trails.ts'
+import { describeFound, describeVisible, findItems, linkFeatures, MAP3D_EVENT, pinFeatures, routeFeatures, routeProgress, storyFeatures, ZOOM_FOR } from './mapops.ts'
+import { LayerRail, RAIL } from './LayerRail.tsx'
+import { NewsCanvas } from './NewsCanvas.tsx'
+import { newsFeatures } from './newsmap.ts'
+import { layerFilter, readFilters, saveFilters } from './panels.ts'
+import { pickAt } from './pick.ts'
+import { DisplayDefs, DisplayFx, HudChip, TacticalHud } from './Display.tsx'
+import { DISPLAY_MODES, MODE_FILTER, MODE_LABEL, readDisplay, saveDisplay, type DisplayPrefs } from './hud.ts'
+// CesiumJS is large: the 3D view loads only when opened.
+const Globe3D = lazy(() => import('./Globe3D.tsx'))
+import type { Globe3DControl } from './Globe3D.tsx'
+import type { Globe3dLayer } from '../../../shared/map.ts'
+import { CATEGORY_COLOR, type AlertRegion, type IntelEvent } from '../../../shared/intel.ts'
+import { DockButtons, DockPanel, DOCK, type DockContext, type DockId } from './Dock.tsx'
+import { useWorldPanels, type FloatRect } from './panelDock.ts'
+import { MAP3D_STATE_EVENT } from '../../../shared/ui.ts'
+/** If the 3D view fails (no WebGL, a bad driver), say so and keep the 2D map working. */
+class Guard3D extends Component<{ onClose: () => void; children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null }
+  static getDerivedStateFromError(e: unknown) {
+    return { error: e instanceof Error ? e.message.slice(0, 160) : 'unknown error' }
+  }
+  render() {
+    if (!this.state.error) return this.props.children
+    return (
+      <div className="absolute inset-0 z-30 grid place-items-center bg-black/85 p-6 text-center text-xs text-muted">
+        <div className="space-y-2">
+          <p>The 3D view could not start on this PC: {this.state.error}</p>
+          <button type="button" onClick={this.props.onClose} className="map-chip mx-auto">
+            Back to 2D
+          </button>
+        </div>
+      </div>
+    )
+  }
+}
+import { BASE_URL, carryOverlays, composeStyle, creditLine, STYLES, type CreditPart, type StyleId } from './styles.ts'
+import { MAP_VIEW_EVENT } from '../../../shared/map.ts'
+import { Atmos } from './Atmos.tsx'
+
+export interface MapPrefs {
+  style: StyleId
+  globe: boolean
+}
+
+export interface View {
+  center: [number, number]
+  zoom: number
+  bearing: number
+  pitch: number
+}
+
+const isLite = () => document.documentElement.dataset.lite === 'true'
+const theme = (): 'dark' | 'light' => (document.documentElement.dataset.theme === 'daylight' ? 'light' : 'dark')
+
+/** The OpenFreeMap styles, fetched once per session; imagery styles borrow their labels. */
+let bases: Promise<{ dark: StyleSpecification; light: StyleSpecification }> | null = null
+const loadBases = () => {
+  bases ??= Promise.all([BASE_URL.dark, BASE_URL.light].map(u => fetch(u).then(r => (r.ok ? (r.json() as Promise<StyleSpecification>) : Promise.reject(new Error(`HTTP ${r.status}`)))))).then(
+    ([dark, light]) => ({ dark: dark!, light: light! }),
+    err => {
+      bases = null
+      throw err
+    },
+  )
+  return bases
+}
+
+const viewOf = (m: MapLibre): View => {
+  const c = m.getCenter()
+  return { center: [c.lng, c.lat], zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() }
+}
+
+const ICONS: Record<string, () => ImageData> = { plane: planeIcon, ship: shipIcon }
+
+/**
+ * The map's background threads: MapLibre starts one per two CPU cores (4 here), each with its
+ * own copy of tile data. One is plenty for a modest machine (Lite), two otherwise.
+ */
+let workersSet = false
+const setMapWorkers = () => {
+  if (workersSet) return
+  workersSet = true
+  try {
+    maplibregl.setWorkerCount(isLite() ? 1 : 2)
+  } catch {
+    // Already started: keep the default.
+  }
+}
+
+/** Sources whose points move every second or two (planes, ships, satellites). */
+/** Two cards with the same values (a shallow look: card fields are numbers and short text). */
+const sameFields = (a: Record<string, unknown>, b: Record<string, unknown>) => {
+  if (a === b) return true
+  const ka = Object.keys(a)
+  if (ka.length !== Object.keys(b).length) return false
+  return ka.every(k => a[k] === b[k])
+}
+
+const MOVING = new Set(['flights', 'ships', 'satellites'])
+/**
+ * Moving points tile at low zoom only and keep a small buffer: each update
+ * (every second for planes) cuts far fewer tiles, and points need no detail
+ * beyond that.
+ */
+const MOVING_SOURCE = { maxzoom: 9, buffer: 32, tolerance: 1 } as const
+
+/**
+ * Icons and labels that may overlap anyway skip collision placement too: with
+ * thousands of planes the placement maths, not the drawing, made panning stutter.
+ */
+const fastSymbols = (spec: LayerSpecification): LayerSpecification => {
+  if (spec.type !== 'symbol') return spec
+  const layout = { ...(spec.layout ?? {}) } as Record<string, unknown>
+  if (layout['icon-allow-overlap'] === true && layout['icon-ignore-placement'] === undefined) layout['icon-ignore-placement'] = true
+  if (layout['text-allow-overlap'] === true && layout['text-ignore-placement'] === undefined) layout['text-ignore-placement'] = true
+  return { ...spec, layout } as LayerSpecification
+}
+
+export function MapView({
+  world,
+  selected,
+  onSelect,
+  focus,
+  follow,
+  prefs,
+  onPrefs,
+  toolbar,
+  now,
+  onNearby,
+}: {
+  world: WorldSnapshot
+  selected: Selected | null
+  onSelect: (s: Selected | null) => void
+  focus: { lngLat: [number, number]; zoom?: number; n: number } | null
+  /** Keep the picked moving item (aircraft, ship, satellite) in the middle as it moves. */
+  follow: boolean
+  prefs: MapPrefs
+  onPrefs: (p: MapPrefs) => void
+  toolbar: (controls: ReactNode) => ReactNode
+  now: number
+  /** What sits near the picked item, nearest first. */
+  onNearby: (items: NearbyItem[]) => void
+}) {
+  const box = useRef<HTMLDivElement>(null)
+  const map = useRef<MapLibre | null>(null)
+  const [ready, setReady] = useState(false)
+  const [styleError, setStyleError] = useState('')
+  const fitted = useRef(false)
+  const [layers, setLayers] = useState(readLayers)
+  const [filters, setFilters] = useState(readFilters)
+  const filtersNow = useRef(filters)
+  filtersNow.current = filters
+  /** Orbit elements of the tracked satellites, for the rail's "above you" panel. */
+  const satsRef = useRef<{ name: string; rec: satellite.SatRec }[]>([])
+  /** The last flights and when they came, for gliding between polls. */
+  const glide = useRef<{ list: Flight[]; at: number } | null>(null)
+  /** Planes glide to each new fix instead of jumping (one smoother for the 2D map). */
+  const smooth = useMemo(() => createGlide(), [])
+  /** Where aircraft and ships have been since the map opened. */
+  const trails = useRef(new Trails())
+  const [open, setOpen] = useState<'layers' | 'style' | 'display' | null>(null)
+  /** The 3D view (terrain, buildings, aircraft at real altitude), opened where the map is. */
+  const [threeD, setThreeD] = useState<{ lat: number; lon: number; zoom: number } | null>(null)
+  const threeDRef = useRef(threeD)
+  threeDRef.current = threeD
+  // The panels: one docked on the right, any floating over the map, up to four pinned along the bottom.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const panels = useWorldPanels(() => rootRef.current)
+  const [intelOnMap, setIntelOnMapState] = useState(() => {
+    try {
+      return localStorage.getItem('atlas.intel.onMap') !== '0'
+    } catch {
+      return true
+    }
+  })
+  const setIntelOnMap = (on: boolean) => {
+    setIntelOnMapState(on)
+    try {
+      localStorage.setItem('atlas.intel.onMap', on ? '1' : '0')
+    } catch {
+      // A private window: not remembered.
+    }
+  }
+  const [intel, setIntel] = useState<{ events: IntelEvent[]; alerts: AlertRegion[] } | null>(null)
+  const [note3d, setNote3d] = useState('')
+  // Live traffic (TomTom, the owner's key): the chip, and the key once read.
+  const [traffic, setTraffic] = useState(false)
+  const [trafficKey, setTrafficKey] = useState<string | null>(null)
+  const [trafficStatus, setTrafficStatus] = useState<TrafficStatus | null>(null)
+  const toggleTraffic = async () => {
+    if (traffic) return setTraffic(false)
+    const keys = await window.world.map3dKeys().catch(() => null)
+    if (!keys?.tomtom) {
+      setNote3d('Live traffic needs a free TomTom key: Setup › Power up › TomTom Traffic (GET KEY). About 50,000 map tiles a day are free.')
+      setTimeout(() => setNote3d(''), 9000)
+      return
+    }
+    setTrafficKey(keys.tomtom)
+    setTraffic(true)
+  }
+  // Tell the app (and so Atlas) which map is in front.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent(MAP3D_STATE_EVENT, { detail: threeD !== null }))
+  }, [threeD])
+  useEffect(() => () => void window.dispatchEvent(new CustomEvent(MAP3D_STATE_EVENT, { detail: false })), [])
+  /** Nothing to draw: the window is hidden, or the 3D view covers the flat map. */
+  const idle = () => document.hidden || threeDRef.current !== null
+  /** The open 3D view's handle, for Atlas's map_3d. */
+  const globeCtl = useRef<Globe3DControl | null>(null)
+  // Visual mode, tactical HUD and scope (keys 1-5, H).
+  const [display, setDisplay] = useState<DisplayPrefs>(readDisplay)
+  useEffect(() => saveDisplay(display), [display])
+  const [counts, setCounts] = useState<Partial<Record<LayerId, number>>>({})
+  // A poll that finds the same numbers leaves the page alone.
+  const setCount = (patch: Partial<Record<LayerId, number>>) => setCounts(c => ((Object.keys(patch) as LayerId[]).every(k => c[k] === patch[k]) ? c : { ...c, ...patch }))
+  const [flightNote, setFlightNote] = useState('')
+  const [shipState, setShipState] = useState<{ status: ShipsResult['status']; message: string | null }>({ status: 'off', message: null })
+  const [shipKey, setShipKey] = useState('')
+  const [shipKeyError, setShipKeyError] = useState('')
+  /** Worldwide webcams (Windy, the owner's key): status, what is in view, and the key form. */
+  const [webcamState, setWebcamState] = useState<{ status: 'no-key' | 'ok' | 'error'; message: string | null; inView: number }>({ status: 'ok', message: null, inView: 0 })
+  const [webcamKey, setWebcamKey] = useState('')
+  const [webcamKeyError, setWebcamKeyError] = useState('')
+  const [webcamKeyVersion, setWebcamKeyVersion] = useState(0)
+  /** Views to go back to, newest last; each fly-to the owner or Atlas asks for adds one. */
+  const history = useRef<View[]>([])
+  const [canGoBack, setCanGoBack] = useState(false)
+  const data = useMemo(() => toFeatures(world), [world])
+  const dataRef = useRef(data)
+  dataRef.current = data
+  /** What each layer shows right now, for "Nearby" in the Inspector. */
+  const latest = useRef<Partial<Record<LayerId, FC>>>({})
+  const put = (id: LayerId, fc: FC) => {
+    latest.current[id] = fc
+    ;(map.current?.getSource(id) as GeoJSONSource | undefined)?.setData(fc)
+  }
+  const selectRef = useRef(onSelect)
+  selectRef.current = onSelect
+  // Lite mode keeps the map flat: the globe costs the most GPU.
+  const globe = prefs.globe && !isLite()
+
+  useEffect(() => {
+    if (!box.current) return
+    setMapWorkers()
+    const m = new maplibregl.Map({ container: box.current, style: BASE_URL.dark, center: [70, 28], zoom: 2.2, attributionControl: false, pixelRatio: isLite() ? 1 : Math.min(window.devicePixelRatio, 1.5), fadeDuration: 0, maxTileCacheZoomLevels: 3 })
+    map.current = m
+    // Dev runs only: a handle for checking the map from the debugger.
+    if (location.protocol === 'http:') (window as unknown as { __map2d?: unknown }).__map2d = m
+    m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+    // Credits: our own small line at the bottom (MapCredit), not the library's white pill.
+    // Style switches drop images added at runtime; draw them again when a layer asks.
+    m.on('styleimagemissing', e => {
+      const make = ICONS[e.id]
+      if (make && !m.hasImage(e.id)) m.addImage(e.id, make(), { sdf: true })
+    })
+    m.once('load', () => {
+      const d = dataRef.current
+      const empty: FC = { type: 'FeatureCollection', features: [] }
+      const initial: Record<string, FC> = { quakes: d.quakes, events: d.events, places: d.places }
+      for (const l of LAYERS)
+        for (const id of [l.source, ...(l.extraSources ?? [])])
+          if (!m.getSource(id))
+            m.addSource(id, l.raster ? { type: 'raster', tiles: [rainTiles(null)], tileSize: 256, maxzoom: l.raster.maxzoom, attribution: l.raster.attribution } : { type: 'geojson', data: initial[id] ?? empty, ...(MOVING.has(id) ? MOVING_SOURCE : {}), ...(id === l.source ? l.sourceOptions : {}) })
+      for (const id of ['selected', 'trail', 'route']) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: empty })
+      for (const l of LAYERS) for (const spec of l.draw) if (!m.getLayer(spec.id)) m.addLayer(fastSymbols(spec))
+      for (const spec of ROUTE_LAYERS) if (!m.getLayer(spec.id)) m.addLayer(spec)
+      if (!m.getLayer(TRAIL_LAYER.id)) m.addLayer(TRAIL_LAYER)
+      if (!m.getLayer(SELECTED_LAYER.id)) m.addLayer(SELECTED_LAYER)
+
+      // One click handler: the top-most item near the pointer, or nothing (closes the Inspector).
+      m.on('click', e => {
+        const hit = pickAt(m, e.point)
+        selectRef.current(hit ? { kind: hit.kind, lngLat: hit.lngLat, props: hit.props } : null)
+      })
+      // A news bubble opens up: zoom in until its headlines separate.
+      m.on('click', 'news-clusters', e => {
+        const f = e.features?.[0]
+        const id = f?.properties?.cluster_id
+        if (!f || typeof id !== 'number') return
+        void (m.getSource('news') as GeoJSONSource).getClusterExpansionZoom(id).then(zoom =>
+          m.easeTo({ center: (f.geometry as unknown as { coordinates: [number, number] }).coordinates, zoom: Math.min(zoom + 0.5, 12), duration: isLite() ? 0 : 600 }),
+        )
+      })
+      // A radio bubble opens up the same way.
+      m.on('click', 'radio-clusters', e => {
+        const f = e.features?.[0]
+        const id = f?.properties?.cluster_id
+        if (!f || typeof id !== 'number') return
+        void (m.getSource('radio') as GeoJSONSource).getClusterExpansionZoom(id).then(zoom =>
+          m.easeTo({ center: (f.geometry as unknown as { coordinates: [number, number] }).coordinates, zoom: Math.min(zoom + 0.5, 12), duration: isLite() ? 0 : 600 }),
+        )
+      })
+      m.on('mouseenter', 'news-clusters', () => (m.getCanvas().style.cursor = 'pointer'))
+      m.on('mouseleave', 'news-clusters', () => (m.getCanvas().style.cursor = ''))
+      for (const { layer } of PICKABLE) {
+        m.on('mouseenter', layer, () => (m.getCanvas().style.cursor = 'pointer'))
+        m.on('mouseleave', layer, () => (m.getCanvas().style.cursor = ''))
+      }
+      setReady(true)
+      let viewT = 0
+      const tellView = () => {
+        if (viewT) return
+        viewT = window.setTimeout(() => {
+          viewT = 0
+          const c = m.getCenter()
+          window.dispatchEvent(new CustomEvent(MAP_VIEW_EVENT, { detail: { lat: c.lat, lon: c.lng, zoom: m.getZoom() } }))
+        }, 150)
+      }
+      m.on('move', tellView)
+      tellView()
+      // The stage may still be settling its size when the map starts (lazy page, opening drawer): measure again.
+      m.resize()
+      setTimeout(() => m.resize(), 300)
+    })
+    const resize = new ResizeObserver(() => m.resize())
+    resize.observe(box.current)
+    return () => {
+      resize.disconnect()
+      m.remove()
+      map.current = null
+    }
+  }, [])
+
+  // The basemap and projection: built from the OpenFreeMap styles, the map's own layers carried across.
+  useEffect(() => {
+    const m = map.current
+    if (!m) return
+    let stopped = false
+    void loadBases().then(
+      b => {
+        if (stopped) return
+        setStyleError('')
+        const next = composeStyle({ id: prefs.style, bases: b, theme: theme(), globe, now: Date.now() })
+        m.setStyle(next, { transformStyle: (prev, nextStyle) => carryOverlays(prev, nextStyle, OWN_SOURCES) })
+      },
+      err => !stopped && setStyleError(`Map style unavailable (${cleanError(err)}); showing the plain map.`),
+    )
+    return () => {
+      stopped = true
+    }
+  }, [prefs.style, globe])
+
+  // A picked aircraft, ship or satellite stays live: its card and ring move with it, its path is drawn,
+  // and Follow keeps it in the middle. A satellite shows its next orbit and the circle it can see.
+  const selectedNow = useRef(selected)
+  selectedNow.current = selected
+  const followNow = useRef(follow)
+  followNow.current = follow
+  const worldNow = useRef(world)
+  worldNow.current = world
+  const selectedId = selected ? String(selected.props.id ?? '') : ''
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const lines = (items: { coords: [number, number][]; color: string; width?: number }[]) =>
+      (m.getSource('trail') as GeoJSONSource | undefined)?.setData({
+        type: 'FeatureCollection',
+        features: items.filter(i => i.coords.length > 1).map(i => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: i.coords }, properties: { color: i.color, width: i.width ?? 2 } })),
+      })
+    const routeSource = () => m.getSource('route') as GeoJSONSource | undefined
+    const kind = selectedNow.current?.kind
+    if (!kind || !selectedId || (kind !== 'flights' && kind !== 'ships' && kind !== 'satellites')) {
+      lines([])
+      routeSource()?.setData(routeFeatures(null, [0, 0]))
+      return
+    }
+    // A picked flight: ask once where it is going; the line follows the aircraft on each tick.
+    let route: FlightRoute | null = null
+    let gone = false
+    const callsign = kind === 'flights' ? String(selectedNow.current?.props.callsign ?? '').trim() : ''
+    if (callsign)
+      void window.world.flightRoute(callsign).then(
+        r => {
+          if (gone || !r) return
+          route = r
+          tick()
+        },
+        () => undefined,
+      )
+    const sat = kind === 'satellites' ? satsRef.current.find(x => `sat:${String(x.rec.satnum).trim()}` === selectedId) : undefined
+    // The next pass over the first watched place, worked out once per pick.
+    const home = worldNow.current.places[0]?.place
+    const pass = sat && home ? nextPasses(sat.rec, { lat: home.lat, lon: home.lon }, Date.now(), { limit: 1 })[0] : undefined
+    const tick = () => {
+      const sel = selectedNow.current
+      if (!sel) return
+      let lngLat = sel.lngLat
+      let props = sel.props
+      const live = latest.current[kind]?.features.find(f => f.properties.id === selectedId)
+      if (live) {
+        lngLat = live.geometry.coordinates as [number, number]
+        props = { ...sel.props, ...live.properties }
+      }
+      if (sat) {
+        const facts = orbitFacts(sat.rec, new Date())
+        if (facts) {
+          lngLat = [facts.lon, facts.lat]
+          props = { ...props, norad: facts.norad, altKm: facts.altKm, speedKms: facts.speedKms, inclination: facts.inclination, periodMin: facts.periodMin, ...(pass && home ? { nextPass: pass.rise, nextPassMax: pass.maxElevation, nextPassMin: Math.max(1, Math.round((pass.set - pass.rise) / 60_000)), passPlace: home.name } : {}) }
+          lines([
+            { coords: groundTrack(sat.rec, Date.now(), Math.round(facts.periodMin)), color: '#c084fc' },
+            { coords: ring(lngLat, horizonKm(facts.altKm)), color: '#c084fc', width: 1 },
+          ])
+        }
+      } else lines([{ coords: trails.current.path(selectedId), color: kind === 'flights' ? '#fbbf24' : '#34d399' }])
+      if (route) {
+        const r = route as FlightRoute
+        const at = routeProgress(r, { lat: lngLat[1], lon: lngLat[0] })
+        routeSource()?.setData(routeFeatures(r, lngLat))
+        props = { ...props, routeFrom: r.origin.iata || r.origin.icao, routeTo: r.destination.iata || r.destination.icao, routeFromCity: r.origin.city, routeToCity: r.destination.city, routeFromName: r.origin.name, routeToName: r.destination.name, airline: r.airline, routeProgress: at.fraction, routeKmLeft: at.kmLeft }
+      }
+      // Only a real change re-renders the page (a new object with the same values does not).
+      if (lngLat[0] !== sel.lngLat[0] || lngLat[1] !== sel.lngLat[1] || !sameFields(props, sel.props)) selectRef.current({ kind, lngLat, props })
+      if (followNow.current) m.easeTo({ center: lngLat, duration: isLite() ? 0 : 800 })
+    }
+    tick()
+    const timer = setInterval(tick, kind === 'satellites' ? 2_000 : 4_000)
+    return () => {
+      gone = true
+      clearInterval(timer)
+      lines([])
+      routeSource()?.setData(routeFeatures(null, [0, 0]))
+    }
+  }, [ready, selectedId])
+
+  // Intelligence on the flat map: countries shaded by how much happens there, Ukraine's oblasts under
+  // an air-raid alert, and the events themselves (sized by severity). Kept across style changes.
+  const shapes = useRef<{ countries: FC | null; ukraine: FC | null }>({ countries: null, ukraine: null })
+  const intelDrawn = useRef('')
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !intel) return
+    let gone = false
+    const empty: FC = { type: 'FeatureCollection', features: [] }
+    const counts = new Map<string, number>()
+    for (const e of intel.events) if (e.country) counts.set(e.country, (counts.get(e.country) ?? 0) + 1)
+    const top = Math.max(1, ...counts.values())
+    const alertBy = new Map(intel.alerts.map(a => [a.name, a.level]))
+    // The same events and alerts as last time (a refresh that found nothing new): nothing to redraw.
+    const key = `${intelOnMap}|${intel.events.length}|${intel.events[0]?.id}|${intel.events.at(-1)?.id}|${intel.alerts.map(a => a.name + a.level).join(',')}`
+    const draw = (force = false) => {
+      if (gone || !m.isStyleLoaded()) return
+      if (!force && intelDrawn.current === key && m.getSource('intel-events') && shapes.current.countries) return
+      intelDrawn.current = key
+      const below = LAYERS.flatMap(l => l.draw.map(d => d.id)).find(id => m.getLayer(id))
+      const source = (id: string, data: FC) => {
+        const src = m.getSource(id) as GeoJSONSource | undefined
+        if (src) src.setData(data)
+        else m.addSource(id, { type: 'geojson', data })
+      }
+      const vis = intelOnMap ? 'visible' : 'none'
+      source('intel-countries', shapes.current.countries ? { ...shapes.current.countries, features: shapes.current.countries.features.map(f => ({ ...f, properties: { ...f.properties, heat: (counts.get(String(f.properties.iso)) ?? 0) / top } })) } : empty)
+      source('ua-alerts', shapes.current.ukraine ? { ...shapes.current.ukraine, features: shapes.current.ukraine.features.filter(f => alertBy.has(String(f.properties.name))).map(f => ({ ...f, properties: { ...f.properties, level: alertBy.get(String(f.properties.name)) ?? '' } })) } : empty)
+      source('intel-events', { type: 'FeatureCollection', features: intel.events.map(e => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lon, e.lat] }, properties: { id: e.id, title: e.title, color: CATEGORY_COLOR[e.category], severity: e.severity } })) })
+      if (!m.getLayer('intel-countries')) m.addLayer({ id: 'intel-countries', type: 'fill', source: 'intel-countries', filter: ['>', ['get', 'heat'], 0], paint: { 'fill-color': '#f59e0b', 'fill-opacity': ['interpolate', ['linear'], ['get', 'heat'], 0, 0.06, 1, 0.32] } }, below)
+      if (!m.getLayer('ua-alerts')) m.addLayer({ id: 'ua-alerts', type: 'fill', source: 'ua-alerts', paint: { 'fill-color': ['match', ['get', 'level'], 'full', '#ef4444', '#fb923c'], 'fill-opacity': 0.35 } }, below)
+      if (!m.getLayer('ua-alerts-line')) m.addLayer({ id: 'ua-alerts-line', type: 'line', source: 'ua-alerts', paint: { 'line-color': '#ef4444', 'line-width': 1, 'line-opacity': 0.7 } }, below)
+      if (!m.getLayer('intel-events')) m.addLayer({ id: 'intel-events', type: 'circle', source: 'intel-events', paint: { 'circle-color': ['get', 'color'], 'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, ['+', 1.5, ['get', 'severity']], 8, ['+', 3, ['*', 1.5, ['get', 'severity']]]], 'circle-stroke-color': '#000', 'circle-stroke-width': 0.8, 'circle-opacity': 0.9 } })
+      for (const id of ['intel-countries', 'ua-alerts', 'ua-alerts-line', 'intel-events']) m.setLayoutProperty(id, 'visibility', vis)
+    }
+    void Promise.all([
+      shapes.current.countries ? null : window.world.intelCountries().then(c => (shapes.current.countries = c as unknown as FC)),
+      shapes.current.ukraine ? null : window.world.intelUkraine().then(u => (shapes.current.ukraine = u as unknown as FC)),
+    ]).then(
+      () => draw(true),
+      () => draw(true),
+    )
+    draw()
+    // A new base style drops every added layer: draw again once it has loaded (not on every style event).
+    const again = () => draw(true)
+    m.on('style.load', again)
+    return () => {
+      gone = true
+      m.off('style.load', again)
+    }
+  }, [ready, intel, intelOnMap])
+
+  // Live traffic on the flat map: TomTom's flow tiles above the base map, under the markers.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const draw = () => {
+      if (!m.isStyleLoaded()) return
+      if (traffic && trafficKey) {
+        if (!m.getSource('traffic')) m.addSource('traffic', { type: 'raster', tiles: [`https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=${encodeURIComponent(trafficKey)}`], tileSize: 256, minzoom: 3, maxzoom: 20, attribution: 'Traffic © TomTom' })
+        if (!m.getLayer('traffic')) m.addLayer({ id: 'traffic', type: 'raster', source: 'traffic', paint: { 'raster-opacity': 0.85 } }, LAYERS.flatMap(l => l.draw.map(d => d.id)).find(id => m.getLayer(id)))
+      } else {
+        if (m.getLayer('traffic')) m.removeLayer('traffic')
+        if (m.getSource('traffic')) m.removeSource('traffic')
+      }
+    }
+    draw()
+    m.on('styledata', draw)
+    return () => void m.off('styledata', draw)
+  }, [ready, traffic, trafficKey])
+
+  // The ring around the picked item.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    ;(m.getSource('selected') as GeoJSONSource | undefined)?.setData({
+      type: 'FeatureCollection',
+      features: selected ? [{ type: 'Feature', geometry: { type: 'Point', coordinates: selected.lngLat }, properties: {} }] : [],
+    })
+  }, [selected, ready])
+
+  // While the map moves, decorations hold still (styles.css: data-map-moving), so every frame goes to the map.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const root = document.documentElement
+    const start = () => (root.dataset.mapMoving = '')
+    const end = () => delete root.dataset.mapMoving
+    m.on('movestart', start)
+    m.on('moveend', end)
+    return () => {
+      m.off('movestart', start)
+      m.off('moveend', end)
+      end()
+    }
+  }, [ready])
+
+  // What else is on the map around the picked item, at the moment it was picked.
+  const nearbyRef = useRef(onNearby)
+  nearbyRef.current = onNearby
+  const pickedKey = selected ? `${selected.kind}:${String(selected.props.id ?? selected.lngLat.join(','))}` : ''
+  useEffect(() => {
+    nearbyRef.current(selected ? nearbyItems(selected.lngLat, latest.current, { radiusKm: selected.kind === 'places' ? 150 : 100, exclude: selected }) : [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per pick, not each time the picked plane moves
+  }, [pickedKey])
+
+  // "Centre on map" and picking a place from the toolbar; the view before it is kept for Back.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !focus) return
+    history.current = [...history.current, viewOf(m)].slice(-20)
+    setCanGoBack(true)
+    m.flyTo({ center: focus.lngLat, zoom: Math.max(m.getZoom(), focus.zoom ?? 6), duration: isLite() ? 0 : 900 })
+  }, [focus, ready])
+
+  const back = () => {
+    const m = map.current
+    const v = history.current.at(-1)
+    if (!m || !v) return
+    history.current = history.current.slice(0, -1)
+    setCanGoBack(history.current.length > 0)
+    m.flyTo({ ...v, duration: isLite() ? 0 : 900 })
+  }
+
+  // ── The assistant's map ops (map_* tools): run here, answered in words ──
+
+  const pins = useRef<Pin[]>([])
+  /** The news story on the map (map_story), the canvas item lit by hover, and a running tour. */
+  const [story, setStory] = useState<Story | null>(null)
+  const [hoverItem, setHoverItem] = useState<number | null>(null)
+  const [tour, setTour] = useState<{ i: number; secs: number } | null>(null)
+  const now$ = useRef({ prefs, layers, selected, globe, story })
+  now$.current = { prefs, layers, selected, globe, story }
+
+  const showStory = (s: Story | null) => {
+    setStory(s)
+    put('story', storyFeatures(s))
+    ;(map.current?.getSource('story-links') as GeoJSONSource | undefined)?.setData(linkFeatures(s) as unknown as FC)
+    if (!s && now$.current.selected?.kind === 'story') selectRef.current(null)
+  }
+
+  /** Fly to one story item and open its card. */
+  const focusItem = (i: number) => {
+    const m = map.current
+    const f = storyFeatures(now$.current.story).features[i]
+    if (!m || !f) return
+    const lngLat = f.geometry.coordinates as [number, number]
+    selectRef.current({ kind: 'story', lngLat, props: f.properties })
+    void fly(m, { center: lngLat, zoom: Math.max(m.getZoom(), ZOOM_FOR.story) })
+  }
+
+  /** Fly and wait until the map settles (or a few seconds pass), keeping the view for Back. */
+  const fly = (m: MapLibre, to: { center?: [number, number]; zoom?: number }) =>
+    new Promise<void>(resolve => {
+      history.current = [...history.current, viewOf(m)].slice(-20)
+      setCanGoBack(true)
+      const done = setTimeout(resolve, 3_500)
+      m.once('moveend', () => {
+        clearTimeout(done)
+        resolve()
+      })
+      m.flyTo({ ...to, duration: isLite() ? 0 : 1_400, essential: true })
+    })
+
+  const runOp = async (op: MapOp): Promise<string> => {
+    const m = map.current
+    if (!m) throw new Error('The map is not ready yet.')
+    const { prefs: p, layers: on, selected: sel, globe: isGlobe } = now$.current
+    const showLayer = (id: LayerId) => !on[id] && setLayers(x => ({ ...x, [id]: true }))
+    switch (op.kind) {
+      case '3d': {
+        if (op.action === 'close') {
+          if (!threeDRef.current) return 'The 3D view is not open; this is the flat map.'
+          setThreeD(null)
+          return 'Back on the flat map.'
+        }
+        // Open it where asked (or where the map is), then wait for it to start.
+        if (!threeDRef.current) {
+          const at = op.lat !== undefined && op.lon !== undefined ? { lat: op.lat, lon: op.lon, zoom: op.zoom ?? (op.action === 'open' ? 11 : 8) } : { lat: m.getCenter().lat, lon: m.getCenter().lng, zoom: m.getZoom() }
+          globeCtl.current = null
+          setThreeD(at)
+          // Read through a function: the handle is set by the 3D view as it starts.
+          const ctl = () => globeCtl.current
+          for (let i = 0; i < 80 && !ctl(); i++) await new Promise(r => setTimeout(r, 250))
+          const started = ctl()
+          if (!started) throw new Error('The 3D view did not start (this PC may not support WebGL).')
+          // Already there: no second flight.
+          if (op.action === 'open') return started.run({ ...op, lat: undefined, lon: undefined, label: op.label })
+          return started.run({ ...op, lat: op.action === 'camera' ? op.lat : undefined, lon: op.action === 'camera' ? op.lon : undefined })
+        }
+        if (!globeCtl.current) throw new Error('The 3D view is still starting; try again in a moment.')
+        return globeCtl.current.run(op)
+      }
+      case 'traffic': {
+        if (!op.on) {
+          setTraffic(false)
+          return 'Traffic is off.'
+        }
+        if (!traffic) await toggleTraffic()
+        if (!trafficKey && !(await window.world.map3dKeys().catch(() => null))?.tomtom) return 'Live traffic needs a free TomTom key (Setup › Power up › TomTom Traffic).'
+        const zoom = threeDRef.current ? 12 : m.getZoom()
+        const b = m.getBounds()
+        const box = { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() }
+        const [flow, incidents] = await Promise.all([zoom >= 11 ? window.world.trafficFlow(box, zoom).catch(() => null) : Promise.resolve(null), zoom >= 8 ? window.world.trafficIncidents(box).catch(() => []) : Promise.resolve([])])
+        const worst = [...incidents].sort((a, b2) => b2.magnitude - a.magnitude || b2.delay - a.delay).slice(0, 6)
+        const roads = flow?.roads ?? []
+        const jammed = roads.filter(r => r.level < 0.5).length
+        return [
+          zoom < 11 ? 'Traffic is on; zoom to a city (11 or closer) to see the vehicles move.' : flow?.source === 'simulated' ? 'Traffic is on, but TomTom has no live traffic here: the vehicles on the real roads are only an impression.' : flow?.source === 'tomtom' ? `Live traffic is on: ${roads.length} road stretches in view, ${jammed} slow or jammed.` : 'Traffic is on; no traffic data for this view.',
+          worst.length ? `Incidents in view (${incidents.length}): ${worst.map(i => `${i.description}${i.road ? ` on ${i.road}` : ''}${i.from ? ` (${i.from}${i.to ? ` to ${i.to}` : ''})` : ''}${i.delay ? `, +${Math.round(i.delay / 60)} min` : ''}`).join('; ')}.` : zoom >= 8 ? 'No incidents reported in view.' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')
+      }
+      case 'panel': {
+        panels.showSide(op.panel)
+        return op.panel ? `The ${DOCK.find(d => d.id === op.panel)?.label ?? op.panel} panel is open on the World page.` : 'Panel closed.'
+      }
+      case 'display': {
+        setDisplay(d => ({ ...d, ...(op.mode ? { mode: op.mode } : {}), ...(op.hud !== undefined ? { hud: op.hud } : {}), ...(op.scope !== undefined ? { scope: op.scope } : {}) }))
+        return `The map is now ${op.mode ? MODE_LABEL[op.mode] : 'as it was'}${op.hud !== undefined ? `, HUD ${op.hud ? 'on' : 'off'}` : ''}${op.scope !== undefined ? `, scope ${op.scope ? 'on' : 'off'}` : ''}.`
+      }
+      case 'view': {
+        if (threeDRef.current && globeCtl.current && op.lat !== undefined && op.lon !== undefined)
+          return globeCtl.current.run({ kind: '3d', action: 'open', lat: op.lat, lon: op.lon, zoom: op.zoom, label: op.label, show: [], hide: [] })
+        if (op.style !== undefined || op.globe !== undefined) onPrefs({ style: op.style ?? p.style, globe: op.globe ?? p.globe })
+        if (op.lat !== undefined && op.lon !== undefined) await fly(m, { center: [op.lon, op.lat], zoom: op.zoom ?? Math.max(m.getZoom(), 6) })
+        else if (op.zoom !== undefined) await fly(m, { zoom: op.zoom })
+        const style = op.style ?? p.style
+        const wantsGlobe = op.globe ?? p.globe
+        const where = op.label ?? (op.lat !== undefined ? `${op.lat.toFixed(2)}, ${op.lon!.toFixed(2)}` : 'the same place')
+        return `Showing ${where} at zoom ${m.getZoom().toFixed(1)} on the ${STYLES.find(s => s.id === style)?.label ?? style} map${wantsGlobe ? (isLite() ? ' (Lite mode keeps it flat, not a globe)' : ' as a globe') : ''}.`
+      }
+      case 'layers': {
+        // The same layers in 3D, where it has them.
+        if (threeDRef.current && globeCtl.current) {
+          const to3d = (l: LayerId): Globe3dLayer | null => (l === 'satellites' ? 'sats' : l === 'flights' || l === 'ships' || l === 'cameras' || l === 'news' || l === 'radio' ? l : null)
+          const show = op.show.map(to3d).filter((x): x is Globe3dLayer => x !== null)
+          const hide = op.hide.map(to3d).filter((x): x is Globe3dLayer => x !== null)
+          if (show.length || hide.length) await globeCtl.current.run({ kind: '3d', action: 'layers', show, hide })
+        }
+        setLayers(x => {
+          const next = { ...x }
+          for (const id of op.show) next[id] = true
+          for (const id of op.hide) next[id] = false
+          return next
+        })
+        const after = LAYERS.filter(l => (op.show.includes(l.id) ? true : op.hide.includes(l.id) ? false : on[l.id])).map(l => l.id)
+        return `Layers on now: ${after.join(', ') || 'none'}.`
+      }
+      case 'visible': {
+        if (threeDRef.current && globeCtl.current) return `The owner is looking at the 3D view. ${await globeCtl.current.run({ kind: '3d', action: 'state', show: [], hide: [] })}`
+        const b = m.getBounds()
+        const c = m.getCenter()
+        return describeVisible(
+          latest.current,
+          { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() },
+          { center: [c.lng, c.lat], zoom: m.getZoom(), style: p.style, globe: isGlobe, layersOn: LAYERS.filter(l => on[l.id]).map(l => l.id), selected: sel ? { kind: sel.kind, title: String(sel.props.title ?? '') } : null },
+        )
+      }
+      case 'find':
+        return describeFound(findItems(latest.current, op.query, op.layers), op.query)
+      case 'focus': {
+        if (op.query) {
+          const hit = findItems(latest.current, op.query)[0]
+          if (!hit) throw new Error(describeFound([], op.query))
+          showLayer(hit.kind)
+          selectRef.current({ kind: hit.kind, lngLat: hit.lngLat, props: hit.props })
+          await fly(m, { center: hit.lngLat, zoom: op.zoom ?? Math.max(m.getZoom(), ZOOM_FOR[hit.kind]) })
+          const around = nearbyItems(hit.lngLat, latest.current, { exclude: { kind: hit.kind, props: hit.props }, limit: 5 })
+          return `Focused on ${layerDef(hit.kind).kind.toLowerCase()} "${hit.title}"; its card is open.${around.length ? ` Around it: ${around.map(a => `${a.title} (${a.km} km)`).join('; ')}.` : ''}`
+        }
+        await fly(m, { center: [op.lon!, op.lat!], zoom: op.zoom ?? Math.max(m.getZoom(), 8) })
+        return `Focused on ${op.label ?? `${op.lat!.toFixed(2)}, ${op.lon!.toFixed(2)}`}.`
+      }
+      case 'clear-selection':
+        selectRef.current(null)
+        return 'Closed the card.'
+      case 'pins': {
+        pins.current = [...(op.clear ? [] : pins.current), ...op.add].slice(-MAX_PINS)
+        put('pins', pinFeatures(pins.current))
+        if (op.add.length) showLayer('pins')
+        if (op.add.length === 1) await fly(m, { center: [op.add[0]!.lon, op.add[0]!.lat], zoom: Math.max(m.getZoom(), 6) })
+        else if (op.add.length > 1) {
+          const b = new maplibregl.LngLatBounds()
+          for (const pin of op.add) b.extend([pin.lon, pin.lat])
+          history.current = [...history.current, viewOf(m)].slice(-20)
+          setCanGoBack(true)
+          m.fitBounds(b, { padding: 90, maxZoom: 9, duration: isLite() ? 0 : 1_400 })
+        }
+        return pins.current.length ? `${pins.current.length} pin${pins.current.length === 1 ? '' : 's'} on the map: ${pins.current.map(x => x.label).join('; ')}.` : 'Pins cleared.'
+      }
+      case 'back':
+        if (!history.current.length) return 'There is no earlier view to go back to.'
+        back()
+        return 'Back to the previous view.'
+      case 'story': {
+        setTour(null)
+        if (!op.story) {
+          showStory(null)
+          return 'Took the story off the map.'
+        }
+        showStory(op.story)
+        showLayer('story')
+        const b = new maplibregl.LngLatBounds()
+        for (const it of op.story.items) b.extend([it.lon, it.lat])
+        history.current = [...history.current, viewOf(m)].slice(-20)
+        setCanGoBack(true)
+        if (op.story.items.length === 1) m.flyTo({ center: [op.story.items[0]!.lon, op.story.items[0]!.lat], zoom: Math.max(m.getZoom(), 5), duration: isLite() ? 0 : 1_400 })
+        else m.fitBounds(b, { padding: { top: 90, bottom: 110, left: 60, right: 360 }, maxZoom: 7, duration: isLite() ? 0 : 1_600 })
+        const { items, links } = op.story
+        return `Story "${op.story.title}" is on the map: ${items.length} numbered item${items.length === 1 ? '' : 's'}${links.length ? `, ${links.length} connection${links.length === 1 ? '' : 's'} drawn` : ''}; the News canvas is open. The owner can say "focus on number 2" (map_focus with query "#2") or ask for a tour (map_tour).`
+      }
+      case 'tour': {
+        const s = now$.current.story
+        if (op.action === 'stop') {
+          setTour(null)
+          return 'Tour stopped.'
+        }
+        if (!s) throw new Error('There is no story on the map to tour; put one there with map_story first.')
+        setTour({ i: 0, secs: op.secondsEach })
+        return `Tour started: ${s.items.length} stops, ${op.secondsEach} s each. Each stop opens its card.`
+      }
+    }
+  }
+  useEffect(() => {
+    const on = (e: Event) => {
+      const op = (e as CustomEvent<MapOp>).detail
+      if (!op || op.kind !== '3d') return
+      setNote3d('')
+      void runOpRef.current(op).catch(err => {
+        setNote3d(err instanceof Error ? err.message : String(err))
+        setTimeout(() => setNote3d(''), 7000)
+      })
+    }
+    window.addEventListener(MAP3D_EVENT, on)
+    return () => window.removeEventListener(MAP3D_EVENT, on)
+  }, [])
+  const runOpRef = useRef(runOp)
+  runOpRef.current = runOp
+
+  // The tour: one stop at a time, each card open for a few seconds, then the next; stops at the end.
+  useEffect(() => {
+    if (!tour || !story) return
+    focusItem(tour.i)
+    const next = setTimeout(() => setTour(t => (t && t.i + 1 < story.items.length ? { ...t, i: t.i + 1 } : null)), tour.secs * 1_000)
+    return () => clearTimeout(next)
+  }, [tour, story])
+
+  // Marching dashes along the story's connections; not in Lite mode, paused while the window is hidden.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !story?.links.length || isLite()) return
+    const steps: number[][] = [
+      [0, 4, 3],
+      [0.5, 4, 2.5],
+      [1, 4, 2],
+      [1.5, 4, 1.5],
+      [2, 4, 1],
+      [2.5, 4, 0.5],
+      [3, 4, 0],
+      [0, 0.5, 3, 3.5],
+      [0, 1, 3, 3],
+      [0, 1.5, 3, 2.5],
+      [0, 2, 3, 2],
+      [0, 2.5, 3, 1.5],
+      [0, 3, 3, 1],
+      [0, 3.5, 3, 0.5],
+    ]
+    // The links march for a few seconds to draw the eye, then rest (each step repaints the whole map).
+    let k = 0
+    const until = Date.now() + 8_000
+    const timer = setInterval(() => {
+      if (Date.now() > until) return clearInterval(timer)
+      if (idle() || !m.getLayer('story-links')) return
+      k = (k + 1) % steps.length
+      m.setPaintProperty('story-links', 'line-dasharray', steps[k])
+    }, 70)
+    return () => clearInterval(timer)
+  }, [ready, story])
+
+  // The canvas item under the pointer lights its marker.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !m.getLayer('story-glow')) return
+    const base = ['interpolate', ['linear'], ['get', 'severity'], 0, 14, 10, 26]
+    m.setPaintProperty('story-glow', 'circle-radius', hoverItem === null ? base : ['case', ['==', ['get', 'n'], hoverItem + 1], 34, base])
+    m.setPaintProperty('story-glow', 'circle-opacity', hoverItem === null ? 0.18 : ['case', ['==', ['get', 'n'], hoverItem + 1], 0.45, 0.12])
+  }, [hoverItem, ready])
+
+  useEffect(() => {
+    if (!ready) return
+    // Main sends each op again until it hears back; answer each one once.
+    const seen = new Set<string>()
+    return window.mapOps.onOp(({ requestId, op }) => {
+      if (seen.has(requestId)) return
+      seen.add(requestId)
+      void runOpRef.current(op).then(
+        result => window.mapOps.reply(requestId, result),
+        err => window.mapOps.reply(requestId, undefined, cleanError(err)),
+      )
+    })
+  }, [ready])
+
+  // Places, quakes and events: update the sources; frame the places the first time.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    put('quakes', data.quakes)
+    put('events', data.events)
+    put('disasters', data.disasters)
+    put('places', data.places)
+    setCount({ places: data.places.features.length, quakes: data.quakes.features.length, events: data.events.features.length, disasters: data.disasters.features.length })
+    if (!fitted.current && data.places.features.length) {
+      fitted.current = true
+      const b = new maplibregl.LngLatBounds()
+      for (const f of data.places.features) b.extend(f.geometry.coordinates as [number, number])
+      m.fitBounds(b, { padding: 80, maxZoom: 5.5, duration: 0 })
+    }
+  }, [data, ready])
+
+  // Filters from the rail's Filters tab: the same rule for the map and the panel lists. Applied again after a style switch.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const apply = () => {
+      for (const l of LAYERS)
+        for (const spec of l.draw) {
+          if (!m.getLayer(spec.id) || spec.type === 'line' || spec.type === 'background' || spec.type === 'raster' || spec.type === 'hillshade') continue
+          // A layer's own filter (clusters, labels for big alerts only) stays; the owner's filter is added to it.
+          const own = 'filter' in spec ? spec.filter : undefined
+          const theirs = layerFilter(l.id, filters)
+          m.setFilter(spec.id, own && theirs ? (['all', own, theirs] as FilterSpecification) : (theirs ?? own ?? null))
+        }
+    }
+    apply()
+    m.on('style.load', apply)
+    saveFilters(filters)
+    return () => {
+      m.off('style.load', apply)
+    }
+  }, [filters, ready])
+
+  // One key per layer (shown on the rail) while the map is on screen; never while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return
+      const t = e.target
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)) return
+      if (!box.current?.offsetParent) return
+      if (e.key === 'Escape') return setOpen(null)
+      // 1-5: visual modes; H: the tactical HUD.
+      const n = Number(e.key)
+      if (Number.isInteger(n) && n >= 1 && n <= DISPLAY_MODES.length) return setDisplay(d => ({ ...d, mode: DISPLAY_MODES[n - 1]! }))
+      if (e.key.toLowerCase() === 'h') return setDisplay(d => ({ ...d, hud: !d.hud }))
+      const dk = DOCK.find(x => x.key === e.key.toLowerCase())
+      if (dk) return panels.toggle(dk.id)
+      const r = RAIL.find(x => x.key === e.key.toLowerCase())
+      if (!r) return
+      setLayers(x => ({ ...x, [r.id]: !x[r.id] }))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Switches: show or hide each layer's map layers, remembered. Applied again after a style switch.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const apply = () => {
+      for (const l of LAYERS) for (const spec of l.draw) if (m.getLayer(spec.id)) m.setLayoutProperty(spec.id, 'visibility', layers[l.id] ? 'visible' : 'none')
+    }
+    apply()
+    m.on('style.load', apply)
+    try {
+      localStorage.setItem('world.layers', JSON.stringify(layers))
+    } catch {
+      // Remembering the switches is a convenience only.
+    }
+    return () => {
+      m.off('style.load', apply)
+    }
+  }, [layers, ready])
+
+  // The 3D view's engine is large: load it quietly once the flat map has settled, so 3D opens without the wait.
+  useEffect(() => {
+    if (!ready || isLite()) return
+    const t = setTimeout(() => {
+      const warm = () => void import('./Globe3D.tsx').catch(() => undefined)
+      if ('requestIdleCallback' in window) requestIdleCallback(warm, { timeout: 5000 })
+      else warm()
+    }, 4000)
+    return () => clearTimeout(t)
+  }, [ready])
+
+  // Fires from space: the last day (main refreshes every three hours).
+  const [fireList, setFireList] = useState<FireSpot[] | null>(null)
+  useEffect(() => {
+    if (!ready || !layers.fires) return
+    let stopped = false
+    const load = () =>
+      void window.world.fires().then(
+        list => {
+          if (stopped) return
+          put('fires', fireFeatures(list))
+          setFireList(list)
+          setCount({ fires: list.length })
+        },
+        () => undefined,
+      )
+    load()
+    const t = setInterval(load, 30 * 60_000)
+    return () => {
+      stopped = true
+      clearInterval(t)
+    }
+  }, [ready, layers.fires])
+
+  // Space launches: the next 30 days and the last 7, refreshed every 5 minutes (main caches 15).
+  useEffect(() => {
+    if (!ready || !layers.launches) return
+    let stopped = false
+    const load = () =>
+      void window.world.launches().then(
+        list => {
+          if (stopped) return
+          put('launches', launchFeatures(list, Date.now()))
+          setCount({ launches: list.filter(l => l.at > Date.now()).length })
+        },
+        () => undefined,
+      )
+    load()
+    const t = setInterval(load, 5 * 60_000)
+    return () => {
+      stopped = true
+      clearInterval(t)
+    }
+  }, [ready, layers.launches])
+
+  // World radio: the most-played stations with a place, once.
+  useEffect(() => {
+    if (!ready || !layers.radio) return
+    let stopped = false
+    void window.world.radio().then(
+      list => {
+        if (stopped) return
+        put('radio', radioFeatures(list))
+        setCount({ radio: list.length })
+      },
+      () => undefined,
+    )
+    return () => {
+      stopped = true
+    }
+  }, [ready, layers.radio])
+
+  // Rain: the newest half-hour NASA has published, looked for every 20 minutes.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !layers.rain) return
+    let stopped = false
+    const load = () =>
+      void window.world.rain().then(
+        t => !stopped && (m.getSource('rain') as RasterTileSource | undefined)?.setTiles([rainTiles(t)]),
+        () => undefined,
+      )
+    load()
+    const i = setInterval(load, 20 * 60_000)
+    return () => {
+      stopped = true
+      clearInterval(i)
+    }
+  }, [ready, layers.rain])
+
+  // Live flights: a region (up to 1000 nm across) in one call; a wider view is swept area by area. When the map stops and every 20 s (every 4 s while the sweep fills in).
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !layers.flights) return
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    // Only the newest request may draw: an older answer arriving late would put back a view the map has left.
+    let seq = 0
+    const load = async () => {
+      if (timer) clearTimeout(timer)
+      let again = 20_000
+      const mine = ++seq
+      if (!stopped && !idle()) {
+        const c = m.getCenter()
+        const b = m.getBounds()
+        const corner = b.getNorthEast()
+        const nm = kmBetween({ lat: c.lat, lon: c.lng }, { lat: corner.lat, lon: corner.lng }) / 1.852
+        const show = (flights: Flight[]) => {
+          trails.current.add(flights.map(f => ({ id: `f:${f.hex}`, lon: f.lon, lat: f.lat })))
+          glide.current = { list: flights, at: Date.now() }
+          smooth.keep(new Set(flights.map(f => f.hex)))
+          put('flights', flightFeatures(flights, f => smooth.place(f, Date.now(), f.seen)))
+          setCount({ flights: flights.length })
+        }
+        try {
+          if (nm <= 1000 && m.getZoom() >= 3) {
+            const flights = await window.world.flights(c.lat, c.lng, Math.ceil(nm), filtersNow.current.openSky)
+            if (stopped || mine !== seq) return
+            show(flights)
+            setFlightNote('Everything on screen, plus military aircraft worldwide')
+          } else {
+            const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
+            const r = await window.world.flightsArea({ south: clamp(b.getSouth(), 90), north: clamp(b.getNorth(), 90), west: clamp(b.getWest(), 180), east: clamp(b.getEast(), 180) })
+            if (stopped || mine !== seq) return
+            show(r.flights)
+            if (r.loaded < r.cells) again = 4_000
+            setFlightNote(r.loaded < r.cells ? `Filling in every flight on screen: ${r.loaded} of ${r.cells} areas so far, plus military aircraft worldwide` : 'Every flight on screen, plus military aircraft worldwide')
+          }
+        } catch {
+          setFlightNote('Flights unavailable right now')
+        }
+      }
+      if (!stopped && mine === seq) timer = setTimeout(() => void load(), again)
+    }
+    void load()
+    // Between polls, planes glide on along their track, and a new fix never makes them jump (createGlide).
+    // Zoomed in, only the planes in view are moved, often (smooth); zoomed out, the whole sky now and then.
+    let tick = 0
+    const lite = isLite()
+    const glider = setInterval(
+      () => {
+        tick++
+        const g = glide.current
+        if (!g || stopped || idle()) return
+        const zoom = m.getZoom()
+        const close = zoom >= 5
+        if (!close && (tick % (lite ? 30 : 10) || g.list.length > 6000)) return
+        // Ten moves a second only where a plane crosses pixels quickly (zoomed right in); about three at country zoom.
+        if (close && zoom < 9 && tick % 3) return
+        const now = Date.now()
+        const dt = (now - g.at) / 1000
+        let list = g.list
+        if (close) {
+          const b = m.getBounds()
+          const padLat = (b.getNorth() - b.getSouth()) * 0.3
+          const padLon = (b.getEast() - b.getWest()) * 0.3
+          list = list.filter(f => f.lat > b.getSouth() - padLat && f.lat < b.getNorth() + padLat && f.lon > b.getWest() - padLon && f.lon < b.getEast() + padLon)
+        }
+        put('flights', flightFeatures(list, f => smooth.place(f, now, f.seen + dt)))
+      },
+      lite ? 200 : 100,
+    )
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const onMove = () => {
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => void load(), 600)
+    }
+    m.on('moveend', onMove)
+    return () => {
+      stopped = true
+      if (glider) clearInterval(glider)
+      m.off('moveend', onMove)
+      if (timer) clearTimeout(timer)
+      if (debounce) clearTimeout(debounce)
+    }
+  }, [ready, layers.flights, filters.openSky])
+
+  // Ships in the area on screen (the owner's AISStream key): when the map stops and every 8 s.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !layers.ships) return
+    let stopped = false
+    let drawn = ''
+    const load = async () => {
+      if (stopped || idle()) return
+      const b = m.getBounds()
+      const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
+      try {
+        const r = await window.world.ships({ south: clamp(b.getSouth(), 90), north: clamp(b.getNorth(), 90), west: clamp(b.getWest(), 180), east: clamp(b.getEast(), 180) })
+        if (stopped) return
+        setShipState({ status: r.status, message: r.message })
+        // The same ships in the same places (most polls at sea): nothing to redraw.
+        const key = r.ships.map(v => `${v.mmsi}:${v.lat}:${v.lon}:${v.heading ?? ''}`).join('|')
+        if (key === drawn) return
+        drawn = key
+        trails.current.add(r.ships.map(v => ({ id: `s:${v.mmsi}`, lon: v.lon, lat: v.lat })))
+        put('ships', shipFeatures(r.ships))
+        setCount({ ships: r.ships.length })
+      } catch {
+        setShipState({ status: 'error', message: 'Ships unavailable right now.' })
+      }
+    }
+    void load()
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const onMove = () => {
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => void load(), 600)
+    }
+    m.on('moveend', onMove)
+    const timer = setInterval(() => void load(), 8_000)
+    return () => {
+      stopped = true
+      m.off('moveend', onMove)
+      clearInterval(timer)
+      if (debounce) clearTimeout(debounce)
+    }
+  }, [ready, layers.ships, shipState.status === 'no-key'])
+
+  const saveShipKey = async (key: string | null) => {
+    setShipKeyError('')
+    try {
+      await window.world.setShipsKey(key)
+      setShipKey('')
+      setShipState({ status: key ? 'connecting' : 'no-key', message: null })
+    } catch (err) {
+      setShipKeyError(cleanError(err) || 'Could not save the key.')
+    }
+  }
+
+  // News from the owner's feeds, placed where it happens; redrawn whenever the feeds refresh.
+  useEffect(() => {
+    if (!ready || !layers.news) return
+    let stopped = false
+    const show = (r: NewsResult) => {
+      if (stopped) return
+      const types = filters.newsTypes
+      const fc = newsFeatures(types.length ? r.headlines.filter(h => types.includes(h.category)) : r.headlines)
+      put('news', fc)
+      setCount({ news: fc.features.length })
+    }
+    // Locked: the feeds are the owner's, so the layer stays empty until they confirm it is them.
+    void window.news.list().then(show, () => undefined)
+    const off = window.news.onChanged(show)
+    return () => {
+      stopped = true
+      off()
+    }
+  }, [ready, layers.news, filters.newsTypes.join('|')])
+
+  // Public cameras: the official open feeds once, plus (with the owner's free Windy key) the webcams in view.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !layers.cameras) return
+    let stopped = false
+    let official: Camera[] = []
+    let windy: Camera[] = []
+    const feature = (c: Camera) => cameraFeatures([c]).features[0]!
+    const draw = () => {
+      if (stopped) return
+      const ids = new Set(official.map(c => c.id))
+      const all = [...official, ...windy.filter(c => !ids.has(c.id))]
+      put('cameras', { type: 'FeatureCollection', features: all.map(feature) })
+      setCount({ cameras: all.length })
+    }
+    void window.world.cameras().then(list => {
+      official = list
+      draw()
+    }, () => undefined)
+    const loadWindy = async () => {
+      if (stopped || idle()) return
+      const b = m.getBounds()
+      const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
+      try {
+        const r = await window.world.webcams({ south: clamp(b.getSouth(), 90), north: clamp(b.getNorth(), 90), west: clamp(b.getWest(), 180), east: clamp(b.getEast(), 180) }, m.getZoom())
+        if (stopped) return
+        setWebcamState({ status: r.status, message: r.message, inView: r.cameras.length })
+        if (r.status === 'no-key') return
+        windy = r.cameras
+        draw()
+      } catch {
+        setWebcamState(w => ({ ...w, status: 'error', message: 'Webcams unavailable right now.' }))
+      }
+    }
+    void loadWindy()
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const onMove = () => {
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => void loadWindy(), 800)
+    }
+    m.on('moveend', onMove)
+    return () => {
+      stopped = true
+      m.off('moveend', onMove)
+      if (debounce) clearTimeout(debounce)
+    }
+  }, [ready, layers.cameras, webcamKeyVersion])
+
+  // Satellites: orbit elements once, positions every 2 s.
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !layers.satellites) return
+    let stopped = false
+    let sats: { name: string; rec: satellite.SatRec }[] = []
+    // The whole sky every 2 s; zoomed in, the satellites near the view more often (they cross ~15 km in 2 s):
+    // twice a second close up, once a second at country zoom.
+    let all: FC | null = null
+    let near: { name: string; rec: satellite.SatRec }[] = []
+    const draw = () => {
+      if (stopped || idle() || !sats.length) return
+      all = satelliteFeatures(sats, new Date())
+      put('satellites', all)
+      near = []
+      if (m.getZoom() < 4) return
+      const b = m.getBounds()
+      const padLat = (b.getNorth() - b.getSouth()) * 0.5 + 2
+      const padLon = (b.getEast() - b.getWest()) * 0.5 + 2
+      const ids = new Set(all.features.filter(f => {
+        const [lon = 0, lat = 0] = (f.geometry as { coordinates: number[] }).coordinates
+        return lat > b.getSouth() - padLat && lat < b.getNorth() + padLat && lon > b.getWest() - padLon && lon < b.getEast() + padLon
+      }).map(f => String(f.properties?.norad)))
+      near = sats.filter(s => ids.has(String(s.rec.satnum).trim())).slice(0, 300)
+    }
+    let beat = 0
+    const drawNear = () => {
+      beat++
+      if (stopped || idle() || !all || !near.length || m.getZoom() < 4) return
+      if (m.getZoom() < 7 && beat % 2) return
+      const fresh = new Map(satelliteFeatures(near, new Date()).features.map(f => [String(f.properties?.id), f]))
+      all = { ...all, features: all.features.map(f => fresh.get(String(f.properties?.id)) ?? f) }
+      put('satellites', all)
+    }
+    const fast = setInterval(drawNear, 500)
+    void window.world.satellites().then(list => {
+      sats = list.flatMap(s => {
+        try {
+          return [{ name: String(s.OBJECT_NAME ?? ''), rec: satellite.json2satrec(s as unknown as satellite.OMMJsonObject) }]
+        } catch {
+          return []
+        }
+      })
+      satsRef.current = sats
+      setCount({ satellites: sats.length })
+      draw()
+    }, () => undefined)
+    const timer = setInterval(draw, 2_000)
+    return () => {
+      stopped = true
+      clearInterval(timer)
+      clearInterval(fast)
+    }
+  }, [ready, layers.satellites])
+
+  const saveWebcamKey = async (key: string | null) => {
+    setWebcamKeyError('')
+    try {
+      const r = await window.world.setWebcamsKey(key)
+      setWebcamKey('')
+      setWebcamState(w => ({ ...w, status: r.hasKey ? 'ok' : 'no-key', message: null }))
+      setWebcamKeyVersion(v => v + 1)
+    } catch (err) {
+      setWebcamKeyError(cleanError(err) || 'Could not save the key.')
+    }
+  }
+  /** The owner's Windy Webcams key, for worldwide webcams; shown in the Cameras panel. */
+  const webcamKeyForm = (
+    <form
+      className="space-y-1 pt-1"
+      onSubmit={e => {
+        e.preventDefault()
+        if (webcamKey.trim()) void saveWebcamKey(webcamKey.trim())
+      }}
+    >
+      <p className="text-[10px] leading-snug text-muted">
+        Add webcams from all over the world with your free Windy key ({' '}
+        <a href="https://api.windy.com/keys" target="_blank" rel="noreferrer" className="text-accent underline">
+          get one
+        </a>
+        , choose Webcams API). They load for the area you look at, zoomed in to a country or closer.
+      </p>
+      <div className="flex gap-1">
+        <input type="password" autoComplete="off" spellCheck={false} className="field min-w-0 flex-1 py-0.5 text-[11px]" placeholder="Paste Windy Webcams key" value={webcamKey} onChange={e => setWebcamKey(e.target.value)} aria-label="Windy Webcams API key" />
+        <button type="submit" className="btn h-6 px-2 text-[11px]" disabled={!webcamKey.trim()}>
+          Save
+        </button>
+      </div>
+      {webcamKeyError && <p className="text-[10px] text-danger">{webcamKeyError}</p>}
+    </form>
+  )
+  const needsShipKey = shipState.status === 'no-key' || (shipState.status === 'error' && /key/i.test(shipState.message ?? ''))
+  /** The owner's AISStream key form: in the Layers popover and in the Ships panel on the rail. */
+  const shipKeyForm = (className: string) => (
+      <form
+        className={`space-y-1 ${className}`}
+        onSubmit={e => {
+          e.preventDefault()
+          if (shipKey.trim()) void saveShipKey(shipKey.trim())
+        }}
+      >
+        <p className="text-[10px] text-muted">
+          {shipState.message ?? 'Ships need your free AISStream key:'}{' '}
+          <a href="https://aisstream.io/apikeys" target="_blank" rel="noreferrer" className="text-accent underline">
+            get one
+          </a>
+        </p>
+        <div className="flex gap-1">
+          <input type="password" autoComplete="off" spellCheck={false} className="field min-w-0 flex-1 py-0.5 text-[11px]" placeholder="Paste AISStream key" value={shipKey} onChange={e => setShipKey(e.target.value)} aria-label="AISStream API key" />
+          <button type="submit" className="btn h-6 px-2 text-[11px]" disabled={!shipKey.trim()}>
+            Save
+          </button>
+        </div>
+        {shipKeyError && <p className="text-[10px] text-danger">{shipKeyError}</p>}
+      </form>
+  )
+
+  const on = LAYERS.filter(l => layers[l.id]).length
+  const current = STYLES.find(s => s.id === prefs.style)!
+  const toggle = (which: 'layers' | 'style' | 'display') => setOpen(o => (o === which ? null : which))
+  const trayShown = panels.state.pinned.length > 0 && panels.state.trayOpen
+  const movesFor = (id: DockId) => ({ onPin: () => panels.pin(id), onFloat: () => panels.float(id), onSide: () => panels.dockSide(id) })
+  const dockCtx: DockContext = {
+    flyTo: (lat, lon, zoom) => {
+      if (threeDRef.current && globeCtl.current) void globeCtl.current.run({ kind: '3d', action: 'open', lat, lon, zoom, show: [], hide: [] })
+      else if (map.current) void fly(map.current, { center: [lon, lat], zoom })
+    },
+    inView: (lat, lon) => (threeDRef.current ? true : (map.current?.getBounds().contains([lon, lat]) ?? true)),
+    intelOnMap,
+    setIntelOnMap,
+    onIntel: (events, alerts) => setIntel({ events, alerts }),
+    intelEvents: intel?.events ?? null,
+    select: s => onSelect(s),
+    world,
+  }
+  const dockButtons = (
+    <>
+      <button type="button" onClick={() => void toggleTraffic()} aria-pressed={traffic} className={`map-chip px-2 ${traffic ? 'border-accent text-accent' : ''}`} title="Live traffic (TomTom, your free key)">
+        <CarFront className="size-3.5" aria-hidden />
+        <span className="hidden @[1400px]:inline">Traffic</span>
+      </button>
+      <DockButtons isOpen={panels.isOpen} onToggle={panels.toggle} badge={intel ? { intel: String(intel.events.length) } : undefined} />
+    </>
+  )
+  const displayButton = (
+    <button type="button" onClick={() => toggle('display')} aria-expanded={open === 'display'} className={`map-chip px-2 ${open === 'display' || display.mode !== 'normal' || display.hud ? 'border-accent text-accent' : ''}`} title="Display: night vision, thermal, CRT, HUD (keys 1-5, H)">
+      <ScanEye className="size-3.5" aria-hidden />
+      <span className="hidden @[760px]:inline">{display.mode === 'normal' ? 'Display' : MODE_LABEL[display.mode]}</span>
+    </button>
+  )
+  const controls = (
+    <>
+      {canGoBack && (
+        <button type="button" onClick={back} className="map-chip px-2" title="Back to the previous view" aria-label="Back to the previous view">
+          <ArrowLeft className="size-3.5" aria-hidden />
+        </button>
+      )}
+      <button type="button" onClick={() => toggle('style')} aria-expanded={open === 'style'} className={`map-chip ${open === 'style' ? 'border-accent text-accent' : ''}`} title="Map style">
+        <MapIcon className="size-3.5" aria-hidden />
+        <span className="hidden @[520px]:inline">{current.label}</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onPrefs({ ...prefs, globe: !prefs.globe })}
+        aria-pressed={globe}
+        disabled={isLite()}
+        className={`map-chip px-2 ${globe ? 'border-accent text-accent' : ''}`}
+        title={isLite() ? 'Lite mode keeps the map flat' : globe ? 'Flat map' : 'Globe'}
+        aria-label={globe ? 'Show the flat map' : 'Show the globe'}
+      >
+        <Globe2 className="size-3.5" aria-hidden />
+        <span className="hidden @[640px]:inline">{globe ? 'Globe' : '2D'}</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          const m = map.current
+          if (m) setThreeD({ lat: m.getCenter().lat, lon: m.getCenter().lng, zoom: m.getZoom() })
+        }}
+        className="map-chip px-2"
+        title="3D view: terrain, buildings, live aircraft at their real altitude, fly with a plane"
+        aria-label="Open the 3D view"
+      >
+        <Box className="size-3.5" aria-hidden />
+        <span className="hidden @[640px]:inline">3D</span>
+      </button>
+      {displayButton}
+      {dockButtons}
+      <button type="button" onClick={() => toggle('layers')} aria-expanded={open === 'layers'} className={`map-chip @[640px]:hidden ${open === 'layers' ? 'border-accent text-accent' : ''}`} title="Map layers">
+        <Layers className="size-3.5" aria-hidden />
+        <span className="hidden @[520px]:inline">Layers</span>
+        <span className="font-mono text-[10px] text-muted">
+          {on}/{LAYERS.length}
+        </span>
+      </button>
+    </>
+  )
+
+  return (
+    <div ref={rootRef} className="relative h-full w-full overflow-hidden">
+      <DisplayDefs />
+      {!threeD && <TrafficLayer2D map={ready ? map.current : null} on={traffic} idle={idle} onStatus={setTrafficStatus} />}
+      {traffic && trafficStatus && !threeD && <TrafficPill s={trafficStatus} />}
+      <div ref={box} className="h-full w-full" aria-label="World map" role="region" style={{ filter: MODE_FILTER[display.mode], transition: isLite() ? 'none' : 'filter 500ms ease-in-out' }} />
+      <DisplayFx mode={display.mode} scope={display.scope} />
+      {!threeD && <Atmos />}
+      {display.hud && ready && <TacticalHud />}
+      <HoverCard map={map.current} ready={ready} world={world} now={now} />
+      {ready && map.current && (
+        <LayerRail
+          on={layers}
+          counts={counts}
+          onToggle={id => setLayers(x => ({ ...x, [id]: !x[id] }))}
+          ctx={{
+            sources: latest.current,
+            world,
+            filters,
+            onFilters: setFilters,
+            observer: world.places[0] ? { lat: world.places[0].place.lat, lon: world.places[0].place.lon, name: world.places[0].place.name } : { lat: map.current.getCenter().lat, lon: map.current.getCenter().lng, name: 'the map centre' },
+            centre: [map.current.getCenter().lng, map.current.getCenter().lat],
+            sats: satsRef.current,
+            storyTitle: story?.title ?? null,
+            flightNote,
+            shipNote: shipState.status === 'connecting' ? 'Connecting to AISStream… ships appear as they report.' : (shipState.status === 'error' && !needsShipKey) || shipState.status === 'reconnecting' ? shipState.message : null,
+            shipKeyForm: needsShipKey ? shipKeyForm('pt-1') : null,
+            webcamNote: webcamState.status === 'error' ? webcamState.message : webcamState.status === 'ok' && webcamState.inView ? `${webcamState.inView} worldwide webcams in this view (Windy)` : webcamState.message,
+            webcamKeyForm: webcamState.status === 'no-key' ? webcamKeyForm : null,
+            now,
+            onFocus: (kind, f) => {
+              const lngLat = f.geometry.coordinates as [number, number]
+              selectRef.current({ kind, lngLat, props: f.properties })
+              void fly(map.current!, { center: lngLat, zoom: Math.max(map.current!.getZoom(), ZOOM_FOR[kind]) })
+            },
+            onFly: (lat, lon, zoom) => void fly(map.current!, { center: [lon, lat], zoom }),
+          }}
+        />
+      )}
+      {story && (
+        <NewsCanvas
+          story={story}
+          active={tour ? tour.i : selected?.kind === 'story' ? Number(selected.props.n) - 1 : null}
+          playing={tour !== null}
+          onFocus={i => {
+            setTour(null)
+            focusItem(i)
+          }}
+          onHover={setHoverItem}
+          onPlay={() => setTour({ i: 0, secs: 7 })}
+          onStop={() => setTour(null)}
+          onClose={() => {
+            setTour(null)
+            showStory(null)
+          }}
+        />
+      )}
+      {!threeD && toolbar(controls)}
+      {/* The HUD readout: its own line under the toolbar, never mixed into the buttons. */}
+      {display.hud && ready && !threeD && (
+        <div className="pointer-events-none absolute left-1/2 top-[52px] z-10 flex max-w-[calc(100%-8rem)] -translate-x-1/2 justify-center">
+          <HudChip map={map.current} mode={display.mode} counts={counts} />
+        </div>
+      )}
+      {panels.state.side && (
+        <div className={`pointer-events-none absolute top-14 z-40 flex ${threeD ? 'right-3' : 'right-[64px]'}`} style={{ bottom: trayShown ? panels.state.trayH + 24 : 16 }}>
+          <DockPanel which={panels.state.side} onClose={() => panels.close(panels.state.side!)} ctx={dockCtx} moves={movesFor(panels.state.side)} />
+        </div>
+      )}
+      {(Object.entries(panels.state.floats) as [DockId, FloatRect][]).map(([id, r]) => (
+        <div key={id} className="absolute z-40" style={{ left: r.x, top: r.y, width: r.w, height: r.h }}>
+          <DockPanel which={id} place="float" onClose={() => panels.close(id)} ctx={dockCtx} moves={{ ...movesFor(id), onHeaderDown: e => panels.startMove(id, e), onResizeDown: e => panels.startResize(id, e) }} />
+        </div>
+      ))}
+      {panels.state.pinned.length > 0 && (
+        <div className={`pointer-events-none absolute bottom-2 left-2 z-[36] flex flex-col ${threeD ? 'right-3' : 'right-[64px]'}`}>
+          {/* The tray's top edge: drag to resize the cards; the tab folds the tray away. */}
+          <div className="pointer-events-auto flex items-center justify-center">
+            <button
+              type="button"
+              onPointerDown={trayShown ? panels.startTrayResize : undefined}
+              onClick={() => !trayShown && panels.setTray({ trayOpen: true })}
+              className={`group flex h-4 w-28 items-center justify-center rounded-t-lg border border-b-0 border-border bg-solid/85 ${trayShown ? 'cursor-ns-resize' : ''}`}
+              title={trayShown ? 'Drag to resize the pinned cards' : 'Show the pinned cards'}
+              aria-label={trayShown ? 'Resize the pinned cards' : 'Show the pinned cards'}
+            >
+              <span className="h-1 w-10 rounded-full bg-muted/50 group-hover:bg-accent" aria-hidden />
+            </button>
+            <button type="button" onClick={() => panels.setTray({ trayOpen: !trayShown })} className="ml-1 h-4 rounded-t-lg border border-b-0 border-border bg-solid/85 px-2 text-[10px] text-muted hover:text-text" title={trayShown ? 'Fold the pinned cards away' : 'Show the pinned cards'}>
+              {trayShown ? 'Hide' : `Pinned (${panels.state.pinned.length})`}
+            </button>
+          </div>
+          {trayShown && (
+            <div className="pointer-events-auto flex gap-2 overflow-x-auto" style={{ height: panels.state.trayH }} role="region" aria-label="Pinned cards">
+              {panels.state.pinned.map(id => (
+                <div key={id} className="h-full min-w-[260px] flex-1">
+                  <DockPanel which={id} place="pinned" onClose={() => panels.close(id)} ctx={dockCtx} moves={movesFor(id)} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {note3d && <p className="glass absolute left-1/2 top-14 z-40 max-w-md -translate-x-1/2 rounded-lg bg-solid/90 px-3 py-1.5 text-xs text-warm">{note3d}</p>}
+      {threeD && (
+        <Guard3D onClose={() => setThreeD(null)}>
+        <Suspense fallback={null}>
+          <Globe3D start={threeD} onClose={() => setThreeD(null)} controlRef={globeCtl} onSelect={onSelect} selectedId={selected ? String(selected.props.id ?? '') : null} world={world} now={now} display={display} displayButton={<>{displayButton}{dockButtons}</>} intel={intelOnMap ? intel?.events : undefined} traffic={traffic ? trafficKey : null} onTrafficStatus={setTrafficStatus} fires={layers.fires ? (fireList ?? undefined) : undefined} />
+        </Suspense>
+        </Guard3D>
+      )}
+      <MapCredit
+        parts={creditLine(prefs.style, LAYERS.filter(l => layers[l.id]).map(l => l.id), [
+          ...(layers.cameras && webcamState.inView ? [{ text: 'Webcams Windy.com', href: 'https://www.windy.com/webcams' }] : []),
+          ...(layers.flights && filters.openSky ? [{ text: 'OpenSky Network', href: 'https://opensky-network.org' }] : []),
+          ...(selected?.kind === 'flights' && selected.props.routeFrom ? [{ text: 'Routes adsbdb', href: 'https://www.adsbdb.com' }] : []),
+        ])}
+      />
+      {styleError && <p className="glass absolute bottom-16 left-2 z-10 rounded-lg bg-solid/85 px-2 py-1 text-[11px] text-warm">{styleError}</p>}
+      {open === 'display' && (
+        <fieldset className={`ask-pop glass absolute w-[min(260px,calc(100%-1rem))] space-y-1 rounded-xl bg-solid/90 p-2 text-xs shadow-2xl ${threeD ? 'left-3 top-14 z-40' : 'left-2 top-12 z-20'}`}>
+          <legend className="sr-only">Display</legend>
+          <p className="hud-label px-1">Vision</p>
+          <div className="grid grid-cols-2 gap-1">
+            {DISPLAY_MODES.map((m, i) => (
+              <button key={m} type="button" onClick={() => setDisplay(d => ({ ...d, mode: m }))} className={`flex items-center justify-between rounded-lg border px-2 py-1.5 text-left ${display.mode === m ? 'border-accent text-accent' : 'border-border hover:border-edge'}`}>
+                {MODE_LABEL[m]} <span className="font-mono text-[10px] text-muted">{i + 1}</span>
+              </button>
+            ))}
+          </div>
+          <p className="hud-label px-1 pt-1">Overlay</p>
+          <label className="flex items-center gap-2 rounded-lg px-1 py-1">
+            <input type="checkbox" checked={display.hud} onChange={() => setDisplay(d => ({ ...d, hud: !d.hud }))} /> Tactical HUD <span className="ml-auto font-mono text-[10px] text-muted">H</span>
+          </label>
+          <label className="flex items-center gap-2 rounded-lg px-1 py-1">
+            <input type="checkbox" checked={display.scope} onChange={() => setDisplay(d => ({ ...d, scope: !d.scope }))} /> Scope
+          </label>
+        </fieldset>
+      )}
+      {open === 'style' && (
+        <fieldset className="ask-pop glass absolute left-2 top-12 z-20 w-[min(280px,calc(100%-1rem))] space-y-0.5 rounded-xl bg-solid/90 p-1.5 text-xs shadow-2xl">
+          <legend className="sr-only">Map style</legend>
+          {STYLES.map(s => (
+            <label key={s.id} className={`flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-surface ${s.id === prefs.style ? 'text-accent' : ''}`}>
+              <input
+                type="radio"
+                name="map-style"
+                className="mt-0.5"
+                checked={s.id === prefs.style}
+                onChange={() => {
+                  onPrefs({ ...prefs, style: s.id })
+                  setOpen(null)
+                }}
+              />
+              <span className="min-w-0">
+                <span className="block font-medium">{s.label}</span>
+                <span className="block text-[10px] text-muted">{s.hint}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {open === 'layers' && (
+        <fieldset className="ask-pop glass absolute left-2 top-12 z-20 w-[min(280px,calc(100%-1rem))] space-y-1 rounded-xl bg-solid/90 px-3 py-2 text-xs shadow-2xl">
+          <legend className="sr-only">Map layers</legend>
+          {[...LAYERS]
+            .sort((a, b) => a.pickRank - b.pickRank)
+            .map(l => (
+              <label key={l.id} className="flex cursor-pointer items-center gap-2 py-0.5">
+                <input type="checkbox" checked={layers[l.id]} onChange={() => setLayers(x => ({ ...x, [l.id]: !x[l.id] }))} />
+                <span className="size-2 shrink-0 rounded-full" style={{ background: l.dot }} aria-hidden />
+                <span className="truncate">{l.label}</span>
+                {layers[l.id] && counts[l.id] !== undefined && <span className="ml-auto pl-2 font-mono text-muted">{counts[l.id]}</span>}
+              </label>
+            ))}
+          {layers.flights && flightNote && <p className="pl-6 text-[10px] text-muted">{flightNote}</p>}
+          {layers.ships && shipState.status === 'connecting' && <p className="pl-6 text-[10px] text-muted">Connecting to AISStream… ships appear as they report</p>}
+          {layers.ships && shipState.status === 'reconnecting' && <p className="pl-6 text-[10px] text-muted">{shipState.message}</p>}
+          {layers.ships && needsShipKey && shipKeyForm('pl-6 pt-1')}
+          {layers.ships && shipState.status === 'error' && !/key/i.test(shipState.message ?? '') && <p className="pl-6 text-[10px] text-warm">{shipState.message}</p>}
+          {layers.cameras && <p className="pl-6 text-[10px] leading-snug text-muted">Official open feeds only: {CAMERA_COVERAGE}</p>}
+        </fieldset>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The map's credit line: small monospace text at the bottom right, no pill,
+ * each source linked where its licence asks. Hover shows it whole.
+ */
+function MapCredit({ parts }: { parts: CreditPart[] }) {
+  const full = parts.map(p => p.text).join(' | ')
+  return (
+    <p className="map-credit pointer-events-auto absolute bottom-1 right-2 z-[4] line-clamp-2 max-w-[min(42%,34rem)] text-right font-mono text-[9.5px] leading-tight" title={full}>
+      {parts.map((p, i) => (
+        <span key={p.text}>
+          {i > 0 && <span aria-hidden> | </span>}
+          {p.href ? (
+            <a href={p.href} target="_blank" rel="noreferrer">
+              {p.text}
+            </a>
+          ) : (
+            p.text
+          )}
+        </span>
+      ))}
+    </p>
+  )
+}
+

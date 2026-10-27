@@ -1,0 +1,37 @@
+{
+  "name": "personal-assistant",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Open source, proactive personal assistant for Windows with local memory, voice and authorized computer control.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @assistant/desktop typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "chat": "tsx packages/runtime/src/cli.ts",
+    "doctor": "tsx packages/runtime/src/doctor.ts",
+    "keys": "tsx packages/runtime/src/keys.ts",
+    "learning:demo": "tsx packages/runtime/src/learning-demo.ts",
+    "eval:workflows": "tsx packages/runtime/src/workflow-eval.ts",
+    "trial:skills": "tsx packages/runtime/src/skill-trial.ts",
+    "trial:provider": "tsx packages/runtime/src/provider-trial.ts",
+    "licenses:inventory": "node tools/license-inventory.mjs",
+    "dist": "pnpm licenses:inventory && pnpm build && pnpm --filter @assistant/desktop run pack",
+    "check": "pnpm typecheck && pnpm test",
+    "trial:files": "tsx apps/desktop/src/runtime/files-trial.ts",
+    "dev": "pnpm --filter @assistant/desktop dev",
+    "build": "pnpm --filter @assistant/desktop build",
+    "start": "pnpm --filter @assistant/desktop start"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}

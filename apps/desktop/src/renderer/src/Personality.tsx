@@ -1,0 +1,331 @@
+import * as Label from '@radix-ui/react-label'
+import * as ToggleGroup from '@radix-ui/react-toggle-group'
+import { useEffect, useState, type ReactNode } from 'react'
+
+import { parseName, type PersonalityProfile } from '@assistant/shared'
+
+import type { PersonalityView } from '../../shared/personality.ts'
+import { AppearanceSettings } from './Appearance.tsx'
+import { SecuritySettings } from './Security.tsx'
+import { PowerUpPage } from './PowerUp.tsx'
+import { nameOf } from './ui/assistantName.ts'
+
+const cleanError = (err: unknown, fallback: string) =>
+  err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : fallback
+
+const LANGUAGES: { value: PersonalityProfile['language']; label: string }[] = [
+  { value: 'auto', label: 'Follow me' },
+  { value: 'ur-Latn', label: 'Roman Urdu' },
+  { value: 'ur-Arab', label: 'اردو' },
+  { value: 'en', label: 'English' },
+  { value: 'mix', label: 'Mix' },
+]
+
+/** Setup with Connection (keys, voice) and Personality side by side as sections. */
+export function SetupSections({ connection, onClose }: { connection: ReactNode; onClose: () => void }) {
+  const [section, setSection] = useState<'appearance' | 'connection' | 'power' | 'personality' | 'security'>('appearance')
+  const [assistantName, setAssistantName] = useState('')
+  useEffect(() => {
+    void window.personality.get().then(v => setAssistantName(v?.profile.assistantName ?? ''), () => undefined)
+    return window.personality.onChanged(v => setAssistantName(v.profile.assistantName))
+  }, [])
+  return (
+    <div className="flex h-full flex-col">
+      <nav className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <ToggleGroup.Root
+          type="single"
+          value={section}
+          onValueChange={v => v && setSection(v as typeof section)}
+          aria-label="Setup section"
+          className="flex rounded-xl border border-border bg-bg p-0.5"
+        >
+          {(['appearance', 'connection', 'power', 'personality', 'security'] as const).map(s => (
+            <ToggleGroup.Item key={s} value={s} className="rounded-md px-2 py-0.5 text-xs capitalize text-muted transition-colors hover:text-text data-[state=on]:bg-accent-soft data-[state=on]:text-accent">
+              {s === 'security' ? 'Security & backups' : s === 'power' ? 'Power up' : s}
+            </ToggleGroup.Item>
+          ))}
+        </ToggleGroup.Root>
+      </nav>
+      <div className="min-h-0 flex-1 overflow-y-auto">{section === 'appearance' ? <AppearanceSettings /> : section === 'connection' ? connection : section === 'power' ? <PowerUpPage /> : section === 'personality' ? <PersonalitySettings onRunIntro={onClose} /> : <SecuritySettings assistantName={assistantName} />}</div>
+    </div>
+  )
+}
+
+const changedKeys =(a: PersonalityProfile, b: PersonalityProfile) => (Object.keys(a) as (keyof PersonalityProfile)[]).filter(k => a[k] !== b[k])
+
+/**
+ * Setup › Personality: names, language and tone, with undo, reset and
+ * export. Every save is a new version in the local database.
+ */
+export function PersonalitySettings({ onRunIntro }: { onRunIntro: () => void }) {
+  const [view, setView] = useState<PersonalityView | null>(null)
+  const [form, setForm] = useState<PersonalityProfile | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [note, setNote] = useState('')
+
+  useEffect(() => {
+    const apply = (v: PersonalityView) => {
+      setView(v)
+      setForm(v.profile)
+    }
+    void window.personality.get().then(v => (v ? apply(v) : setError('The assistant is not ready yet; finish the connection setup first.')), err => setError(cleanError(err, 'Could not load.')))
+    return window.personality.onChanged(apply)
+  }, [])
+
+  if (!view || !form) return <div className="mx-auto max-w-md p-6 text-sm text-muted">{error || 'Loading…'}</div>
+
+  const dirty = changedKeys(form, view.profile)
+  const badName = parseName(form.ownerNickname) === null || parseName(form.assistantName) === null
+
+  const run = async (action: () => Promise<unknown>, done: string) => {
+    setBusy(true)
+    setError('')
+    setNote('')
+    try {
+      await action()
+      setNote(done)
+    } catch (err) {
+      setError(cleanError(err, 'That did not work.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const save = () => run(() => window.personality.update(Object.fromEntries(dirty.map(k => [k, form[k]])), 'setup'), 'Saved. The next reply uses it.')
+  const set = <K extends keyof PersonalityProfile>(k: K, v: PersonalityProfile[K]) => setForm(f => (f ? { ...f, [k]: v } : f))
+
+  return (
+    <div className="mx-auto flex max-w-md flex-col gap-5 p-6">
+      <header>
+        <h1 className="text-xl font-semibold">Personality</h1>
+        <p className="mt-1 text-sm text-muted">
+          How the assistant talks to you. This changes tone only: honesty, safety rules, approvals and your limits stay the same.
+        </p>
+      </header>
+
+      <QuietHours />
+      <SpeakLimits />
+
+      <TextField id="nick" label="What it calls you" value={form.ownerNickname} placeholder="Your name, or e.g. Boss" onChange={v => set('ownerNickname', v)} />
+      <TextField id="aname" label="Assistant’s name" value={form.assistantName} placeholder="No name" onChange={v => set('assistantName', v)} />
+      {badName && <p className="-mt-3 text-xs text-danger">Names may use letters, numbers, spaces, dots, apostrophes and hyphens (up to 40).</p>}
+
+      <Choice label="Language" value={form.language} options={LANGUAGES} onChange={v => set('language', v)} />
+      <Choice
+        label="Humour"
+        value={form.humour ? 'on' : 'off'}
+        options={[
+          { value: 'on', label: 'On' },
+          { value: 'off', label: 'Off' },
+        ]}
+        onChange={v => set('humour', v === 'on')}
+      />
+      <Choice
+        label="Replies"
+        value={form.verbosity}
+        options={[
+          { value: 'short', label: 'Short' },
+          { value: 'detailed', label: 'Detailed' },
+        ]}
+        onChange={v => set('verbosity', v)}
+      />
+      <Choice
+        label="When it disagrees"
+        value={form.disagreement}
+        options={[
+          { value: 'gentle', label: 'Gently' },
+          { value: 'direct', label: 'Directly' },
+          { value: 'firm', label: 'Firmly' },
+        ]}
+        onChange={v => set('disagreement', v)}
+      />
+
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {note && <p className="text-sm text-muted" role="status">{note}</p>}
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy || dirty.length === 0 || badName}
+          onClick={() => void save()}
+          className="btn btn-primary h-9 flex-1"
+        >
+          Save
+        </button>
+        {dirty.length > 0 && (
+          <button type="button" disabled={busy} onClick={() => setForm(view.profile)} className="btn h-9">
+            Discard
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2 text-sm">
+        <button type="button" disabled={busy || !view.canUndo} onClick={() => void run(() => window.personality.undo(), 'Undone.')} className="btn h-9">
+          Undo last change
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void run(() => window.personality.reset(), 'Back to defaults. Undo brings your settings back.')}
+          className="btn h-9"
+        >
+          Reset to defaults
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void run(async () => {
+            const { saved } = await window.personality.exportFile()
+            if (!saved) throw new Error('Export cancelled.')
+          }, 'Exported.')}
+          className="btn h-9"
+        >
+          Export…
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void run(async () => {
+            await window.personality.setOnboarded(false)
+            onRunIntro()
+          }, '')}
+          className="btn h-9"
+        >
+          Run the intro again
+        </button>
+      </div>
+
+      <section aria-label="History" className="text-xs text-muted">
+        <p className="font-medium text-text">History</p>
+        {view.history.length === 0 ? (
+          <p className="mt-1">No changes yet; using the defaults.</p>
+        ) : (
+          <ul className="mt-1 space-y-0.5">
+            {view.history.map(h => (
+              <li key={h.version}>
+                v{h.version} · {h.reason} · {new Date(h.at).toLocaleString()}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function TextField({ id, label, value, placeholder, onChange }: { id: string; label: string; value: string; placeholder: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label.Root htmlFor={id} className="text-sm font-medium">
+        {label}
+      </Label.Root>
+      <input
+        id={id}
+        value={value}
+        maxLength={40}
+        spellCheck={false}
+        placeholder={placeholder}
+        onChange={e => onChange(e.target.value)}
+        className="field"
+      />
+    </div>
+  )
+}
+
+function Choice<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-sm font-medium">{label}</span>
+      <ToggleGroup.Root type="single" value={value} onValueChange={v => v && onChange(v as T)} aria-label={label} className="flex flex-wrap gap-1 rounded-xl border border-border bg-bg p-0.5">
+        {options.map(o => (
+          <ToggleGroup.Item
+            key={o.value}
+            value={o.value}
+            className="flex-1 rounded-md px-2 py-1 text-xs text-muted transition-colors hover:text-text data-[state=on]:bg-accent-soft data-[state=on]:text-accent"
+          >
+            {o.label}
+          </ToggleGroup.Item>
+        ))}
+      </ToggleGroup.Root>
+    </div>
+  )
+}
+
+/** When the assistant keeps its own initiatives to itself; the owner's timers still ring. */
+function QuietHours() {
+  const [range, setRange] = useState<string | null | undefined>(undefined)
+  const [from, setFrom] = useState('22:00')
+  const [to, setTo] = useState('07:00')
+  const [note, setNote] = useState('')
+  useEffect(() => {
+    void window.assistant.quietHours().then(r => {
+      setRange(r)
+      if (r) {
+        const [a, b] = r.split('-')
+        setFrom(a!.padStart(5, '0'))
+        setTo(b!.padStart(5, '0'))
+      }
+    }, () => setRange(null))
+  }, [])
+  const save = (r: string | null) =>
+    void window.assistant.setQuietHours(r).then(
+      v => (setRange(v), setNote(v ? 'Saved; it applies in a few seconds.' : 'Quiet hours are off.')),
+      err => setNote(cleanError(err, 'Could not save.')),
+    )
+  if (range === undefined) return null
+  return (
+    <section className="tile space-y-2 p-3">
+      <label className="flex items-center gap-2 text-sm font-medium">
+        <input type="checkbox" checked={range !== null} onChange={e => save(e.target.checked ? `${from}-${to}` : null)} /> Quiet hours
+      </label>
+      <p className="text-xs text-muted">{nameOf()} does not speak up on its own then (briefings, check-ins, nudges wait or show silently). Your timers and alarms still ring.</p>
+      {range !== null && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <input type="time" value={from} onChange={e => setFrom(e.target.value)} className="field w-28" aria-label="From" />
+          <span className="text-muted">to</span>
+          <input type="time" value={to} onChange={e => setTo(e.target.value)} className="field w-28" aria-label="To" />
+          <button type="button" className="btn" disabled={`${from}-${to}` === range} onClick={() => save(`${from}-${to}`)}>
+            Save
+          </button>
+        </div>
+      )}
+      {note && <p className="text-xs text-muted">{note}</p>}
+    </section>
+  )
+}
+
+/** How often the assistant may speak up on its own about routine things. */
+function SpeakLimits() {
+  const [saved, setSaved] = useState<{ perDay: number; gapMin: number } | null>(null)
+  const [perDay, setPerDay] = useState(5)
+  const [gapMin, setGapMin] = useState(60)
+  const [note, setNote] = useState('')
+  useEffect(() => {
+    void window.assistant.speakLimits().then(l => (setSaved(l), setPerDay(l.perDay), setGapMin(l.gapMin)), () => undefined)
+  }, [])
+  const save = () =>
+    void window.assistant.setSpeakLimits(perDay, gapMin).then(
+      l => (setSaved(l), setNote('Saved; it applies in a few seconds.')),
+      err => setNote(cleanError(err, 'Could not save.')),
+    )
+  if (!saved) return null
+  return (
+    <section className="tile space-y-2 p-3">
+      <p className="text-sm font-medium">Speaking up</p>
+      <p className="text-xs text-muted">
+        How often {nameOf()} may bring up routine things on its own (check-ins, project nudges). Urgent things and reminders you set are not counted. {nameOf()} also learns from how you react and keeps quiet about what you usually pass on.
+      </p>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted">At most</span>
+        <input type="number" min={0} max={50} value={perDay} onChange={e => setPerDay(Number(e.target.value))} className="field w-20" aria-label="Times a day" />
+        <span className="text-muted">a day, at least</span>
+        <input type="number" min={5} max={1440} value={gapMin} onChange={e => setGapMin(Number(e.target.value))} className="field w-20" aria-label="Minutes apart" />
+        <span className="text-muted">minutes apart</span>
+        <button type="button" className="btn" disabled={perDay === saved.perDay && gapMin === saved.gapMin} onClick={save}>
+          Save
+        </button>
+      </div>
+      {note && <p className="text-xs text-muted">{note}</p>}
+    </section>
+  )
+}

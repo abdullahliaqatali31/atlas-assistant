@@ -1,0 +1,2 @@
+# Shell scripts run on a Mac: Unix line endings always.
+*.sh text eol=lf

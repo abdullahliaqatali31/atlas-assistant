@@ -1,0 +1,943 @@
+@import 'tailwindcss';
+
+/*
+ * Design system: themes as tokens.
+ * The window sits on Windows 11 acrylic; each theme adds its tint and a slow
+ * aurora so the glass reads the same where acrylic is unavailable.
+ * Rules: one level of glass (no glass inside glass), 1px light edges, one
+ * interactive accent per theme, amber only for "attention", rose for danger.
+ * Themes: :root[data-theme] (midnight, graphite, aurora, daylight), an accent
+ * override [data-accent], and [data-lite="true"] for light machines.
+ */
+:root,
+:root[data-theme='midnight'] {
+  color-scheme: dark;
+  --tint: rgb(6 10 20 / 0.34);
+  --bg: rgb(4 8 18 / 0.55);
+  --solid: #070c18;
+  --surface: rgb(255 255 255 / 0.045);
+  --surface-strong: rgb(255 255 255 / 0.09);
+  --border: rgb(255 255 255 / 0.10);
+  --edge: rgb(255 255 255 / 0.16);
+  --text: #e8f1ff;
+  --muted: #8ea0bd;
+  --accent: #22d3ee;
+  --accent-fg: #04121a;
+  --warm: #fbbf24;
+  --danger: #fb7185;
+  --ok: #34d399;
+  --shadow: 0 10px 40px rgb(0 0 0 / 0.35);
+  --blur: 18px;
+  --glow-1: rgb(34 211 238 / 0.18);
+  --glow-2: rgb(59 130 246 / 0.16);
+  --glow-3: rgb(251 191 36 / 0.07);
+}
+
+:root[data-theme='graphite'] {
+  color-scheme: dark;
+  --tint: rgb(12 13 16 / 0.55);
+  --bg: rgb(14 15 18 / 0.7);
+  --solid: #0e1013;
+  --surface: rgb(255 255 255 / 0.04);
+  --surface-strong: rgb(255 255 255 / 0.08);
+  --border: rgb(255 255 255 / 0.08);
+  --edge: rgb(255 255 255 / 0.12);
+  --text: #e7e9ee;
+  --muted: #9097a3;
+  --accent: #60a5fa;
+  --accent-fg: #061223;
+  --shadow: 0 10px 34px rgb(0 0 0 / 0.4);
+  --glow-1: rgb(96 165 250 / 0.08);
+  --glow-2: rgb(148 163 184 / 0.06);
+  --glow-3: transparent;
+}
+
+:root[data-theme='aurora'] {
+  color-scheme: dark;
+  --tint: rgb(8 8 24 / 0.4);
+  --bg: rgb(10 8 28 / 0.6);
+  --solid: #0a0820;
+  --surface: rgb(255 255 255 / 0.05);
+  --surface-strong: rgb(255 255 255 / 0.1);
+  --border: rgb(196 181 253 / 0.14);
+  --edge: rgb(255 255 255 / 0.18);
+  --text: #f1edff;
+  --muted: #a49cc4;
+  --accent: #a78bfa;
+  --accent-fg: #12062b;
+  --glow-1: rgb(167 139 250 / 0.22);
+  --glow-2: rgb(236 72 153 / 0.14);
+  --glow-3: rgb(34 211 238 / 0.1);
+}
+
+:root[data-theme='daylight'] {
+  color-scheme: light;
+  --tint: rgb(238 243 252 / 0.5);
+  --bg: rgb(255 255 255 / 0.7);
+  --solid: #f4f7fb;
+  --surface: rgb(255 255 255 / 0.55);
+  --surface-strong: rgb(255 255 255 / 0.85);
+  --border: rgb(15 23 42 / 0.10);
+  --edge: rgb(255 255 255 / 0.9);
+  --text: #0b1324;
+  --muted: #55637a;
+  --accent: #0891b2;
+  --accent-fg: #ffffff;
+  --warm: #b45309;
+  --danger: #e11d48;
+  --ok: #059669;
+  --shadow: 0 10px 30px rgb(15 23 42 / 0.10);
+  --glow-1: rgb(8 145 178 / 0.12);
+  --glow-2: rgb(59 130 246 / 0.10);
+  --glow-3: rgb(251 191 36 / 0.08);
+}
+
+/* One accent across the app, whatever the theme. */
+:root[data-accent='cyan'] { --accent: #22d3ee; --accent-fg: #04121a; }
+:root[data-accent='blue'] { --accent: #60a5fa; --accent-fg: #061223; }
+:root[data-accent='violet'] { --accent: #a78bfa; --accent-fg: #12062b; }
+:root[data-accent='emerald'] { --accent: #34d399; --accent-fg: #03140d; }
+:root[data-accent='amber'] { --accent: #fbbf24; --accent-fg: #1f1402; }
+:root[data-accent='rose'] { --accent: #fb7185; --accent-fg: #26060c; }
+:root[data-theme='daylight'][data-accent] { --accent-fg: #ffffff; }
+
+/* Derived from the accent, so every theme and accent stays consistent. */
+:root {
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* Lite: no blur, no drifting light, lighter shadows. For modest machines. */
+:root[data-lite='true'] {
+  --blur: 0px;
+  --shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+}
+:root[data-lite='true'] .glass {
+  backdrop-filter: none;
+  background: color-mix(in srgb, var(--solid) 92%, transparent);
+}
+:root[data-lite='true'] .aurora,
+:root[data-lite='true'] .scanline::after {
+  display: none;
+}
+:root[data-lite='true'] * {
+  transition-duration: 0ms !important;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-solid: var(--solid);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-border: var(--border);
+  --color-edge: var(--edge);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-warm: var(--warm);
+  --color-danger: var(--danger);
+  --color-ok: var(--ok);
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'Cascadia Mono', Consolas, ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  /* Transparent over acrylic; the tint keeps contrast on bright wallpapers. */
+  background: var(--tint);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/*
+ * Custom title bar: the whole strip drags the window; buttons inside stay clickable.
+ * Right padding keeps clear of the Windows caption buttons (Window Controls Overlay).
+ */
+.titlebar {
+  -webkit-app-region: drag;
+  app-region: drag;
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 0.75rem);
+}
+.titlebar button,
+.titlebar a,
+.titlebar input {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Aurora behind everything: a visual base where acrylic is off. It stays still: a moving
+   background would make every frosted panel above it blur again on each frame. */
+.aurora {
+  position: fixed;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 35% at 20% 15%, var(--glow-1), transparent 70%),
+    radial-gradient(35% 30% at 85% 80%, var(--glow-2), transparent 70%),
+    radial-gradient(25% 25% at 70% 20%, var(--glow-3), transparent 70%);
+  filter: blur(20px);
+}
+
+@layer components {
+  /* One frosted plane. */
+  .glass {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow:
+      inset 0 1px 0 var(--edge),
+      var(--shadow);
+    backdrop-filter: blur(var(--blur)) saturate(140%);
+  }
+
+  /* A row or card inside a glass plane: flat, never blurred again. */
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.875rem;
+  }
+
+  .hud-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    border-radius: 0.625rem;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text);
+    transition:
+      background 120ms,
+      border-color 120ms,
+      transform 120ms;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--surface-strong);
+    border-color: var(--edge);
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .btn:disabled {
+    opacity: 0.4;
+  }
+  .btn-primary {
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--accent-fg);
+    font-weight: 600;
+    box-shadow: 0 0 18px var(--accent-glow);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent);
+    filter: brightness(1.08);
+  }
+  .btn-danger {
+    background: var(--danger);
+    border-color: transparent;
+    color: #fff;
+    font-weight: 600;
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: var(--danger);
+    filter: brightness(1.08);
+  }
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.625rem;
+    color: var(--muted);
+    transition:
+      background 120ms,
+      color 120ms;
+  }
+  .icon-btn:hover {
+    background: var(--surface-strong);
+    color: var(--text);
+  }
+  .icon-btn[aria-pressed='true'],
+  .icon-btn[aria-current='page'] {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .field {
+    width: 100%;
+    border-radius: 0.625rem;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--text);
+    outline: none;
+    transition:
+      border-color 120ms,
+      box-shadow 120ms;
+  }
+  .field::placeholder {
+    color: var(--muted);
+  }
+  .field:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+}
+
+/* Custom checkboxes and radios: glass box, accent fill, drawn check. */
+input[type='checkbox'],
+input[type='radio'] {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  margin: 0;
+  border: 1px solid var(--edge);
+  background: var(--surface-strong);
+  border-radius: 0.3rem;
+  transition:
+    background 120ms,
+    border-color 120ms,
+    box-shadow 120ms;
+}
+input[type='radio'] {
+  border-radius: 999px;
+}
+input[type='checkbox']::before {
+  content: '';
+  width: 0.55rem;
+  height: 0.55rem;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  background: var(--accent-fg);
+  transform: scale(0);
+  transition: transform 120ms;
+}
+input[type='radio']::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--accent-fg);
+  transform: scale(0);
+  transition: transform 120ms;
+}
+input[type='checkbox']:checked,
+input[type='radio']:checked {
+  background: var(--accent);
+  border-color: transparent;
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+input[type='checkbox']:checked::before,
+input[type='radio']:checked::before {
+  transform: scale(1);
+}
+input[type='checkbox']:disabled,
+input[type='radio']:disabled {
+  opacity: 0.4;
+}
+
+/* Keyboard focus is always visible, never on mouse clicks. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+/* Custom scrollbars: a thin glass thumb that brightens on hover. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184 / 0.35) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgb(148 163 184 / 0.28) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-glow) padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@keyframes pulse-dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+.thinking-dot {
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.rise-in {
+  animation: rise-in 220ms ease-out both;
+}
+
+@keyframes scan {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+.scanline {
+  position: relative;
+  overflow: hidden;
+}
+.scanline::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
+  animation: scan 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-dot,
+  .aurora,
+  .rise-in,
+  .scanline::after {
+    animation: none;
+  }
+}
+
+/* Rail hover cards and the Ask bar's bubble: a quick, small entrance. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+.peek-card {
+  animation: pop-in 140ms ease-out both;
+  transform-origin: right center;
+}
+.ask-pop {
+  animation: pop-in 180ms ease-out both;
+  transform-origin: bottom center;
+}
+/* The widget's quick replies: they pop in one after another. */
+.pop-in {
+  animation: pop-in 220ms ease-out both;
+}
+
+/* The World map's own credit line: quiet text, readable over imagery. */
+.map-credit {
+  color: color-mix(in srgb, var(--text) 62%, transparent);
+  text-shadow: 0 0 3px rgb(0 0 0 / 0.9);
+  letter-spacing: 0.02em;
+}
+.map-credit a {
+  color: inherit;
+}
+.map-credit a:hover {
+  color: var(--accent);
+}
+
+/* World map hover: the leader line draws out of the item, then the card opens at its end. */
+@keyframes leader-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+@keyframes hover-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes ring-in {
+  from {
+    opacity: 0;
+    r: 3;
+  }
+}
+.hover-leader {
+  stroke-dasharray: 1;
+  animation: leader-draw 160ms ease-out both;
+}
+.hover-ring {
+  animation: ring-in 160ms ease-out both;
+}
+.hover-card {
+  animation: hover-in 140ms ease-out 110ms both;
+}
+:root[data-lite='true'] .hover-leader,
+:root[data-lite='true'] .hover-ring,
+:root[data-lite='true'] .hover-card {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hover-leader,
+  .hover-ring,
+  .hover-card {
+    animation: none;
+  }
+}
+
+/* Inputs that sit inside their own styled box (Ask bar, palette) show focus on the box instead. */
+.bare-input:focus-visible {
+  outline: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Floating controls on the World map: small glass pills. In the components
+   layer, so utilities on a chip (hidden, px-2, responsive variants) win. */
+@layer components {
+  .map-chip {
+    display: inline-flex;
+    height: 2rem;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.375rem;
+    white-space: nowrap;
+    border-radius: 9999px;
+    border: 1px solid var(--edge);
+    /* Nearly solid instead of frosted: over a moving map a blur is redone on every frame. */
+    background: color-mix(in srgb, var(--solid) 92%, transparent);
+    padding: 0 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text);
+    transition: border-color 120ms, color 120ms;
+  }
+  .map-chip:hover {
+    border-color: var(--accent);
+  }
+  :root[data-lite='true'] .map-chip {
+    backdrop-filter: none;
+    background: var(--solid);
+  }
+}
+
+/* ── Drawer density ────────────────────────────────────────────
+   Pages inside a drawer: flat sections divided by space, compact rows,
+   long explanations folded behind "How this works". A glass plane inside a
+   drawer is drawn flat (no second blur: lighter on the GPU). */
+.drawer-body .glass {
+  backdrop-filter: none;
+  box-shadow: none;
+  border-radius: 0.75rem;
+}
+.d-page {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.d-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.d-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.75rem;
+}
+.d-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.d-title svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  color: var(--accent);
+}
+.d-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.625rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.4rem 0.4rem 0.75rem;
+  font-size: 0.8125rem;
+}
+.d-row:hover {
+  border-color: var(--edge);
+}
+.d-note {
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.d-how > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+.d-how > summary::-webkit-details-marker {
+  display: none;
+}
+.d-how > summary::before {
+  content: '▸ ';
+}
+.d-how[open] > summary::before {
+  content: '▾ ';
+}
+.d-how > summary:hover {
+  color: var(--text);
+}
+.btn-sm {
+  height: 1.75rem;
+  padding: 0 0.6rem;
+  font-size: 0.6875rem;
+}
+
+/* World display modes: night-vision grain drifts, the CRT flickers a little. */
+@keyframes atlas-grain {
+  0% { background-position: 0 0; }
+  25% { background-position: -40px 25px; }
+  50% { background-position: 30px -35px; }
+  75% { background-position: -20px -15px; }
+  100% { background-position: 0 0; }
+}
+@keyframes atlas-flicker {
+  0%, 100% { opacity: 0.55; }
+  48% { opacity: 1; }
+  50% { opacity: 0.35; }
+  52% { opacity: 0.9; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [class*='atlas-grain'], [class*='atlas-flicker'] { animation: none !important; }
+}
+
+/* The brain lives in deep space, in every theme: its light is additive. */
+.brain-stage {
+  background:
+    radial-gradient(ellipse 60% 55% at 50% 48%, rgba(14, 165, 233, 0.13), transparent 70%),
+    radial-gradient(ellipse 90% 80% at 50% 50%, rgba(76, 29, 149, 0.16), transparent 75%),
+    #020617;
+}
+
+/* Atlas is using its browser: a slow electric glow around the frame. */
+.atlas-driving {
+  animation: atlas-driving 1.6s ease-in-out infinite;
+}
+@keyframes atlas-driving {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.5), 0 0 18px rgba(56, 189, 248, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.9), 0 0 34px rgba(56, 189, 248, 0.6);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .atlas-driving {
+    animation: none;
+    box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.8);
+  }
+}
+
+/* ── The World map's skin (Atmos.tsx): light, theme-tinted, slowly alive ── */
+.atmos {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.atmos > * {
+  position: absolute;
+  pointer-events: none;
+}
+.atmos-hex {
+  inset: -80px;
+  background-color: var(--accent);
+  opacity: 0.03;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'><path d='M28 0 56 16v32L28 64 0 48V16Z M28 64v33' fill='none' stroke='black' stroke-width='1'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'><path d='M28 0 56 16v32L28 64 0 48V16Z M28 64v33' fill='none' stroke='black' stroke-width='1'/></svg>");
+  -webkit-mask-size: 56px 97px;
+  mask-size: 56px 97px;
+  animation: atmos-drift 60s linear infinite;
+  will-change: transform;
+}
+.atmos-lines {
+  inset: 0;
+  background-image: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px);
+  opacity: 0.18;
+}
+.atmos-sweep {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 26%;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--accent) 4%, transparent) 55%, color-mix(in srgb, var(--accent) 7%, transparent) 62%, transparent);
+  animation: atmos-sweep 11s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: transform;
+}
+.atmos-grain {
+  inset: -50%;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
+  /* Still, and without a blend mode: blending it over the map meant redoing the whole pane on every frame. */
+  opacity: 0.035;
+}
+.atmos-mark {
+  left: 50%;
+  top: 50%;
+  width: min(34vmin, 300px);
+  height: min(34vmin, 300px);
+  translate: -50% -50%;
+  opacity: 0.02;
+  filter: drop-shadow(0 0 30px var(--accent));
+  animation: atmos-breathe 14s ease-in-out infinite;
+}
+.atmos-vignette {
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(2, 6, 23, 0.4) 100%);
+  box-shadow: inset 0 0 60px color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.atmos-dim .atmos-mark,
+.atmos-dim .atmos-hex {
+  display: none;
+}
+@keyframes atmos-drift {
+  to {
+    transform: translate(56px, 97px);
+  }
+}
+@keyframes atmos-sweep {
+  0% {
+    transform: translateY(-110%);
+  }
+  70%,
+  100% {
+    transform: translateY(420%);
+  }
+}
+@keyframes atmos-breathe {
+  0%,
+  100% {
+    opacity: 0.015;
+    scale: 1;
+  }
+  50% {
+    opacity: 0.03;
+    scale: 1.04;
+  }
+}
+:root[data-lite='true'] .atmos * {
+  animation: none !important;
+}
+/* While the map moves, the overlay holds still, so the frame goes to the map. */
+:root[data-map-moving] .atmos * {
+  animation-play-state: paused !important;
+}
+:root[data-lite='true'] .atmos-grain {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .atmos * {
+    animation: none !important;
+  }
+}
+
+@keyframes atlas-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The HUD's reticle turns, slowly. */
+.hud-reticle {
+  animation: atlas-spin 24s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-reticle {
+    animation: none;
+  }
+}
+
+/* The corner mini globe: its rim sweep and centre pulse run on the compositor (transform and opacity only). */
+.mini-globe-sweep {
+  background: conic-gradient(from 0deg, transparent 0 78%, color-mix(in srgb, var(--accent) 85%, transparent) 88%, transparent 90%);
+  -webkit-mask: radial-gradient(circle, transparent calc(50% - 3px), #000 calc(50% - 2px));
+  mask: radial-gradient(circle, transparent calc(50% - 3px), #000 calc(50% - 2px));
+  animation: mini-globe-spin 5.2s linear infinite;
+  will-change: transform;
+}
+.mini-globe-pulse {
+  animation: mini-globe-pulse 1.6s ease-out infinite;
+  will-change: transform, opacity;
+}
+@keyframes mini-globe-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes mini-globe-pulse {
+  from {
+    transform: scale(0.25);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mini-globe-sweep,
+  .mini-globe-pulse {
+    animation: none;
+  }
+}
+
+/* ── The desktop widget (widget.html): Atlas outside the browser ───────────────────────────── */
+/* The page is see-through: Windows 11's acrylic glass shows behind it (widget-glass); elsewhere it draws its own (widget-solid). */
+/* No dark canvas from the colour scheme either: nothing at all is painted where the page has nothing. */
+html:has(body.widget) {
+  color-scheme: normal;
+  background: transparent;
+}
+body.widget,
+body.widget #root {
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+.widget-shell {
+  color: #e2f4ff;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow:
+    inset 0 0 24px color-mix(in srgb, var(--accent) 12%, transparent),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+  transition: border-color 300ms, box-shadow 300ms;
+}
+.widget-glass {
+  background: linear-gradient(160deg, rgba(8, 20, 40, 0.42), rgba(4, 10, 22, 0.58));
+}
+.widget-solid {
+  background: linear-gradient(160deg, rgb(10, 22, 42), rgb(4, 10, 22));
+}
+/* Clear: the desktop shows through; a soft dark panel keeps the words readable over any wallpaper. */
+.widget-clear {
+  background: rgba(4, 10, 22, 0.6);
+}
+.widget-clear,
+.widget-clear * {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+/* The orb and the glass panel float with nothing behind them: only Atlas, its rings and its cards. */
+.widget-clear.widget-orb,
+.widget-clear.widget-hud {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.widget-card {
+  background: rgba(0, 0, 0, 0.22);
+}
+.widget-clear .widget-card {
+  background: rgba(4, 10, 22, 0.66);
+}
+/* The edge glows with what Atlas is doing. */
+.widget-shell.listening {
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 0 30px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 0 18px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.widget-shell.speaking {
+  border-color: color-mix(in srgb, var(--accent) 80%, white);
+}
+.widget-label {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 80%, white);
+}
+/* The glass panel: a faint grid and slowly turning rings around the orb. */
+.hud-grid {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--accent) 10%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 10%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+}
+.hud-ring {
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent);
+  animation: atlas-spin 30s linear infinite;
+}
+.hud-ring-slow {
+  border-style: dotted;
+  animation-duration: 60s;
+  animation-direction: reverse;
+  opacity: 0.6;
+}
+.hud-announce {
+  animation: hud-announce 600ms ease-out both;
+}
+@keyframes hud-announce {
+  from {
+    opacity: 0;
+    transform: scale(1.06);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-ring,
+  .hud-announce {
+    animation: none;
+  }
+}

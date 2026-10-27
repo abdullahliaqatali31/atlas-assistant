@@ -1,0 +1,23 @@
+# Atlas's brain on a server, with its own HTTPS for your domain (ports 80 and 443 here).
+#   ATLAS_SECRET_KEY=$(openssl rand -base64 32) docker compose -f docker/compose.yaml up -d
+#   docker compose -f docker/compose.yaml exec atlas atlas pair      (a code for your browser)
+# Keep that key safe: it seals the API keys stored in the volume.
+# Behind Dokploy, Coolify, Traefik or Caddy, use docker/compose.dokploy.yaml instead.
+services:
+  atlas:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: atlas-assistant:latest
+    container_name: atlas
+    restart: unless-stopped
+    ports:
+      - "47800:47800" # the page, by IP (http)
+      - "80:80" # Let's Encrypt and the redirect to https
+      - "443:443" # https://<your domain>
+    volumes:
+      - atlas-data:/data
+    environment:
+      ATLAS_SECRET_KEY: ${ATLAS_SECRET_KEY:-}
+volumes:
+  atlas-data:

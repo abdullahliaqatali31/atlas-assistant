@@ -1,0 +1,16 @@
+node_modules/
+dist/
+out/
+*.log
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.db-*
+mcp.servers.json
+.DS_Store
+.playwright-mcp/
+release/
+docs/workflow-eval-smoke.json
+docker/*.tgz

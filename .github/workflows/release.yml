@@ -1,0 +1,49 @@
+name: Release
+
+# Push a tag like v0.4.0 to build the release zip and the npm package file, attach them to a draft release
+# (publish the draft: the one-line installers use releases/latest),
+# and publish the same package to npm (npm install -g atlas-ai-assistant).
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  # npm provenance: the package says publicly which repository and workflow built it.
+  id-token: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm dist
+      - name: Draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = Get-ChildItem apps/desktop/release/atlas-*-win-x64.zip | Select-Object -First 1
+          Copy-Item $zip.FullName apps/desktop/release/atlas-win-x64.zip
+          # The npm package as a file too: the installers use it when npm itself does not have Atlas (yet).
+          $dir = Get-ChildItem apps/desktop/release -Directory | Where-Object Name -like 'atlas-*-win-x64' | Select-Object -First 1
+          npm pack $dir.FullName --pack-destination apps/desktop/release
+          Copy-Item (Get-ChildItem apps/desktop/release/atlas-ai-assistant-*.tgz | Select-Object -First 1).FullName apps/desktop/release/atlas-ai-assistant.tgz
+          gh release create $env:GITHUB_REF_NAME --draft --generate-notes $zip.FullName apps/desktop/release/atlas-win-x64.zip apps/desktop/release/atlas-ai-assistant.tgz install.ps1 install.sh
+      - name: Publish to npm
+        shell: pwsh
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if (-not $env:NODE_AUTH_TOKEN) { Write-Host 'No NPM_TOKEN secret: skipping npm.'; exit 0 }
+          $dir = Get-ChildItem apps/desktop/release -Directory | Where-Object Name -like 'atlas-*-win-x64' | Select-Object -First 1
+          npm publish $dir.FullName --access public --provenance
